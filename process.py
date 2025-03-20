@@ -41,7 +41,7 @@ def compute_metrics(frame):
         # Compute entropy (measure of randomness)
         hist = cv2.calcHist([color_channel], [0], None, [256], [0, 256])
         hist_prob = hist / hist.sum()
-        entropy_val = entropy(hist_prob, base=2)
+        entropy_val = entropy(hist_prob, base=2)[0]
 
         # Store values
         metrics[f"{name}_avg"] = avg_intensity
@@ -52,10 +52,10 @@ def compute_metrics(frame):
 
 def process_video_to_midi(video_path, 
                           output_prefix, 
-                          nth_frame=30, 
                           frames_per_second=30, 
+                          beats_per_frame=4,
                           ticks_per_beat=480, 
-                          tempo=120, 
+                          beats_per_minute=120, 
                           cc_number=7, 
                           midi_channel=0):
     """
@@ -63,10 +63,10 @@ def process_video_to_midi(video_path,
     
     :param video_path: Path to the video file.
     :param output_prefix: Prefix for output MIDI filenames.
-    :param nth_frame: Process every Nth frame.
     :param frames_per_second (number of frames per second in video)
+    :param beats_per_frame (number of beats between each frame that will per processed)
     :param ticks_per_beat (number of midi ticks per beat in DAW)
-    :param tempo (number of beats per minute in DAW)
+    :param beats_per_minute (number of beats per minute in DAW)
     :param cc_number: MIDI CC number (default 7 for volume).
     :param channel: MIDI channel (0-15).
 
@@ -80,9 +80,14 @@ def process_video_to_midi(video_path,
     metric_names = ["avg", "std", "entropy"]
     color_channels = ["R", "G", "B", "Gray"]
 
+    ticks_per_frame = ticks_per_beat / (frames_per_second / beats_per_frame)
+    # Calculate the frame interval for processing frames
+    frame_interval_real = frames_per_second * (60. * beats_per_frame / beats_per_minute) 
+    # Take every Nth frame, where frame_interval_real is the floating point non-integer version of N
+
     frame_count = 0
-    time_tick = round(ticks_per_beat * (tempo/60.) * (nth_frame/frames_per_second)) # Fixed MIDI time step
-    #!!! fix this, make times ticks exact, but then round to find the right frame
+    frame_count_list = []
+
 
     # assemble dictionary of results for metrics
     metrics = {f"{color_channel}_{metric}": [] for color_channel in color_channels for metric in metric_names}
@@ -91,12 +96,17 @@ def process_video_to_midi(video_path,
         if not ret:
             break
 
-        if frame_count % nth_frame == 0:
+        k = frame_count / frame_interval_real
+        k_rounded = round(k)
+        frame_count_good = round(k_rounded * frame_interval_real)
+        if frame_count == frame_count_good :
             print ("Processing frame:", frame_count)
-            metrics = compute_metrics(frame)
+            frame_count_list.append(frame_count)
+
+            metric_results = compute_metrics(frame)
 
             #append to the dictionary of results
-            for key, value in metrics.items():
+            for key, value in metric_results.items():
                 metrics[key].append(value)
 
         frame_count += 1
@@ -125,13 +135,17 @@ def process_video_to_midi(video_path,
 
     # Write MIDI messages for each metric
     for key, value in metrics.items():
-        midi_val = round(127 * value)  # Scale to MIDI range (0-127)
+        midi_val = [round(127 * val) for val in value] # Scale to MIDI range (0-127)
         # Invert the MIDI value for the second file
-        midi_val_inv = 127 - midi_val
+        midi_val_inv = [round(127 * (1-val)) for val in value]
 
         # Add to the correct MIDI track
         color_channel_name, metric_name = key.split("_")
         for i, midi_value in enumerate(midi_val):
+            if i == 0:
+                time_tick = 0
+            else:
+                time_tick = int(ticks_per_frame * (frame_count_list[i] -frame_count_list[i-1]) )
             midi_files[f"{color_channel_name}_{metric_name}"].tracks[0].append(
                 Message('control_change', 
                         control=cc_number, 
@@ -139,7 +153,13 @@ def process_video_to_midi(video_path,
                         channel=midi_channel, 
                         time=time_tick)
             )
-            for i, midi_value_inv in enumerate(midi_val_inv):
+        for i, midi_value_inv in enumerate(midi_val_inv):
+            if i == 0:
+                time_tick = 0
+            else:
+                time_tick = int(ticks_per_frame * (frame_count_list[i] -frame_count_list[i-1]) )
+
+
             midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
                 Message('control_change', 
                         control=cc_number, 
@@ -147,20 +167,7 @@ def process_video_to_midi(video_path,
                         channel=midi_channel, 
                         time=time_tick)
             )
-        midi_files[f"{color_channel_name}_{metric_name}"].tracks[0].append(
-            Message('control_change', 
-                    control=cc_number, 
-                    value=midi_val, 
-                    channel=midi_channel, 
-                    time=time_tick)
-        )
-        midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
-            Message('control_change', 
-                    control=cc_number, 
-                    value=midi_val_inv, 
-                    channel=midi_channel, 
-                    time=time_tick)
-        )
+
 
 
 
@@ -177,11 +184,11 @@ test_video = "Mz3DllgimbrV2.wmv"
 
 process_video_to_midi(test_video, 
                       "test_midi", 
-                      nth_frame=60, 
                       frames_per_second=30, 
+                      beats_per_frame=4,
                       ticks_per_beat=480, 
-                      tempo=120, 
+                      beats_per_minute=120, 
                       cc_number=7, 
                       midi_channel=0)
-# process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, tempo=120, cc_number=7, channel=0)
+# process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
