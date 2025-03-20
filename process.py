@@ -50,14 +50,6 @@ def compute_metrics(frame):
 
     return metrics
 
-def map_to_midi(value, invert=False):
-    """
-    Map a value in the range (0-255) to MIDI (0-127).
-    If invert=True, reverse the scale (127-0).
-    """
-    midi_value = int((value / 255) * 127)
-    return 127 - midi_value if invert else midi_value
-
 def process_video_to_midi(video_path, 
                           output_prefix, 
                           nth_frame=30, 
@@ -88,6 +80,37 @@ def process_video_to_midi(video_path,
     metric_names = ["avg", "std", "entropy"]
     color_channels = ["R", "G", "B", "Gray"]
 
+    frame_count = 0
+    time_tick = round(ticks_per_beat * (tempo/60.) * (nth_frame/frames_per_second)) # Fixed MIDI time step
+    #!!! fix this, make times ticks exact, but then round to find the right frame
+
+    # assemble dictionary of results for metrics
+    metrics = {f"{color_channel}_{metric}": [] for color_channel in color_channels for metric in metric_names}
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if frame_count % nth_frame == 0:
+            print ("Processing frame:", frame_count)
+            metrics = compute_metrics(frame)
+
+            #append to the dictionary of results
+            for key, value in metrics.items():
+                metrics[key].append(value)
+
+        frame_count += 1
+
+    cap.release()
+
+    # normalize all metrics to be between 0 and 1
+    for key, values in metrics.items():
+        metric = np.array(values)
+        max_val = np.max(metric)
+        min_val = np.min(metric)
+        normalized_metric = (metric - min_val) / (max_val - min_val)
+        metrics[key] = normalized_metric.tolist()
+
     # Initialize MIDI files for each metric
     midi_files = {}
     for color_channel in color_channels:
@@ -100,44 +123,48 @@ def process_video_to_midi(video_path,
             midi_files[f"{color_channel}_{metric}"].tracks.append(MidiTrack())
             midi_files[f"{color_channel}_{metric}_inv"].tracks.append(MidiTrack())
 
-    frame_count = 0
-    time_tick = round(ticks_per_beat * (tempo/60.) * (nth_frame/frames_per_second)) # Fixed MIDI time step
-    #!!! fix this, make times ticks exact, but then round to find the right frame
+    # Write MIDI messages for each metric
+    for key, value in metrics.items():
+        midi_val = round(127 * value)  # Scale to MIDI range (0-127)
+        # Invert the MIDI value for the second file
+        midi_val_inv = 127 - midi_val
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+        # Add to the correct MIDI track
+        color_channel_name, metric_name = key.split("_")
+        for i, midi_value in enumerate(midi_val):
+            midi_files[f"{color_channel_name}_{metric_name}"].tracks[0].append(
+                Message('control_change', 
+                        control=cc_number, 
+                        value=midi_value, 
+                        channel=midi_channel, 
+                        time=time_tick)
+            )
+            for i, midi_value_inv in enumerate(midi_val_inv):
+            midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
+                Message('control_change', 
+                        control=cc_number, 
+                        value=midi_value_inv, 
+                        channel=midi_channel, 
+                        time=time_tick)
+            )
+        midi_files[f"{color_channel_name}_{metric_name}"].tracks[0].append(
+            Message('control_change', 
+                    control=cc_number, 
+                    value=midi_val, 
+                    channel=midi_channel, 
+                    time=time_tick)
+        )
+        midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
+            Message('control_change', 
+                    control=cc_number, 
+                    value=midi_val_inv, 
+                    channel=midi_channel, 
+                    time=time_tick)
+        )
 
-        if frame_count % nth_frame == 0:
-            print ("Processing frame:", frame_count)
-            metrics = compute_metrics(frame)
 
-            # Write MIDI messages for each metric
-            for key, value in metrics.items():
-                midi_val = map_to_midi(value, invert=False)
-                midi_val_inv = map_to_midi(value, invert=True)
 
-                # Add to the correct MIDI track
-                color_channel_name, metric_name = key.split("_")
-                midi_files[f"{color_channel_name}_{metric_name}"].tracks[0].append(
-                    Message('control_change', 
-                            control=cc_number, 
-                            value=midi_val, 
-                            channel=midi_channel, 
-                            time=time_tick)
-                )
-                midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
-                    Message('control_change', 
-                            control=cc_number, 
-                            value=midi_val_inv, 
-                            channel=midi_channel, 
-                            time=time_tick)
-                )
 
-        frame_count += 1
-
-    cap.release()
 
     # Save all MIDI files
     for key, midi_file in midi_files.items():
