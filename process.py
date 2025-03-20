@@ -3,7 +3,7 @@
 prompt for ChatGTP:
 
 Here's a Python script that processes every Nth frame of a video file, calculates multiple metrics (average intensity, 
-standard deviation, and entropy) for each color channel (R, G, B, and grayscale) and outputs 24 MIDI files. 
+standard deviation, and entropy) for each color color_channel (R, G, B, and grayscale) and outputs 24 MIDI files. 
 Each metric is stored in two MIDI files: one directly scaled (0-127) and another inverted (127-0).
 
 This script will:
@@ -33,13 +33,13 @@ def compute_metrics(frame):
     # Split into R, G, B channels
     b, g, r = cv2.split(frame)
 
-    for name, channel in [("R", r), ("G", g), ("B", b), ("Gray", gray_frame)]:
+    for name, color_channel in [("R", r), ("G", g), ("B", b), ("Gray", gray_frame)]:
         # Compute metrics
-        avg_intensity = np.mean(channel)
-        std_dev = np.std(channel)
+        avg_intensity = np.mean(color_channel)
+        std_dev = np.std(color_channel)
         
         # Compute entropy (measure of randomness)
-        hist = cv2.calcHist([channel], [0], None, [256], [0, 256])
+        hist = cv2.calcHist([color_channel], [0], None, [256], [0, 256])
         hist_prob = hist / hist.sum()
         entropy_val = entropy(hist_prob, base=2)
 
@@ -58,7 +58,14 @@ def map_to_midi(value, invert=False):
     midi_value = int((value / 255) * 127)
     return 127 - midi_value if invert else midi_value
 
-def process_video_to_midi(video_path, output_prefix, nth_frame=30, frames_per_second=30, ticks_per_beat=480, tempo=120, cc_number=7, channel=0):
+def process_video_to_midi(video_path, 
+                          output_prefix, 
+                          nth_frame=30, 
+                          frames_per_second=30, 
+                          ticks_per_beat=480, 
+                          tempo=120, 
+                          cc_number=7, 
+                          midi_channel=0):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
     
@@ -79,22 +86,23 @@ def process_video_to_midi(video_path, output_prefix, nth_frame=30, frames_per_se
 
     # Define metric categories
     metric_names = ["avg", "std", "entropy"]
-    channels = ["R", "G", "B", "Gray"]
+    color_channels = ["R", "G", "B", "Gray"]
 
     # Initialize MIDI files for each metric
     midi_files = {}
-    for channel in channels:
+    for color_channel in color_channels:
         for metric in metric_names:
-            base_filename = f"{output_prefix}_{channel}_{metric}"
-            midi_files[f"{channel}_{metric}"] = MidiFile()
-            midi_files[f"{channel}_{metric}_inv"] = MidiFile()
+            base_filename = f"{output_prefix}_{color_channel}_{metric}"
+            midi_files[f"{color_channel}_{metric}"] = MidiFile()
+            midi_files[f"{color_channel}_{metric}_inv"] = MidiFile()
 
             # Add MIDI tracks
-            midi_files[f"{channel}_{metric}"].tracks.append(MidiTrack())
-            midi_files[f"{channel}_{metric}_inv"].tracks.append(MidiTrack())
+            midi_files[f"{color_channel}_{metric}"].tracks.append(MidiTrack())
+            midi_files[f"{color_channel}_{metric}_inv"].tracks.append(MidiTrack())
 
     frame_count = 0
-    time_tick = ticks_per_beat * (tempo/60.) * (nth_frame/frames_per_second)  # Fixed MIDI time step
+    time_tick = round(ticks_per_beat * (tempo/60.) * (nth_frame/frames_per_second)) # Fixed MIDI time step
+    #!!! fix this, make times ticks exact, but then round to find the right frame
 
     while True:
         ret, frame = cap.read()
@@ -102,6 +110,7 @@ def process_video_to_midi(video_path, output_prefix, nth_frame=30, frames_per_se
             break
 
         if frame_count % nth_frame == 0:
+            print ("Processing frame:", frame_count)
             metrics = compute_metrics(frame)
 
             # Write MIDI messages for each metric
@@ -110,12 +119,20 @@ def process_video_to_midi(video_path, output_prefix, nth_frame=30, frames_per_se
                 midi_val_inv = map_to_midi(value, invert=True)
 
                 # Add to the correct MIDI track
-                channel_name, metric_name = key.split("_")
-                midi_files[f"{channel_name}_{metric_name}"].tracks[0].append(
-                    Message('control_change', control=cc_number, value=midi_val, channel=channel, time=time_tick)
+                color_channel_name, metric_name = key.split("_")
+                midi_files[f"{color_channel_name}_{metric_name}"].tracks[0].append(
+                    Message('control_change', 
+                            control=cc_number, 
+                            value=midi_val, 
+                            channel=midi_channel, 
+                            time=time_tick)
                 )
-                midi_files[f"{channel_name}_{metric_name}_inv"].tracks[0].append(
-                    Message('control_change', control=cc_number, value=midi_val_inv, channel=channel, time=time_tick)
+                midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
+                    Message('control_change', 
+                            control=cc_number, 
+                            value=midi_val_inv, 
+                            channel=midi_channel, 
+                            time=time_tick)
                 )
 
         frame_count += 1
@@ -129,4 +146,15 @@ def process_video_to_midi(video_path, output_prefix, nth_frame=30, frames_per_se
         print(f"Saved: {filename}")
 
 # Example usage
-process_video_to_midi("input_video.mp4", "output_midi", nth_frame=10)
+test_video = "Mz3DllgimbrV2.wmv"
+
+process_video_to_midi(test_video, 
+                      "test_midi", 
+                      nth_frame=60, 
+                      frames_per_second=30, 
+                      ticks_per_beat=480, 
+                      tempo=120, 
+                      cc_number=7, 
+                      midi_channel=0)
+# process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, tempo=120, cc_number=7, channel=0)
+
