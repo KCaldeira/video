@@ -80,10 +80,11 @@ def process_video_to_midi(video_path,
     metric_names = ["avg", "std", "entropy"]
     color_channels = ["R", "G", "B", "Gray"]
 
-    ticks_per_frame = ticks_per_beat / (frames_per_second / beats_per_frame)
+    ticks_per_frame = ticks_per_beat * beats_per_frame
     # Calculate the frame interval for processing frames
-    frame_interval_real = frames_per_second * (60. * beats_per_frame / beats_per_minute) 
-    # Take every Nth frame, where frame_interval_real is the floating point non-integer version of N
+    seconds_per_interval = beats_per_frame / (beats_per_minute / 60)
+    frames_per_interval_real = seconds_per_interval * frames_per_second
+    # Take every Nth frame, where frames_per_interval_real is the floating point non-integer version of N
 
     frame_count = 0
     frame_count_list = []
@@ -96,9 +97,9 @@ def process_video_to_midi(video_path,
         if not ret:
             break
 
-        k = frame_count / frame_interval_real
+        k = frame_count / frames_per_interval_real
         k_rounded = round(k)
-        frame_count_good = round(k_rounded * frame_interval_real)
+        frame_count_good = round(k_rounded * frames_per_interval_real)
         if frame_count == frame_count_good :
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
