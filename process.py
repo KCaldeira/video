@@ -18,8 +18,6 @@ import cv2
 import numpy as np
 from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
-from colorspacious import cspace_convert
-
 
 def information_metric(color_channel, downscale_factor=4):
     """
@@ -88,14 +86,6 @@ def bgr_to_cmyk(b, g, r):
 
     return c, m, y, k
 
-def bgr_to_lab(b, g, r):
-    # Normalize RGB
-    rgb = [r / 255.0, g / 255.0, b / 255.0]
-    
-    # Convert to Lab using sRGB as the source space
-    L,a,b = cspace_convert(rgb, "sRGB1", "CIELab")
-    return L, a, b # L is lightness, a is green-red, b is blue-yellow
-
 def percentile_data(data):
     """
     Transform the vector <data> into a percentile list where 0 is the lowest and 1 the highest.
@@ -111,15 +101,10 @@ def compute_metrics(frame,scale_boundary=30):
     Returns a dictionary of results.
     """
     metrics = {}
-
-    # Get the dimensions of the frame for downscaling tests
-
-    h,w = frame.shape[0:2] # third dimension is color channel
     
     b, g, r = cv2.split(frame)
     c, m, y, k = bgr_to_cmyk(b, g, r)
-    labL, laba, labb = bgr_to_lab(b, g, r) # make a form of bgr separating color from intensity as with CMYK
-
+  
     # Convert to grayscale
     gray = 255 - cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # 255 is black, 0 is white
 
@@ -128,10 +113,10 @@ def compute_metrics(frame,scale_boundary=30):
 
     for name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("C", c), ("M", m), ("Y", y), ("K", k),
-                                ("labL", labL), ("laba", laba), ("labb", labb), ("Gray", gray)]:
+                                ("Gray", gray)]:
         avg_intensity = np.mean(color_channel)
         variance = np.var(color_channel)
-        print("color channel", name, " channel shape",color_channel.shape)
+
         # 1 means all information is at finer spatial scales,
         # 0 means all information is at coarser spatial scales
         large_scale_info = information_metric(color_channel, scale_boundary) # fraction info at small and medium scales
@@ -177,7 +162,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories
     metric_names = ["avg", "var", "large", "symmetry"]
-    color_channels = ["R", "G", "B", "C", "M", "Y", "K", "labL", "laba", "labb", "Gray"]
+    color_channels = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
 
     ticks_per_frame = ticks_per_beat *( beats_per_minute / 60.) / frames_per_second # ticks per second / frames per second
     # Calculate the frame interval for processing frames
