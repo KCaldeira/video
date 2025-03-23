@@ -45,7 +45,7 @@ def information_metric(color_channel, downscale_factor=4):
 
     return normalized_mse
 
-def symmetry_metric(color_channel, downscale_factor=4):
+def tranpose_metric(color_channel, downscale_factor=4):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
@@ -69,6 +69,65 @@ def symmetry_metric(color_channel, downscale_factor=4):
     # 0 means no symmetry at this scale
 
     return normalized_mse
+
+def reflect_metric(color_channel, downscale_factor=4):
+    """
+    Returns a metric of information loss when a color channel from a frame 
+    is downscaled and then upscaled.
+    
+    frame: color channel (e.g., R, G, B, or grayscale)
+    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
+    """
+
+    # Original size
+    h, w = color_channel.shape[0:2]
+
+    # Downscale and then upscale
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
+
+    # Compute mean squared error (MSE) between original and vertically reflected image
+    mse0 = np.mean((downscaled - downscaled[::-1]) ** 2)
+
+    # Compute mean squared error (MSE) between original and horizontally reflected image
+    mse1 = np.mean((downscaled - downscaled[:,::-1]) ** 2)
+
+    # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
+    normalized_mse = 1 -(mse0 + mse1) / (2. * np.var(downscaled) )
+    # 1 means perfect symmetry at this scale 
+    # 0 means no symmetry at this scale
+
+    return normalized_mse
+
+def radial_symmetry_metric(color_channel, scale_factor):
+    """
+    Compute radial symmetry metric for a color channel with distance bins of width `scale_factor`.
+    """
+    # Step 1: Create coordinate grid
+    y, x = np.indices(color_channel.shape)
+    center_y = (color_channel.shape[0] / 2) - 0.5
+    center_x = (color_channel.shape[1] / 2) - 0.5
+
+    # Step 2: Compute radial distance from center for each pixel
+    r = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+
+    # Step 2b: Bin distances into scale_factor-wide bins
+    r_bin = (r / scale_factor).astype(np.int32)
+
+    # Step 3: Compute mean value for each radial bin
+    max_bin = r_bin.max()
+    radial_mean = np.zeros(max_bin + 1)
+    counts = np.bincount(r_bin.ravel())
+    sums = np.bincount(r_bin.ravel(), weights=color_channel.ravel())
+
+    # Avoid division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
+        radial_mean[:len(sums)] = np.where(counts != 0, sums / counts, 0)
+
+    # Optional: remove zeros or masked bins if they skew the variance
+    # valid = counts > 0
+    # return np.var(radial_mean[valid])
+
+    return np.var(radial_mean)
 
 
 def bgr_to_cmyk(b, g, r):
@@ -121,27 +180,32 @@ def compute_metrics(frame,scale_boundary=30):
         # 0 means all information is at coarser spatial scales
         large_scale_info = information_metric(color_channel, scale_boundary) # fraction info at small and medium scales
 
-        center_point_symmetry = symmetry_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
+        transpose_metric_value = tranpose_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
+        # at the specified spatial scale
+        reflect_metric_value = reflect_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
+        # at the specified spatial scale
+        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
 
         # Store values
         metrics[f"{name}_avg"] = avg_intensity
         metrics[f"{name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
         metrics[f"{name}_large"] =  large_scale_info # fraction of info at large scales
-        metrics[f"{name}_symmetry"] = center_point_symmetry
-
+        metrics[f"{name}_transpose"] = transpose_metric_value
+        metrics[f"{name}_reflect"] = reflect_metric_value
+        metrics[f"{name}_radial"] = radial_symmetry_metric_value
 
     return metrics
 
 def process_video_to_midi(video_path, 
                           output_prefix, 
-                          frames_per_second=30, 
-                          beats_per_frame=4,
-                          ticks_per_beat=480, 
-                          beats_per_minute=120, 
-                          cc_number=7, 
-                          midi_channel=0,
-                          scale_boundary = 30):
+                          frames_per_second, 
+                          beats_per_frame,
+                          ticks_per_beat, 
+                          beats_per_minute, 
+                          cc_number, 
+                          midi_channel,
+                          scale_boundary ):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
     
@@ -161,7 +225,7 @@ def process_video_to_midi(video_path,
         return
 
     # Define metric categories
-    metric_names = ["avg", "var", "large", "symmetry"]
+    metric_names = ["avg", "var", "large", "transpose", "reflect", "radial"]
     color_channels = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
 
     ticks_per_frame = ticks_per_beat *( beats_per_minute / 60.) / frames_per_second # ticks per second / frames per second
@@ -222,9 +286,9 @@ def process_video_to_midi(video_path,
 
     # Write MIDI messages for each metric
     for key, value in metrics.items():
-        midi_val = [round(127 * val) for val in value] # Scale to MIDI range (0-127)
+        midi_val = [round(104 * val) for val in value] # Scale to MIDI range (0-104, avoid 105-127)
         # Invert the MIDI value for the second file
-        midi_val_inv = [round(127 * (1-val)) for val in value]
+        midi_val_inv = [round(104 * (1-val)) for val in value]
 
         # Add to the correct MIDI track
         color_channel_name, metric_name = key.split("_")
@@ -255,11 +319,6 @@ def process_video_to_midi(video_path,
                         time=time_tick)
             )
 
-
-
-
-
-
     # Save all MIDI files
     for key, midi_file in midi_files.items():
         filename = f"{output_prefix}_{key}.mid"
@@ -275,9 +334,9 @@ process_video_to_midi(video_file,
                       frames_per_second=30, 
                       beats_per_frame=1,
                       ticks_per_beat=480, 
-                      beats_per_minute=82, 
+                      beats_per_minute=82,  
                       cc_number=7, 
                       midi_channel=0,
-                      scale_boundary=30) # scale boundary means divide so 30 pixels in a cell
+                      scale_boundary=6) # scale boundary means divide so 30 pixels in a cell
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
