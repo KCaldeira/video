@@ -284,6 +284,31 @@ def process_video_to_midi(video_path,
             midi_files[f"{color_channel}_{metric}"].tracks.append(MidiTrack())
             midi_files[f"{color_channel}_{metric}_inv"].tracks.append(MidiTrack())
 
+    # create derived metrics that involve combining metrics
+    for color_channel in  ["R", "G", "B", "C", "M", "Y", "K", "Gray"]:
+        # find minimum of "transpose", "reflect", "radial" metrics
+        transpose = metrics[f"{color_channel}_transpose"]
+        reflect = metrics[f"{color_channel}_reflect"]
+        radial = metrics[f"{color_channel}_radial"]
+        symmetry = np.minimum.reduce([transpose, reflect, radial])
+        metrics[f"{color_channel}_symmetry"] = symmetry.tolist()
+
+    # create derived metrics that involve combining color channels
+    for metric in ["avg", "var", "large", "transpose", "reflect", "radial", "symmetry"]:
+        # find minimum of "transpose", "reflect", "radial" metrics
+        r = metrics[f"R_{metric}"]
+        g = metrics[f"G_{metric}"]
+        b = metrics[f"B_{metric}"]
+        c = metrics[f"C_{metric}"]
+        m = metrics[f"M_{metric}"]
+        y = metrics[f"Y_{metric}"]
+
+        minRGB = np.minimum.reduce([r, g, b], axis=0)
+        metrics[f"minRGB_{metric}"] = minRGB.tolist()
+
+        minCMY = np.minimum.reduce([c, m, y], axis=0)
+        metrics[f"minCMY_{metric}"] = minCMY.tolist()
+    
     # Write MIDI messages for each metric
     for key, value in metrics.items():
         midi_val = [round(104 * val) for val in value] # Scale to MIDI range (0-104, avoid 105-127)
