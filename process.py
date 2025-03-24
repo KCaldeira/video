@@ -169,7 +169,6 @@ def compute_metrics(frame,scale_boundary=30):
 
     # Split into R, G, B channels
 
-
     for name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("C", c), ("M", m), ("Y", y), ("K", k),
                                 ("Gray", gray)]:
@@ -197,6 +196,18 @@ def compute_metrics(frame,scale_boundary=30):
 
     return metrics
 
+def boxcar_filter_odd(data, N):
+    if N < 1:
+        raise ValueError("Filter length N must be at least 1.")
+    if N % 2 == 0:
+        raise ValueError("Filter length N should be odd for symmetric padding.")
+
+    half_window = N // 2
+    padded = np.pad(data, pad_width=half_window, mode='edge')
+    kernel = np.ones(N) / N
+    filtered = np.convolve(padded, kernel, mode='valid')
+    return filtered
+
 def process_video_to_midi(video_path, 
                           output_prefix, 
                           frames_per_second, 
@@ -205,7 +216,8 @@ def process_video_to_midi(video_path,
                           beats_per_minute, 
                           cc_number, 
                           midi_channel,
-                          scale_boundary ):
+                          scale_boundary,
+                          filter_width):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
     
@@ -217,6 +229,8 @@ def process_video_to_midi(video_path,
     :param beats_per_minute (number of beats per minute in DAW)
     :param cc_number: MIDI CC number (default 7 for volume).
     :param channel: MIDI channel (0-15).
+    :param scale_boundary: spatial scale for computing metrics
+    :param filter_width: width of boxcar filter for smoothing
 
     """
     cap = cv2.VideoCapture(video_path)
@@ -297,6 +311,11 @@ def process_video_to_midi(video_path,
         minCMY = np.minimum.reduce([c, m, y], axis=0)
         metrics[f"minCMY_{metric}"] = minCMY.tolist()
 
+    # Smooth the data with a boxcar filter
+    if filter_width > 1:
+        for key, values in metrics.items():
+            metrics[key] = boxcar_filter_odd(np.array(values), filter_width).tolist()
+
     # Initialize MIDI files for each metric
     midi_files = {}
     for color_channel in color_channels + ["minRGB", "minCMY"]:
@@ -363,6 +382,7 @@ process_video_to_midi(video_file,
                       beats_per_minute=82,  
                       cc_number=7, 
                       midi_channel=0,
-                      scale_boundary=6) # scale boundary means divide so 30 pixels in a cell
+                      scale_boundary=6, # scale boundary means divide so 30 pixels in a cell
+                      filter_width = 5 ) # smooth the data with a boxcar filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
