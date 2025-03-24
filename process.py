@@ -392,6 +392,6 @@ process_video_to_midi(video_file,
                       cc_number=7, 
                       midi_channel=0,
                       scale_boundary=6, # scale boundary means divide so 30 pixels in a cell
-                      filter_width = 9 ) # smooth the data with a triangular filter of this (odd) width
+                      filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
