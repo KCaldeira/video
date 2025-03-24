@@ -196,16 +196,25 @@ def compute_metrics(frame,scale_boundary=30):
 
     return metrics
 
-def boxcar_filter_odd(data, N):
+def triangular_filter_odd(data, N):
     if N < 1:
         raise ValueError("Filter length N must be at least 1.")
     if N % 2 == 0:
-        raise ValueError("Filter length N should be odd for symmetric padding.")
+        raise ValueError("Triangular filter requires odd N.")
 
+    data = np.asarray(data)
     half_window = N // 2
+
+    # Create triangular weights
+    weights = np.arange(1, half_window + 2)
+    weights = np.concatenate([weights, weights[:-1][::-1]])
+    weights = weights / weights.sum()  # Normalize to sum to 1
+
+    # Pad data at both ends using edge values
     padded = np.pad(data, pad_width=half_window, mode='edge')
-    kernel = np.ones(N) / N
-    filtered = np.convolve(padded, kernel, mode='valid')
+
+    # Apply convolution
+    filtered = np.convolve(padded, weights, mode='valid')
     return filtered
 
 def process_video_to_midi(video_path, 
@@ -314,7 +323,7 @@ def process_video_to_midi(video_path,
     # Smooth the data with a boxcar filter
     if filter_width > 1:
         for key, values in metrics.items():
-            metrics[key] = boxcar_filter_odd(np.array(values), filter_width).tolist()
+            metrics[key] = triangular_filter_odd(np.array(values), filter_width).tolist()
 
     # Initialize MIDI files for each metric
     midi_files = {}
@@ -383,6 +392,6 @@ process_video_to_midi(video_file,
                       cc_number=7, 
                       midi_channel=0,
                       scale_boundary=6, # scale boundary means divide so 30 pixels in a cell
-                      filter_width = 5 ) # smooth the data with a boxcar filter of this (odd) width
+                      filter_width = 9 ) # smooth the data with a triangular filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
