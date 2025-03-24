@@ -272,20 +272,8 @@ def process_video_to_midi(video_path,
         normalized_metric = percentile_data(metric)
         metrics[key] = normalized_metric.tolist()
 
-    # Initialize MIDI files for each metric
-    midi_files = {}
-    for color_channel in color_channels:
-        for metric in metric_names:
-            base_filename = f"{output_prefix}_{color_channel}_{metric}"
-            midi_files[f"{color_channel}_{metric}"] = MidiFile()
-            midi_files[f"{color_channel}_{metric}_inv"] = MidiFile()
-
-            # Add MIDI tracks
-            midi_files[f"{color_channel}_{metric}"].tracks.append(MidiTrack())
-            midi_files[f"{color_channel}_{metric}_inv"].tracks.append(MidiTrack())
-
     # create derived metrics that involve combining metrics
-    for color_channel in  ["R", "G", "B", "C", "M", "Y", "K", "Gray"]:
+    for color_channel in color_channels:
         # find minimum of "transpose", "reflect", "radial" metrics
         transpose = metrics[f"{color_channel}_transpose"]
         reflect = metrics[f"{color_channel}_reflect"]
@@ -294,7 +282,7 @@ def process_video_to_midi(video_path,
         metrics[f"{color_channel}_symmetry"] = symmetry.tolist()
 
     # create derived metrics that involve combining color channels
-    for metric in ["avg", "var", "large", "transpose", "reflect", "radial", "symmetry"]:
+    for metric in metric_names + ["symmetry"]:
         # find minimum of "transpose", "reflect", "radial" metrics
         r = metrics[f"R_{metric}"]
         g = metrics[f"G_{metric}"]
@@ -308,6 +296,19 @@ def process_video_to_midi(video_path,
 
         minCMY = np.minimum.reduce([c, m, y], axis=0)
         metrics[f"minCMY_{metric}"] = minCMY.tolist()
+
+    # Initialize MIDI files for each metric
+    midi_files = {}
+    for color_channel in color_channels + ["minRGB", "minCMY"]:
+        
+        for metric in metric_names +  ["symmetry"]:
+            # base_filename = f"{output_prefix}_{color_channel}_{metric}"
+            midi_files[f"{color_channel}_{metric}"] = MidiFile()
+            midi_files[f"{color_channel}_{metric}_inv"] = MidiFile()
+
+            # Add MIDI tracks
+            midi_files[f"{color_channel}_{metric}"].tracks.append(MidiTrack())
+            midi_files[f"{color_channel}_{metric}_inv"].tracks.append(MidiTrack())
     
     # Write MIDI messages for each metric
     for key, value in metrics.items():
