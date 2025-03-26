@@ -145,6 +145,53 @@ def bgr_to_cmyk(b, g, r):
 
     return c, m, y, k
 
+def bgr_to_hsv(b, g, r):
+    """
+    Convert RGB to HSV for 2D numpy arrays.
+    Inputs r, g, b: 2D numpy arrays with values in [0, 255]
+    Outputs h in degrees [0, 360), s and v in [0.0, 1.0]
+    """
+    r = r.astype(np.float32) / 255
+    g = g.astype(np.float32) / 255
+    b = b.astype(np.float32) / 255
+
+    cmax = np.maximum.reduce([r, g, b])
+    cmin = np.minimum.reduce([r, g, b])
+    delta = cmax - cmin
+
+    # Hue calculation
+    h = np.zeros_like(cmax)
+
+    mask = delta != 0
+    r_max = (cmax == r) & mask
+    g_max = (cmax == g) & mask
+    b_max = (cmax == b) & mask
+
+    h[r_max] = (60 * ((g[r_max] - b[r_max]) / delta[r_max])) % 360
+    h[g_max] = (60 * ((b[g_max] - r[g_max]) / delta[g_max]) + 120)
+    h[b_max] = (60 * ((r[b_max] - g[b_max]) / delta[b_max]) + 240)
+
+    # Saturation calculation
+    s = np.zeros_like(cmax)
+    nonzero = cmax != 0
+    s[nonzero] = delta[nonzero] / cmax[nonzero]
+
+    # Value
+    v = cmax
+
+    return h, s, v
+
+# Circular statistics function to compute standard deviation of angle weighted by saturation
+# Hue is assumed to be 0-360 degrees, saturation is 0-1
+def weighted_circular_std_deg(hue, saturation):
+    """Weighted circular standard deviation in degrees"""
+    angles_rad = np.deg2rad(hue)
+    weights = np.array(saturation)
+    z = weights * np.exp(1j * angles_rad)
+    R_w = np.abs(np.sum(z) / np.sum(weights))
+    return np.rad2deg(np.sqrt(-2 * np.log(R_w)))
+
+
 def percentile_data(data):
     """
     Transform the vector <data> into a percentile list where 0 is the lowest and 1 the highest.
@@ -154,7 +201,7 @@ def percentile_data(data):
     return percentiles
 
 
-def compute_metrics(frame,scale_boundary=30):
+def compute_metrics(frame, scale_boundary):
     """
     Compute different intensity-based metrics on R, G, B, and grayscale images.
     Returns a dictionary of results.
@@ -163,6 +210,7 @@ def compute_metrics(frame,scale_boundary=30):
     
     b, g, r = cv2.split(frame)
     c, m, y, k = bgr_to_cmyk(b, g, r)
+    h, s, v = bgr_to_hsv(b, g, r)
   
     # Convert to grayscale
     gray = 255 - cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # 255 is black, 0 is white
@@ -193,6 +241,8 @@ def compute_metrics(frame,scale_boundary=30):
         metrics[f"{name}_transpose"] = transpose_metric_value
         metrics[f"{name}_reflect"] = reflect_metric_value
         metrics[f"{name}_radial"] = radial_symmetry_metric_value
+
+    metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s)
 
     return metrics
 
