@@ -3,7 +3,7 @@
 prompt for ChatGTP:
 
 Here's a Python script that processes every Nth frame of a video file, calculates multiple metrics (average intensity, 
-standard deviation, and entropy) for each color color_channel (R, G, B, and grayscale) and outputs 24 MIDI files. 
+standard deviation, and entropy) for each color color_channel_name (R, G, B, and grayscale) and outputs 24 MIDI files. 
 Each metric is stored in two MIDI files: one directly scaled (0-127) and another inverted (127-0).
 
 This script will:
@@ -145,6 +145,53 @@ def bgr_to_cmyk(b, g, r):
 
     return c, m, y, k
 
+def bgr_to_hsv(b, g, r):
+    """
+    Convert RGB to HSV for 2D numpy arrays.
+    Inputs r, g, b: 2D numpy arrays with values in [0, 255]
+    Outputs h in degrees [0, 360), s and v in [0.0, 1.0]
+    """
+    r = r.astype(np.float32) / 255
+    g = g.astype(np.float32) / 255
+    b = b.astype(np.float32) / 255
+
+    cmax = np.maximum.reduce([r, g, b])
+    cmin = np.minimum.reduce([r, g, b])
+    delta = cmax - cmin
+
+    # Hue calculation
+    h = np.zeros_like(cmax)
+
+    mask = delta != 0
+    r_max = (cmax == r) & mask
+    g_max = (cmax == g) & mask
+    b_max = (cmax == b) & mask
+
+    h[r_max] = (60 * ((g[r_max] - b[r_max]) / delta[r_max])) % 360
+    h[g_max] = (60 * ((b[g_max] - r[g_max]) / delta[g_max]) + 120)
+    h[b_max] = (60 * ((r[b_max] - g[b_max]) / delta[b_max]) + 240)
+
+    # Saturation calculation
+    s = np.zeros_like(cmax)
+    nonzero = cmax != 0
+    s[nonzero] = delta[nonzero] / cmax[nonzero]
+
+    # Value
+    v = cmax
+
+    return h, s, v
+
+# Circular statistics function to compute standard deviation of angle weighted by saturation
+# Hue is assumed to be 0-360 degrees, saturation is 0-1
+def weighted_circular_std_deg(hue, saturation):
+    """Weighted circular standard deviation in degrees"""
+    angles_rad = np.deg2rad(hue)
+    weights = np.array(saturation)
+    z = weights * np.exp(1j * angles_rad)
+    R_w = np.abs(np.sum(z) / np.sum(weights))
+    return np.rad2deg(np.sqrt(-2 * np.log(R_w)))
+
+
 def percentile_data(data):
     """
     Transform the vector <data> into a percentile list where 0 is the lowest and 1 the highest.
@@ -163,13 +210,14 @@ def compute_metrics(frame,scale_boundary=30):
     
     b, g, r = cv2.split(frame)
     c, m, y, k = bgr_to_cmyk(b, g, r)
+    h, s, v = bgr_to_hsv(b, g, r)
   
     # Convert to grayscale
     gray = 255 - cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # 255 is black, 0 is white
 
     # Split into R, G, B channels
 
-    for name, color_channel in [("R", r), ("G", g), ("B", b),
+    for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("C", c), ("M", m), ("Y", y), ("K", k),
                                 ("Gray", gray)]:
         avg_intensity = np.mean(color_channel)
@@ -187,12 +235,15 @@ def compute_metrics(frame,scale_boundary=30):
         # at the specified spatial scale
 
         # Store values
-        metrics[f"{name}_avg"] = avg_intensity
-        metrics[f"{name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
-        metrics[f"{name}_large"] =  large_scale_info # fraction of info at large scales
-        metrics[f"{name}_transpose"] = transpose_metric_value
-        metrics[f"{name}_reflect"] = reflect_metric_value
-        metrics[f"{name}_radial"] = radial_symmetry_metric_value
+        metrics[f"{color_channel_name}_avg"] = avg_intensity
+        metrics[f"{color_channel_name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
+        metrics[f"{color_channel_name}_large"] =  large_scale_info # fraction of info at large scales
+        metrics[f"{color_channel_name}_transpose"] = transpose_metric_value
+        metrics[f"{color_channel_name}_reflect"] = reflect_metric_value
+        metrics[f"{color_channel_name}_radial"] = radial_symmetry_metric_value
+
+    #monochromicity metric is the standard deviation of hue weighted by saturation
+    metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
 
     return metrics
 
@@ -249,7 +300,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories
     metric_names = ["avg", "var", "large", "transpose", "reflect", "radial"]
-    color_channels = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
+    color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
 
     ticks_per_frame = ticks_per_beat *( beats_per_minute / 60.) / frames_per_second # ticks per second / frames per second
     # Calculate the frame interval for processing frames
@@ -262,7 +313,11 @@ def process_video_to_midi(video_path,
 
 
     # assemble dictionary of results for metrics
-    metrics = {f"{color_channel}_{metric}": [] for color_channel in color_channels for metric in metric_names}
+    metrics = {f"{color_channel_name}_{metric_name}": [] 
+               for color_channel_name in color_channel_names for metric_name in metric_names}
+    # add metric that is outside of the normal grouping
+    metrics["HSV_monochromicity"] = []
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -296,56 +351,60 @@ def process_video_to_midi(video_path,
         metrics[key] = normalized_metric.tolist()
 
     # create derived metrics that involve combining metrics
-    for color_channel in color_channels:
+    for color_channel_name in color_channel_names:
         # find minimum of "transpose", "reflect", "radial" metrics
-        transpose = metrics[f"{color_channel}_transpose"]
-        reflect = metrics[f"{color_channel}_reflect"]
-        radial = metrics[f"{color_channel}_radial"]
+        transpose = metrics[f"{color_channel_name}_transpose"]
+        reflect = metrics[f"{color_channel_name}_reflect"]
+        radial = metrics[f"{color_channel_name}_radial"]
         symmetry = np.minimum.reduce([transpose, reflect, radial])
-        metrics[f"{color_channel}_symmetry"] = symmetry.tolist()
+        metrics[f"{color_channel_name}_symmetry"] = symmetry.tolist()
 
     # create derived metrics that involve combining color channels
-    for metric in metric_names + ["symmetry"]:
+    for metric_name in metric_names + ["symmetry"]:
         # find minimum of "transpose", "reflect", "radial" metrics
-        r = metrics[f"R_{metric}"]
-        g = metrics[f"G_{metric}"]
-        b = metrics[f"B_{metric}"]
-        c = metrics[f"C_{metric}"]
-        m = metrics[f"M_{metric}"]
-        y = metrics[f"Y_{metric}"]
+        r = metrics[f"R_{metric_name}"]
+        g = metrics[f"G_{metric_name}"]
+        b = metrics[f"B_{metric_name}"]
+        c = metrics[f"C_{metric_name}"]
+        m = metrics[f"M_{metric_name}"]
+        y = metrics[f"Y_{metric_name}"]
 
         minRGB = np.minimum.reduce([r, g, b], axis=0)
-        metrics[f"minRGB_{metric}"] = minRGB.tolist()
+        metrics[f"minRGB_{metric_name}"] = minRGB.tolist()
 
         minCMY = np.minimum.reduce([c, m, y], axis=0)
-        metrics[f"minCMY_{metric}"] = minCMY.tolist()
+        metrics[f"minCMY_{metric_name}"] = minCMY.tolist()
+
+        maxRGB = np.maximum.reduce([r, g, b], axis=0)
+        metrics[f"maxRGB_{metric_name}"] = maxRGB.tolist()
+
+        maxCMY = np.maximum.reduce([c, m, y], axis=0)
+        metrics[f"maxCMY_{metric_name}"] = maxCMY.tolist()
 
     # Smooth the data with a boxcar filter
     if filter_width > 1:
         for key, values in metrics.items():
             metrics[key] = triangular_filter_odd(np.array(values), filter_width).tolist()
 
-    # Initialize MIDI files for each metric
+    # Create MIDI files for each metric
     midi_files = {}
-    for color_channel in color_channels + ["minRGB", "minCMY"]:
-        
-        for metric in metric_names +  ["symmetry"]:
-            # base_filename = f"{output_prefix}_{color_channel}_{metric}"
-            midi_files[f"{color_channel}_{metric}"] = MidiFile()
-            midi_files[f"{color_channel}_{metric}_inv"] = MidiFile()
-
-            # Add MIDI tracks
-            midi_files[f"{color_channel}_{metric}"].tracks.append(MidiTrack())
-            midi_files[f"{color_channel}_{metric}_inv"].tracks.append(MidiTrack())
-    
-    # Write MIDI messages for each metric
     for key, value in metrics.items():
+        color_channel_name, metric_name = key.split("_")
+        
+        # Initialize MIDI files for each metric
+        midi_files[f"{color_channel_name}_{metric_name}"] = MidiFile()
+        midi_files[f"{color_channel_name}_{metric_name}_inv"] = MidiFile()
+
+        # Add MIDI tracks
+        midi_files[f"{color_channel_name}_{metric_name}"].tracks.append(MidiTrack())
+        midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks.append(MidiTrack())
+    
+        # Write MIDI messages for each metric
         midi_val = [round(104 * val) for val in value] # Scale to MIDI range (0-104, avoid 105-127)
         # Invert the MIDI value for the second file
         midi_val_inv = [round(104 * (1-val)) for val in value]
 
         # Add to the correct MIDI track
-        color_channel_name, metric_name = key.split("_")
         for i, midi_value in enumerate(midi_val):
             if i == 0:
                 time_tick = 0
@@ -363,8 +422,6 @@ def process_video_to_midi(video_path,
                 time_tick = 0
             else:
                 time_tick = int(ticks_per_frame * (frame_count_list[i] -frame_count_list[i-1]) )
-
-
             midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
                 Message('control_change', 
                         control=cc_number, 
@@ -373,8 +430,7 @@ def process_video_to_midi(video_path,
                         time=time_tick)
             )
 
-    # Save all MIDI files
-    for key, midi_file in midi_files.items():
+        # Save all MIDI files
         filename = f"{output_prefix}_{key}.mid"
         midi_file.save(filename)
         print(f"Saved: {filename}")
@@ -391,7 +447,7 @@ process_video_to_midi(video_file,
                       beats_per_minute=82,  
                       cc_number=7, 
                       midi_channel=0,
-                      scale_boundary=6, # scale boundary means divide so 30 pixels in a cell
+                      scale_boundary=12, # scale boundary means divide so 30 pixels in a cell
                       filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
