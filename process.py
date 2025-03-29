@@ -341,7 +341,9 @@ def process_video_to_midi(video_path,
     cap.release()
 
     # normalize all metrics to be between 0 and 1, with a percentile mapping
-    for key, values in metrics.items():
+    #iterate over copy to avoid modifying the dictionary while iterating
+    metrics_copy = metrics.copy()
+    for key, values in metrics_copy.items():
         metric = np.array(values)
         # max_val = np.max(metric)
         # min_val = np.min(metric)
@@ -349,15 +351,21 @@ def process_video_to_midi(video_path,
         # normalize by taking a percentile ranking
         normalized_metric = percentile_data(metric)
         metrics[key] = normalized_metric.tolist()
+        # add square and square root of metric to give different scaling choices
+        metrics[f"{key}-sqrt"] = np.sqrt(normalized_metric).tolist()
+        metrics[f"{key}-square"] = np.square(normalized_metric).tolist()
+        metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-normalized_metric))  .tolist()
+        metrics[f"{key}-Nsquare"] = (1.-np.square(1.-normalized_metric)).tolist()
 
     # create derived metrics that involve combining metrics
     for color_channel_name in color_channel_names:
         # find minimum of "transpose", "reflect", "radial" metrics
-        transpose = metrics[f"{color_channel_name}_transpose"]
-        reflect = metrics[f"{color_channel_name}_reflect"]
-        radial = metrics[f"{color_channel_name}_radial"]
-        symmetry = np.minimum.reduce([transpose, reflect, radial])
-        metrics[f"{color_channel_name}_symmetry"] = symmetry.tolist()
+        for suffix in ["" , "-sqrt", "-square", "-Nsqrt", "-Nsquare"]:
+            transpose = metrics[f"{color_channel_name}_transpose{suffix}"]
+            reflect = metrics[f"{color_channel_name}_reflect{suffix}"]
+            radial = metrics[f"{color_channel_name}_radial{suffix}"]
+            symmetry = np.minimum.reduce([transpose, reflect, radial])
+            metrics[f"{color_channel_name}_symmetry{suffix}"] = symmetry.tolist()
 
     # create derived metrics that involve combining color channels
     for metric_name in metric_names + ["symmetry"]:
@@ -431,23 +439,25 @@ def process_video_to_midi(video_path,
             )
 
         # Save all MIDI files
-        filename = f"{output_prefix}_{key}.mid"
-        midi_file.save(filename)
-        print(f"Saved: {filename}")
+        for key, midi_file in midi_files.items():
+            filename = f"{output_prefix}_{key}.mid"
+            midi_file.save(filename)
+            # print(f"Saved: {filename}")
 
 # Example usage
 #test_video = "Mz3DllgimbrV2.wmv"
-video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
+#video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
+video_file = "Mz3DllgimbrV2B.wmv"
 
 process_video_to_midi(video_file, 
-                      "Julias everywhere", 
+                      "Mz3DllgimbrV2B.wmv", # output prefix
                       frames_per_second=30, 
                       beats_per_frame=1,
                       ticks_per_beat=480, 
-                      beats_per_minute=82,  
+                      beats_per_minute=92,  
                       cc_number=7, 
                       midi_channel=0,
-                      scale_boundary=12, # scale boundary means divide so 30 pixels in a cell
+                      scale_boundary=12, # scale boundary means divide so 12x12 pixels in a cell
                       filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
