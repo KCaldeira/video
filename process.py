@@ -202,6 +202,18 @@ def percentile_data(data):
     return percentiles
 
 
+def scale_data(data):
+    """
+    Rescales data so 0 is the lowest and 1 the highest.
+    """
+    max_val = np.max(data)
+    min_val = np.min(data)
+    range_val = max_val - min_val
+    if range_val == 0:
+        return np.zeros_like(data)  # Avoid division by zero
+    scaled_data = (data - min_val) / range_val
+    return scaled_data
+
 def compute_metrics(frame,scale_boundary=30):
     """
     Compute different intensity-based metrics on R, G, B, and grayscale images.
@@ -364,6 +376,7 @@ def process_video_to_midi(video_path,
 
     cap.release()
 
+
     # normalize all metrics to be between 0 and 1, with a percentile mapping
     #iterate over copy to avoid modifying the dictionary while iterating
     metrics_copy = metrics.copy()
@@ -372,27 +385,28 @@ def process_video_to_midi(video_path,
         # max_val = np.max(metric)
         # min_val = np.min(metric)
         # normalized_metric = (metric - min_val) / (max_val - min_val)
-        # normalize by taking a percentile ranking
+        # scale data by rescaling metric form 0 to 1
+        scaled_metric = scale_data(metric)
+        metrics[key] = scaled_metric.tolist()
+        metrics[f"{key}-neg"] = (1.-scaled_metric).tolist()
+        # rank the data and convert to percentiles
         normalized_metric = percentile_data(metric)
-        metrics[key] = normalized_metric.tolist()
-        # add square and square root of metric to give different scaling choices
-        metrics[f"{key}-sqrt"] = np.sqrt(normalized_metric).tolist()
-        metrics[f"{key}-square"] = np.square(normalized_metric).tolist()
-        metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-normalized_metric))  .tolist()
-        metrics[f"{key}-Nsquare"] = (1.-np.square(1.-normalized_metric)).tolist()
+        metrics[f"{key}-P"] = normalized_metric.tolist()
+        metrics[f"{key}-Pneg"] = (1.-normalized_metric).tolist()
 
-    # create derived metrics that involve combining metrics
+    # create derived metrics that involve combining metrics, i.e., only symmetry now
+    # FIX THIS UP TO WORK WITH ALL KEYS THAT HAVE "_transpoese", "_reflect", "_radial" 
     for color_channel_name in color_channel_names:
         # find minimum of "transpose", "reflect", "radial" metrics
-        for suffix in ["" , "-sqrt", "-square", "-Nsqrt", "-Nsquare"]:
-            transpose = metrics[f"{color_channel_name}_transpose{suffix}"]
-            reflect = metrics[f"{color_channel_name}_reflect{suffix}"]
-            radial = metrics[f"{color_channel_name}_radial{suffix}"]
-            symmetry = np.minimum.reduce([transpose, reflect, radial])
-            metrics[f"{color_channel_name}_symmetry{suffix}"] = symmetry.tolist()
+        transpose = metrics[color_channel_name]
+        reflect = metrics[color_channel_name]
+        radial = metrics[color_channel_name]
+        symmetry = np.minimum.reduce([transpose, reflect, radial])
+        metrics[f"{color_channel_name}_symmetry{suffix}"] = symmetry.tolist()
 
+    metric_name_list = list({key.split("_", 1)[1] for key in metrics if "_" in key})
     # create derived metrics that involve combining color channels
-    for metric_name in metric_names + ["symmetry"]:
+    for metric_name in metric_name_list:
         # find minimum of "transpose", "reflect", "radial" metrics
         r = metrics[f"R_{metric_name}"]
         g = metrics[f"G_{metric_name}"]
@@ -412,6 +426,18 @@ def process_video_to_midi(video_path,
 
         maxCMY = np.maximum.reduce([c, m, y], axis=0)
         metrics[f"maxCMY_{metric_name}"] = maxCMY.tolist()
+    
+    metrics_copy = metrics.copy()
+    for key, values in metrics_copy.items():    
+        # add square and square root of metric to give different scaling choices
+        metrics[f"{key}-sqrt"] = np.sqrt(values).tolist()
+        metrics[f"{key}-square"] = np.square(values).tolist()
+        metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-values))  .tolist()
+        metrics[f"{key}-Nsquare"] = (1.-np.square(1.-values)).tolist()
+        metrics[f"{key}-qtr"] = np.power(values,0.25).tolist()
+        metrics[f"{key}-fourth"] = np.power(values,4).tolist()
+        metrics[f"{key}-Nqtr"] = (1.-np.power(1.-values,0.25))  .tolist()
+        metrics[f"{key}-Nfourth"] = (1.-np.power(1.-values,4)).tolist()
 
     # Smooth the data with a boxcar filter
     if filter_width > 1:
