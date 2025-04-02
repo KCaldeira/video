@@ -19,6 +19,7 @@ import pandas as pd
 import numpy as np
 from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
+from collections import defaultdict
 
 def information_metric(color_channel, downscale_factor=4):
     """
@@ -230,7 +231,7 @@ def compute_metrics(frame, scale_boundary):
 
     for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("C", c), ("M", m), ("Y", y), ("K", k),
-                                ("Gray", gray)]:
+                                ("Gray", gray),("V", v)]:
         avg_intensity = np.mean(color_channel)
         variance = np.var(color_channel)
 
@@ -255,8 +256,6 @@ def compute_metrics(frame, scale_boundary):
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
     metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
-
-    metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s)
 
     return metrics
 
@@ -329,14 +328,9 @@ def process_video_to_midi(video_path,
     :param filter_width: width of boxcar filter for smoothing
 
     """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error: Could not open video file.")
-        return
 
-    # Define metric categories
-    metric_names = ["avg", "var", "large", "transpose", "reflect", "radial"]
-    color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
+
+
 
     ticks_per_frame = ticks_per_beat *( beats_per_minute / 60.) / frames_per_second # ticks per second / frames per second
     # Calculate the frame interval for processing frames
@@ -348,12 +342,22 @@ def process_video_to_midi(video_path,
     frame_count_list = []
 
 
-    # assemble dictionary of results for metrics
+
+    # Define metric categories that get computed by <compute_metrics>
+    # and the color channels that get computed
+    metric_names = ["avg", "var", "large", "transpose", "reflect", "radial"]
+    color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
     metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
     # add metric that is outside of the normal grouping
     metrics["HSV_monochromicity"] = []
 
+    # open rhe video file
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print("Error: Could not open video file.")
+        return
+    
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -376,6 +380,7 @@ def process_video_to_midi(video_path,
 
     cap.release()
 
+    #now compute derivative metrics that are computed after all frames are processed
 
     # normalize all metrics to be between 0 and 1, with a percentile mapping
     #iterate over copy to avoid modifying the dictionary while iterating
@@ -395,14 +400,39 @@ def process_video_to_midi(video_path,
         metrics[f"{key}-Pneg"] = (1.-normalized_metric).tolist()
 
     # create derived metrics that involve combining metrics, i.e., only symmetry now
-    # FIX THIS UP TO WORK WITH ALL KEYS THAT HAVE "_transpoese", "_reflect", "_radial" 
-    for color_channel_name in color_channel_names:
-        # find minimum of "transpose", "reflect", "radial" metrics
-        transpose = metrics[color_channel_name]
-        reflect = metrics[color_channel_name]
-        radial = metrics[color_channel_name]
-        symmetry = np.minimum.reduce([transpose, reflect, radial])
-        metrics[f"{color_channel_name}_symmetry{suffix}"] = symmetry.tolist()
+
+    # Create symmetry metric
+
+    target_substrings = {"transpose", "reflect", "radial"}
+
+    # Step 1: Filter relevant keys
+    filtered_metrics = [m for m in metrics if any(substr in m for substr in target_substrings)]
+
+    # Step 2: Identify and group by the shared prefix (with substring stripped out)
+    grouped = defaultdict(set)
+
+    for metric in filtered_metrics:
+        for substr in target_substrings:
+            if substr in metric:
+                # Remove the substring (and maybe an underscore) to isolate the "base"
+                base = metric.replace(f"_{substr}", "").replace(substr, "")
+                grouped[base].add(metric)
+                break
+
+    # Step 3: Find groups that contain all three substrings
+    def contains_all_substrings(group):
+        return all(any(substr in key for key in group) for substr in target_substrings)
+
+    complete_sets = [group for group in grouped.values() if contains_all_substrings(group)]
+
+    # Show results
+    for group in complete_sets:
+            # find minimum of "transpose", "reflect", "radial" metrics
+            metric1 = metrics[group[0]]
+            metric2 = metrics[group[1]]
+            metric3 = metrics[group[2]]
+            symmetry = np.minimum.reduce([metric1, metric2, metric3], axis=0)
+            metrics[f"{color_channel_name}_symmetry{suffix}"] = symmetry.tolist()
 
     metric_name_list = list({key.split("_", 1)[1] for key in metrics if "_" in key})
     # create derived metrics that involve combining color channels
