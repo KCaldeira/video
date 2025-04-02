@@ -204,17 +204,15 @@ def percentile_data(data):
 
 def scale_data(data):
     """
-    Rescales data so 0 is the lowest and 1 the highest.
+    Scale the vector <data> so that 0 is the lowest and 1 the highest.
     """
-    max_val = np.max(data)
     min_val = np.min(data)
-    range_val = max_val - min_val
-    if range_val == 0:
-        return np.zeros_like(data)  # Avoid division by zero
-    scaled_data = (data - min_val) / range_val
+    max_val = np.max(data)
+    scaled_data = (data - min_val) / (max_val - min_val)
     return scaled_data
 
-def compute_metrics(frame,scale_boundary=30):
+
+def compute_metrics(frame, scale_boundary):
     """
     Compute different intensity-based metrics on R, G, B, and grayscale images.
     Returns a dictionary of results.
@@ -232,10 +230,7 @@ def compute_metrics(frame,scale_boundary=30):
 
     for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("C", c), ("M", m), ("Y", y), ("K", k),
-                                ("Gray", gray),("V", v)]:
-        # Compute metrics for each color channel
-        # Compute average intensity and variance
-        # Note: np.mean and np.var are already vectorized for 2D arrays
+                                ("Gray", gray)]:
         avg_intensity = np.mean(color_channel)
         variance = np.var(color_channel)
 
@@ -259,7 +254,9 @@ def compute_metrics(frame,scale_boundary=30):
         metrics[f"{color_channel_name}_radial"] = radial_symmetry_metric_value
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
-    metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) # standard deviation of hue weighted by saturation
+    metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
+
+    metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s)
 
     return metrics
 
@@ -332,13 +329,6 @@ def process_video_to_midi(video_path,
     :param filter_width: width of boxcar filter for smoothing
 
     """
-
-        # assemble dictionary of results for metrics
-    metrics = {f"{color_channel_name}_{metric_name}": [] 
-               for color_channel_name in color_channel_names for metric_name in metric_names}
-    # add metric that is outside of the normal grouping
-    metrics["HSV_monochromicity"] = []
-
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("Error: Could not open video file.")
@@ -356,6 +346,13 @@ def process_video_to_midi(video_path,
 
     frame_count = 0
     frame_count_list = []
+
+
+    # assemble dictionary of results for metrics
+    metrics = {f"{color_channel_name}_{metric_name}": [] 
+               for color_channel_name in color_channel_names for metric_name in metric_names}
+    # add metric that is outside of the normal grouping
+    metrics["HSV_monochromicity"] = []
 
     while True:
         ret, frame = cap.read()
@@ -379,8 +376,8 @@ def process_video_to_midi(video_path,
 
     cap.release()
 
-    # normalize all metrics to be between 0 and 1, with both linear scaling and percentile mapping
-    # and add the inverse of each metric
+
+    # normalize all metrics to be between 0 and 1, with a percentile mapping
     #iterate over copy to avoid modifying the dictionary while iterating
     metrics_copy = metrics.copy()
     for key, values in metrics_copy.items():
@@ -399,17 +396,13 @@ def process_video_to_midi(video_path,
 
     # create derived metrics that involve combining metrics, i.e., only symmetry now
     # FIX THIS UP TO WORK WITH ALL KEYS THAT HAVE "_transpoese", "_reflect", "_radial" 
-        # assemble dictionary of results for metrics
-
-    color_channel_name_list = list({key.split("_", 1)[0] for key in metrics if "_" in key})
-    for color_channel_name in color_channel_name_list:
-        if all(f"{color_channel}_{suffix}" in metrics for suffix in ["transpose", "reflect", "radial"]):
-            # find minimum of "transpose", "reflect", "radial" metrics
-            transpose = metrics[f"{color_channel_name}_transpose"]
-            reflect = metrics[f"{color_channel_name}_reflect"]
-            radial = metrics[f"{color_channel_name}_radial"]
-            symmetry = np.minimum.reduce([transpose, reflect, radial])
-            metrics[f"{color_channel_name}_symmetry"] = symmetry.tolist()
+    for color_channel_name in color_channel_names:
+        # find minimum of "transpose", "reflect", "radial" metrics
+        transpose = metrics[color_channel_name]
+        reflect = metrics[color_channel_name]
+        radial = metrics[color_channel_name]
+        symmetry = np.minimum.reduce([transpose, reflect, radial])
+        metrics[f"{color_channel_name}_symmetry{suffix}"] = symmetry.tolist()
 
     metric_name_list = list({key.split("_", 1)[1] for key in metrics if "_" in key})
     # create derived metrics that involve combining color channels
@@ -509,10 +502,9 @@ def process_video_to_midi(video_path,
 
 
 # Example usage
-video_file  = "Mz3DllgimbrV2.wmv"
-video_prefix = "Mz3DllgimbrV2"
+#test_video = "Mz3DllgimbrV2.wmv"
 #video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
-#video_prefix = "Julias everywhere"
+video_file = "Mz3DllgimbrV2B.wmv"
 
 process_video_to_midi(video_file, 
                       "Mz3DllgimbrV2B", # output prefix
