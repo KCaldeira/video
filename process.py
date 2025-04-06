@@ -499,39 +499,56 @@ def process_video_to_midi(video_path,
     if not os.path.exists(f"./video_midi/{subdir_name}"):
         os.makedirs(f"./video_midi/{subdir_name}")
 
-    # Create MIDI files for each metric
+    # Create MIDI files for each base metric
     midi_files = {}
-    for key, value in metrics.items():
-        color_channel_name, metric_name = key.split("_",1)
+
+    for key in metrics:
+        # Skip keys that are "_inv" variants
+        if key.endswith("_inv"):
+            continue
+
+        base_key = key
+        inv_key = f"{key}_inv"
         
-        # Initialize MIDI files for each metric
-        midi_files[f"{color_channel_name}_{metric_name}"] = MidiFile()
+        color_channel_name, metric_name = base_key.split("_", 1)
+        
+        # Initialize MIDI file and tracks
+        midi_file = MidiFile()
+        track_base = MidiTrack()
+        midi_file.tracks.append(track_base)
 
-        # Add MIDI tracks
-        midi_files[f"{color_channel_name}_{metric_name}"].tracks.append(MidiTrack())
+        # Write base metric values
+        midi_val_base = [round(104 * val) for val in metrics[base_key]]
 
-        # Write MIDI messages for each metric
-        midi_val = [round(104 * val) for val in value] # Scale to MIDI range (0-104, avoid 105-127)
-
-        # Add to the correct MIDI track
-        for i, midi_value in enumerate(midi_val):
-            if i == 0:
-                time_tick = 0
-            else:
-                time_tick = int(ticks_per_frame * (frame_count_list[i] -frame_count_list[i-1]) )
-            midi_files[f"{color_channel_name}_{metric_name}"].tracks[0].append(
-                Message('control_change', 
-                        control=cc_number, 
-                        value=midi_value, 
-                        channel=midi_channel, 
+        for i, midi_value in enumerate(midi_val_base):
+            time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+            track_base.append(
+                Message('control_change',
+                        control=cc_number,
+                        value=midi_value,
+                        channel=midi_channel,
                         time=time_tick)
             )
 
-        # Save all MIDI files
-        for key, midi_file in midi_files.items():
-            filename = f"video_midi/{subdir_name}/{key}.mid"
-            midi_file.save(filename)
-            # print(f"Saved: {filename}")
+        # If the inverse metric exists, add a second track for it
+        if inv_key in metrics:
+            track_inv = MidiTrack()
+            midi_file.tracks.append(track_inv)
+
+            midi_val_inv = [round(104 * val) for val in metrics[inv_key]]
+            for i, midi_value in enumerate(midi_val_inv):
+                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                track_inv.append(
+                    Message('control_change',
+                            control=cc_number,
+                            value=midi_value,
+                            channel=midi_channel,
+                            time=time_tick)
+                )
+
+        # Save the MIDI file (one file per base key)
+        filename = f"video_midi/{subdir_name}/{color_channel_name}_{metric_name}.mid"
+        midi_file.save(filename)
 
 
 
