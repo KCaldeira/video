@@ -346,7 +346,7 @@ def process_video_to_midi(video_path,
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
     metric_names = ["avg", "var", "large", "transpose", "reflect", "radial"]
-    color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
+    color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
     # add metric that is outside of the normal grouping
