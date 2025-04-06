@@ -247,17 +247,17 @@ def compute_basic_metrics(frame, scale_boundary):
         # at the specified spatial scale
 
         # Store values
-        metrics[f"{color_channel_name}_avg"] = avg_intensity
-        metrics[f"{color_channel_name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
-        metrics[f"{color_channel_name}_large"] =  large_scale_info # fraction of info at large scales
-        metrics[f"{color_channel_name}_transpose"] = transpose_metric_value
-        metrics[f"{color_channel_name}_reflect"] = reflect_metric_value
-        metrics[f"{color_channel_name}_radial"] = radial_symmetry_metric_value
+        basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
+        basic_metrics[f"{color_channel_name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
+        basic_metrics[f"{color_channel_name}_large"] =  large_scale_info # fraction of info at large scales
+        basic_metrics[f"{color_channel_name}_transpose"] = transpose_metric_value
+        basic_metrics[f"{color_channel_name}_reflect"] = reflect_metric_value
+        basic_metrics[f"{color_channel_name}_radial"] = radial_symmetry_metric_value
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
-    metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
+    basic_metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
 
-    return metrics
+    return basic_metrics
 
 def triangular_filter_odd(data, N):
     if N < 1:
@@ -537,12 +537,14 @@ def process_video_to_midi(video_path,
 
 
 # Example usage
-#test_video = "Mz3DllgimbrV2.wmv"
+video_file = "Mz3DllgimbrV2.wmv"
+video_prefix = "Mz3DllgimbrV2" # output prefix
 #video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
-video_file = "Mz3DllgimbrV2B.wmv"
+#video_file = "Mz3DllgimbrV2B.wmv"
+#video_prefix = "Mz3DllgimbrV2B" # output prefix
 
 process_video_to_midi(video_file, 
-                      "Mz3DllgimbrV2B", # output prefix
+                      video_prefix, # output prefix
                       frames_per_second=30, 
                       beats_per_frame=1,
                       ticks_per_beat=480, 
