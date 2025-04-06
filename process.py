@@ -213,12 +213,12 @@ def scale_data(data):
     return scaled_data
 
 
-def compute_metrics(frame, scale_boundary):
+def compute_basic_metrics(frame, scale_boundary):
     """
     Compute different intensity-based metrics on R, G, B, and grayscale images.
     Returns a dictionary of results.
     """
-    metrics = {}
+    basic_metrics = {}
     
     b, g, r = cv2.split(frame)
     c, m, y, k = bgr_to_cmyk(b, g, r)
@@ -347,10 +347,10 @@ def process_video_to_midi(video_path,
     # and the color channels that get computed
     metric_names = ["avg", "var", "large", "transpose", "reflect", "radial"]
     color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray"]
-    metrics = {f"{color_channel_name}_{metric_name}": [] 
+    basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
     # add metric that is outside of the normal grouping
-    metrics["HSV_monochromicity"] = []
+    basic_metrics["HSV_monochromicity"] = []
 
     # open rhe video file
     cap = cv2.VideoCapture(video_path)
@@ -370,11 +370,11 @@ def process_video_to_midi(video_path,
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
 
-            metric_results = compute_metrics(frame, scale_boundary)
+            metric_results = compute_basic_metrics(frame, scale_boundary)
 
             #append to the dictionary of results
             for key, value in metric_results.items():
-                metrics[key].append(value)
+                basic_metrics[key].append(value)
 
         frame_count += 1
 
@@ -384,20 +384,20 @@ def process_video_to_midi(video_path,
 
     # normalize all metrics to be between 0 and 1, with a percentile mapping
     #iterate over copy to avoid modifying the dictionary while iterating
-    metrics_copy = metrics.copy()
-    for key, values in metrics_copy.items():
+    metrics = {}
+    for key, values in basic_metrics.items():
         metric = np.array(values)
         # max_val = np.max(metric)
         # min_val = np.min(metric)
         # normalized_metric = (metric - min_val) / (max_val - min_val)
         # scale data by rescaling metric form 0 to 1
         scaled_metric = scale_data(metric)
-        metrics[key] = scaled_metric.tolist()
-        metrics[f"{key}-neg"] = (1.-scaled_metric).tolist()
+        metrics[f"{key}-pos"] = scaled_metric
+        metrics[f"{key}-neg"] = (1.-scaled_metric)
         # rank the data and convert to percentiles
         normalized_metric = percentile_data(metric)
-        metrics[f"{key}-P"] = normalized_metric.tolist()
-        metrics[f"{key}-Pneg"] = (1.-normalized_metric).tolist()
+        metrics[f"{key}-Ppos"] = normalized_metric
+        metrics[f"{key}-Pneg"] = (1.-normalized_metric)
 
     # create derived metrics that involve combining metrics, i.e., only symmetry now
 
@@ -432,7 +432,7 @@ def process_video_to_midi(video_path,
             metric2 = metrics[group[1]]
             metric3 = metrics[group[2]]
             symmetry = np.minimum.reduce([metric1, metric2, metric3], axis=0)
-            metrics[f"{color_channel_name}_symmetry{suffix}"] = symmetry.tolist()
+            metrics[f"{color_channel_name}_symmetry"] = symmetry
 
     metric_name_list = list({key.split("_", 1)[1] for key in metrics if "_" in key})
     # create derived metrics that involve combining color channels
@@ -446,33 +446,55 @@ def process_video_to_midi(video_path,
         y = metrics[f"Y_{metric_name}"]
 
         minRGB = np.minimum.reduce([r, g, b], axis=0)
-        metrics[f"minRGB_{metric_name}"] = minRGB.tolist()
+        metrics[f"minRGB_{metric_name}"] = minRGB
 
         minCMY = np.minimum.reduce([c, m, y], axis=0)
-        metrics[f"minCMY_{metric_name}"] = minCMY.tolist()
+        metrics[f"minCMY_{metric_name}"] = minCMY
 
         maxRGB = np.maximum.reduce([r, g, b], axis=0)
-        metrics[f"maxRGB_{metric_name}"] = maxRGB.tolist()
+        metrics[f"maxRGB_{metric_name}"] = maxRGB
 
         maxCMY = np.maximum.reduce([c, m, y], axis=0)
-        metrics[f"maxCMY_{metric_name}"] = maxCMY.tolist()
+        metrics[f"maxCMY_{metric_name}"] = maxCMY
     
     metrics_copy = metrics.copy()
     for key, values in metrics_copy.items():    
         # add square and square root of metric to give different scaling choices
-        metrics[f"{key}-sqrt"] = np.sqrt(values).tolist()
-        metrics[f"{key}-square"] = np.square(values).tolist()
-        metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-values))  .tolist()
-        metrics[f"{key}-Nsquare"] = (1.-np.square(1.-values)).tolist()
-        metrics[f"{key}-qtr"] = np.power(values,0.25).tolist()
-        metrics[f"{key}-fourth"] = np.power(values,4).tolist()
-        metrics[f"{key}-Nqtr"] = (1.-np.power(1.-values,0.25))  .tolist()
-        metrics[f"{key}-Nfourth"] = (1.-np.power(1.-values,4)).tolist()
+        metrics[f"{key}-p050"] = np.sqrt(values)
+        metrics[f"{key}-p200"] = np.square(values)
+        #metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-values))  
+        #metrics[f"{key}-Nsquare"] = (1.-np.square(1.-values))
+        metrics[f"{key}-p025"] = np.power(values,0.25)
+        metrics[f"{key}-p400"] = np.power(values,4)
+        #metrics[f"{key}-Nqtr"] = (1.-np.power(1.-values,0.25))  
+        #metrics[f"{key}-Nfourth"] = (1.-np.power(1.-values,4))
 
     # Smooth the data with a boxcar filter
     if filter_width > 1:
         for key, values in metrics.items():
-            metrics[key] = triangular_filter_odd(np.array(values), filter_width).tolist()
+            metrics[key] = triangular_filter_odd(np.array(values), filter_width)    
+            
+    # renomalize between 0 and 1
+    for key, values in metrics.items():
+        metric = np.array(values)
+        # max_val = np.max(metric)
+        # min_val = np.min(metric)
+        # normalized_metric = (metric - min_val) / (max_val - min_val)
+        # scale data by rescaling metric form 0 to 1
+        scaled_metric = scale_data(metric)
+        metrics[key] = scaled_metric
+
+    # create inverse of each metric
+    for key, values in metrics.items():
+
+    # Create MIDI files for each metric
+        # Invert the metric
+        metrics[f"{key}_inv"] = 1. - values
+
+    # Export metrics to CSV
+    csv_filename = f"{output_prefix}.csv"
+    export_metrics_to_csv(frame_count_list, metrics, csv_filename)
+    print(f"Metrics exported to {csv_filename}")
 
     # Create MIDI files for each metric
     midi_files = {}
@@ -489,8 +511,6 @@ def process_video_to_midi(video_path,
     
         # Write MIDI messages for each metric
         midi_val = [round(104 * val) for val in value] # Scale to MIDI range (0-104, avoid 105-127)
-        # Invert the MIDI value for the second file
-        midi_val_inv = [round(104 * (1-val)) for val in value]
 
         # Add to the correct MIDI track
         for i, midi_value in enumerate(midi_val):
@@ -505,18 +525,6 @@ def process_video_to_midi(video_path,
                         channel=midi_channel, 
                         time=time_tick)
             )
-        for i, midi_value_inv in enumerate(midi_val_inv):
-            if i == 0:
-                time_tick = 0
-            else:
-                time_tick = int(ticks_per_frame * (frame_count_list[i] -frame_count_list[i-1]) )
-            midi_files[f"{color_channel_name}_{metric_name}_inv"].tracks[0].append(
-                Message('control_change', 
-                        control=cc_number, 
-                        value=midi_value_inv, 
-                        channel=midi_channel, 
-                        time=time_tick)
-            )
 
         # Save all MIDI files
         for key, midi_file in midi_files.items():
@@ -524,10 +532,7 @@ def process_video_to_midi(video_path,
             midi_file.save(filename)
             # print(f"Saved: {filename}")
 
-    # Export metrics to CSV
-    csv_filename = f"{output_prefix}.csv"
-    export_metrics_to_csv(frame_count_list, metrics, csv_filename)
-    print(f"Metrics exported to {csv_filename}")
+
 
 
 
@@ -547,4 +552,5 @@ process_video_to_midi(video_file,
                       scale_boundary=12, # scale boundary means divide so 12x12 pixels in a cell
                       filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
+
 
