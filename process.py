@@ -560,16 +560,18 @@ def process_video_to_midi(video_path,
 #video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
 #video_file = "Mz3DllgimbrV2B.wmv"
 #subdir_name = "Mz3DllgimbrV2B" # output prefix
-video_file = "M10zul.wmv"
-subdir_name = "M10zul" # output prefix
+#video_file = "M10zul.wmv"
+#subdir_name = "M10zul" # output prefix
+video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
+subdir_name = "JuliaInJulia" # output prefix
 
 process_video_to_midi(video_file, 
                       subdir_name, # output prefix
                       frames_per_second=30, 
                       beats_per_frame=1,
                       ticks_per_beat=480, 
-                      beats_per_minute=92,  
-                      cc_number=7, 
+                      beats_per_minute=111,  
+                      cc_number=1, 
                       midi_channel=0,
                       scale_boundary=12, # scale boundary means divide so 12x12 pixels in a cell
                       filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
