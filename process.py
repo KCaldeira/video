@@ -214,10 +214,151 @@ def scale_data(data):
     scaled_data = (data - min_val) / (max_val - min_val)
     return scaled_data
 
+def detect_lines(color_channel, scale_boundary):
+    """
+    Detect straight lines in a color channel using Probabilistic Hough Transform.
+    Returns metrics indicating the presence, length, and robustness of straight lines.
+    
+    Parameters:
+    - color_channel: color channel
+    - scale_boundary: Scale factor for downscaling before detection
+    
+    Returns:
+    - line_metrics: Dictionary containing:
+        - 'count': Number of lines detected (normalized 0-1)
+        - 'length': Average length of detected lines (normalized 0-1)
+        - 'robustness': How well the detected lines match actual edges (normalized 0-1)
+    """
+    # Downscale the image to reduce noise and computation time
+    h, w = color_channel.shape
+    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
+                           interpolation=cv2.INTER_AREA)
+    
+    # Apply edge detection
+    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
+    
+    # Detect line segments using Probabilistic Hough Transform
+    lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=50,
+                           minLineLength=20, maxLineGap=10)
+    
+    if lines is None:
+        return {'count': 0.0, 'length': 0.0, 'robustness': 0.0}
+    
+    # Calculate metrics
+    num_lines = len(lines)
+    line_lengths = []
+    line_robustness = []
+    
+    # Create a mask for edge points
+    edge_points = np.where(edges > 0)
+    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
+    
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        
+        # Calculate line length
+        length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+        line_lengths.append(length)
+        
+        # Calculate line equation: ax + by + c = 0
+        a = y2 - y1
+        b = x1 - x2
+        c = x2*y1 - x1*y2
+        
+        # Calculate distance from each edge point to the line
+        if len(edge_coords) > 0:
+            distances = np.abs(a*edge_coords[:,0] + b*edge_coords[:,1] + c) / np.sqrt(a*a + b*b)
+            
+            # Count points within 2 pixels of the line
+            nearby_points = np.sum(distances <= 2.0)
+            
+            # Normalize by line length to get points per unit length
+            points_per_length = nearby_points / (length + 1e-6)  # avoid division by zero
+            line_robustness.append(points_per_length)
+        else:
+            line_robustness.append(0.0)
+    
+    # Normalize metrics
+    non_normalized_line_metric = np.sum( line_lengths * line_robustness)
+    
+    return non_normalized_line_metric
+
+def detect_circles(color_channel, scale_boundary):
+    """
+    Detect circles in a color channel using Hough Transform.
+    Returns metrics indicating the presence, size, and robustness of circles.
+    
+    Parameters:
+    - color_channel: color channel
+    - scale_boundary: Scale factor for downscaling before detection
+    
+    Returns:
+    - circle_metrics: Dictionary containing:
+        - 'count': Number of circles detected (normalized 0-1)
+        - 'size': Average size of detected circles (normalized 0-1)
+        - 'robustness': Confidence of circle detection (normalized 0-1)
+    """
+    # Downscale the image to reduce noise and computation time
+    h, w = color_channel.shape
+    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
+                           interpolation=cv2.INTER_AREA)
+    
+    # Apply edge detection
+    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
+    
+    # Detect circles using Hough Transform
+    # param1: Upper threshold for edge detection
+    # param2: Threshold for circle detection (lower = more circles, higher = more robust)
+    circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
+                              param1=50, param2=30, minRadius=5, maxRadius=100)
+    
+    if circles is None:
+        return {'count': 0.0, 'size': 0.0, 'robustness': 0.0}
+    
+    # Convert circles to numpy array for easier processing
+    circles = np.uint16(np.around(circles))
+    
+    # Calculate metrics
+    num_circles = len(circles[0])
+    circle_radii = []
+    circle_robustness = []
+    
+    # Create a mask for edge points
+    edge_points = np.where(edges > 0)
+    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
+    
+    for circle in circles[0]:
+        x, y, r = circle
+        
+        # Store radius
+        circle_radii.append(r)
+        
+        # Calculate robustness by checking how many edge points lie on the circle
+        if len(edge_coords) > 0:
+            # Calculate distance from each edge point to circle center
+            distances = np.sqrt((edge_coords[:,0] - x)**2 + (edge_coords[:,1] - y)**2)
+            
+            # Count points within 2 pixels of the circle circumference
+            nearby_points = np.sum(np.abs(distances - r) <= 2.0)
+            
+            # Normalize by circumference to get points per unit length
+            circumference = 2 * np.pi * r
+            points_per_length = nearby_points / (circumference + 1e-6)  # avoid division by zero
+            circle_robustness.append(points_per_length)
+        else:
+            circle_robustness.append(0.0)
+    
+    
+    # Non-normalized metric is the sum of the radii** times the robustness  (The idea is proportional to circle area times robustness
+    # because we don not want a huge number of tiny circles to dominate the metric)
+    non_normalized_circle_metric = np.sum( circle_radii**2 * circle_robustness)
+
+    
+    return non_normalized_circle_metric
 
 def compute_basic_metrics(frame, scale_boundary):
     """
-    Compute different intensity-based metrics on R, G, B, and grayscale images.
+    Compute different intensity-based metrics on R, G, B, and color channels.
     Returns a dictionary of results.
     """
     basic_metrics = {}
@@ -225,12 +366,9 @@ def compute_basic_metrics(frame, scale_boundary):
     b, g, r = cv2.split(frame)
     c, m, y, k = bgr_to_cmyk(b, g, r)
     h, s, v = bgr_to_hsv(b, g, r)
-  
-    # Convert to grayscale
-    gray = 255 - cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # 255 is black, 0 is white
+
 
     # Split into R, G, B channels
-
     for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("C", c), ("M", m), ("Y", y), ("K", k),
                                 ("Gray", gray),("V", v)]:
@@ -247,14 +385,20 @@ def compute_basic_metrics(frame, scale_boundary):
         # at the specified spatial scale
         radial_symmetry_metric_value = radial_symmetry_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
+        # Add line detection metrics
+        line_metrics_value = detect_lines(color_channel, scale_boundary)
+        # Add circle detection metrics
+        circle_metrics_value = detect_circles(color_channel, scale_boundary)  
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
         basic_metrics[f"{color_channel_name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
-        basic_metrics[f"{color_channel_name}_large"] =  large_scale_info # fraction of info at large scales
-        basic_metrics[f"{color_channel_name}_transpose"] = transpose_metric_value
-        basic_metrics[f"{color_channel_name}_reflect"] = reflect_metric_value
-        basic_metrics[f"{color_channel_name}_radial"] = radial_symmetry_metric_value
+        basic_metrics[f"{color_channel_name}_lrg"] =  large_scale_info # fraction of info at large scales
+        basic_metrics[f"{color_channel_name}_xps"] = transpose_metric_value
+        basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
+        basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
+        basic_metrics[f"{color_channel_name}_lin"] = line_metrics_value
+        basic_metrics[f"{color_channel_name}_cir"] = circle_metrics_value
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
     basic_metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
@@ -401,38 +545,6 @@ def process_video_to_midi(video_path,
         metrics[f"{key}-Ppos"] = normalized_metric
         metrics[f"{key}-Pneg"] = (1.-normalized_metric)
 
-    # create derived metrics that involve combining metrics, i.e., only symmetry now
-
-    # Create symmetry metric
-
-    target_substrings = {"transpose", "reflect", "radial"}
-
-    # Step 1: Filter relevant keys
-    filtered_metrics = [m for m in metrics if any(substr in m for substr in target_substrings)]
-
-    # Step 2: Identify and group by the shared prefix (with substring stripped out)
-    grouped = defaultdict(set)
-
-    for metric in filtered_metrics:
-        for substr in target_substrings:
-            if substr in metric:
-                # Remove the substring (and maybe an underscore) to isolate the "base"
-                base = metric.replace(f"_{substr}", "").replace(substr, "")
-                grouped[base].add(metric)
-                break
-
-    # Step 3: Find groups that contain all three substrings
-    def contains_all_substrings(group):
-        return all(any(substr in key for key in group) for substr in target_substrings)
-
-    complete_sets = [group for group in grouped.values() if contains_all_substrings(group)]
-
-    # Show results
-    for group in complete_sets:
-        symmetry = np.minimum.reduce([metrics[item] for item in group], axis=0)
-        sample_key = next(iter(group))  # Get a sample key from the group
-        new_key = re.sub(r"(transpose|reflect|radial)", "symmetry", sample_key)
-        metrics[new_key] = symmetry
 
     metric_name_list = list({
         key.split("_", 1)[1]
@@ -441,7 +553,7 @@ def process_video_to_midi(video_path,
 
     # create derived metrics that involve combining color channels
     for metric_name in metric_name_list:
-        # find minimum of "transpose", "reflect", "radial" metrics
+
         r = metrics[f"R_{metric_name}"]
         g = metrics[f"G_{metric_name}"]
         b = metrics[f"B_{metric_name}"]
@@ -464,12 +576,12 @@ def process_video_to_midi(video_path,
     metrics_copy = metrics.copy()
     for key, values in metrics_copy.items():    
         # add square and square root of metric to give different scaling choices
-        metrics[f"{key}-p050"] = np.sqrt(values)
-        metrics[f"{key}-p200"] = np.square(values)
+        metrics[f"{key}-05"] = np.sqrt(values)
+        metrics[f"{key}-2"] = np.square(values)
         #metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-values))  
         #metrics[f"{key}-Nsquare"] = (1.-np.square(1.-values))
-        metrics[f"{key}-p025"] = np.power(values,0.25)
-        metrics[f"{key}-p400"] = np.power(values,4)
+        metrics[f"{key}-025"] = np.power(values,0.25)
+        metrics[f"{key}-4"] = np.power(values,4)
         #metrics[f"{key}-Nqtr"] = (1.-np.power(1.-values,0.25))  
         #metrics[f"{key}-Nfourth"] = (1.-np.power(1.-values,4))
 
