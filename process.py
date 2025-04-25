@@ -134,14 +134,14 @@ def radial_symmetry_metric(color_channel, scale_factor):
     return np.var(radial_mean)
 
 
-def lines_metric(color_channel, scale_boundary):
+def lines_metric(color_channel, resolution_reduction):
     """
     Detect straight lines in a color channel using Probabilistic Hough Transform.
     Returns metrics indicating the presence, length, and robustness of straight lines.
     
     Parameters:
     - color_channel: color channel
-    - scale_boundary: Scale factor for downscaling before detection
+    - resolution_reduction: Scale factor for downscaling before detection
     
     Returns:
     - line_metrics: Dictionary containing:
@@ -155,7 +155,7 @@ def lines_metric(color_channel, scale_boundary):
     
     # Downscale the image to reduce noise and computation time
     h, w = color_channel.shape
-    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
+    downscaled = cv2.resize(color_channel, (w // resolution_reduction, h // resolution_reduction), 
                            interpolation=cv2.INTER_AREA)
     
     # Apply edge detection
@@ -163,7 +163,7 @@ def lines_metric(color_channel, scale_boundary):
     
     # Detect line segments using Probabilistic Hough Transform
     lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=50,
-                           minLineLength=20, maxLineGap=10)
+                           minLineLength=100, maxLineGap=50)
     
     if lines is None:
         return 0.0 #no lines detected
@@ -210,14 +210,14 @@ def lines_metric(color_channel, scale_boundary):
         
     return non_normalized_line_metric
 
-def circles_metric(color_channel, scale_boundary, power):
+def circles_metric(color_channel, resolution_reduction, power):
     """
     Detect circles in a color channel using Hough Transform.
     Returns metrics indicating the presence, size, and robustness of circles.
     
     Parameters:
     - color_channel: color channel
-    - scale_boundary: Scale factor for downscaling before detection
+    - resolution_reduction: Scale factor for downscaling before detection
     
     Returns:
     - circle_metrics: Dictionary containing:
@@ -231,7 +231,7 @@ def circles_metric(color_channel, scale_boundary, power):
     
     # Downscale the image to reduce noise and computation time
     h, w = color_channel.shape
-    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
+    downscaled = cv2.resize(color_channel, (w // resolution_reduction, h // resolution_reduction), 
                            interpolation=cv2.INTER_AREA)
     
     # Apply edge detection
@@ -240,8 +240,11 @@ def circles_metric(color_channel, scale_boundary, power):
     # Detect circles using Hough Transform
     # param1: Upper threshold for edge detection
     # param2: Threshold for circle detection (lower = more circles, higher = more robust)
+    h0, w0 = downscaled.shape
+    min_radius = min(h0, w0) // 10 # min radius is 1/10 of the smaller dimension of the image
+    max_radius = min(h0, w0) // 2 # max radius is 1/2 of the smaller dimension of the image
     circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
-                              param1=50, param2=30, minRadius=5, maxRadius=100)
+                              param1=50, param2=30, minRadius=min_radius, maxRadius=max_radius)
     
     if circles is None:
         return 0.0 #no circles detected
@@ -371,7 +374,7 @@ def scale_data(data):
     return scaled_data
 
 
-def compute_basic_metrics(frame, scale_boundary):
+def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
     """
     Compute different intensity-based metrics on R, G, B, and color channels.
     Returns a dictionary of results.
@@ -402,11 +405,10 @@ def compute_basic_metrics(frame, scale_boundary):
         radial_symmetry_metric_value = radial_symmetry_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
         # Add line detection metrics
-        line_metric_value = lines_metric(color_channel, scale_boundary)
+        line_metric_value = lines_metric(color_channel, resolution_reduction)
         # Add circle detection metrics
-        circle1_metric_value = circles_metric(color_channel, scale_boundary,1)  
-        circle2_metric_value = circles_metric(color_channel, scale_boundary, 2)  
-        circle4_metric_value = circles_metric(color_channel, scale_boundary, 4)  
+        circle2_metric_value = circles_metric(color_channel, resolution_reduction, 2)  
+        circle4_metric_value = circles_metric(color_channel, resolution_reduction, 4)  
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -416,7 +418,6 @@ def compute_basic_metrics(frame, scale_boundary):
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
         basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
-        basic_metrics[f"{color_channel_name}_ci1"] = circle1_metric_value
         basic_metrics[f"{color_channel_name}_ci2"] = circle2_metric_value
         basic_metrics[f"{color_channel_name}_ci4"] = circle4_metric_value
 
@@ -479,6 +480,7 @@ def process_video_to_midi(video_path,
                           cc_number, 
                           midi_channel,
                           scale_boundary,
+                          resolution_reduction,
                           filter_width):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
@@ -492,6 +494,7 @@ def process_video_to_midi(video_path,
     :param cc_number: MIDI CC number (default 7 for volume).
     :param channel: MIDI channel (0-15).
     :param scale_boundary: spatial scale for computing metrics
+    :param resolution_reduction: resolution reduction for computing metrics
     :param filter_width: width of boxcar filter for smoothing
 
     """
@@ -508,11 +511,9 @@ def process_video_to_midi(video_path,
     frame_count = 0
     frame_count_list = []
 
-
-
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci1", "ci2", "ci4"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci2", "ci4"]
     color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
@@ -537,7 +538,7 @@ def process_video_to_midi(video_path,
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
 
-            metric_results = compute_basic_metrics(frame, scale_boundary)
+            metric_results = compute_basic_metrics(frame, scale_boundary, resolution_reduction)
 
             #append to the dictionary of results
             for key, value in metric_results.items():
@@ -699,7 +700,7 @@ subdir_name = "Mz3DllgimbrV2" # output prefix
 #video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
 #subdir_name = "JuliaInJulia" # output prefix
 video_file = "MzUL2-5jm3f.wmv"
-subdir_name = "MzUL2-5jm3f" # output prefix
+subdir_name = "MzUL2-5jm3f_2" # output prefix
 
 process_video_to_midi(video_file, 
                       subdir_name, # output prefix
@@ -710,6 +711,7 @@ process_video_to_midi(video_file,
                       cc_number=1, 
                       midi_channel=0,
                       scale_boundary=12, # scale boundary means divide so 12x12 pixels in a cell
+                      resolution_reduction=6, # resolution reduction means divide so 12x12 pixels in a cell
                       filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
