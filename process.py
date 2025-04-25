@@ -220,7 +220,12 @@ def circle_metrics(color_channel, resolution_reduction):
     - resolution_reduction: Scale factor for downscaling before detection
     
     Returns:
-    - 
+    - non_normalized_circle_metric0: Sum of circle confidences
+    - non_normalized_circle_metric2: Sum of (radius^2 * confidence)
+    - non_normalized_circle_metric4: Sum of (radius^4 * confidence)
+    - n_circles: Number of circles detected
+    - area_circles: Total area of detected circles
+    - circle_confidences: List of confidence values for each circle
     """
     # Convert to uint8 if needed and scale to 0-255 range
     if color_channel.dtype != np.uint8:
@@ -240,11 +245,13 @@ def circle_metrics(color_channel, resolution_reduction):
     h0, w0 = downscaled.shape
     min_radius = min(h0, w0) // 10 # min radius is 1/10 of the smaller dimension of the image
     max_radius = min(h0, w0) // 2 # max radius is 1/2 of the smaller dimension of the image
+    
+    # First call to get circles with confidence values
     circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
                               param1=50, param2=30, minRadius=min_radius, maxRadius=max_radius)
     
     if circles is None:
-        return 0.0, 0.0, 0.0, 0, 0 #no circles detected
+        return 0.0, 0.0, 0.0, 0, 0, [] #no circles detected
     
     # Convert circles to numpy array for easier processing
     circles = np.uint16(np.around(circles))
@@ -253,6 +260,7 @@ def circle_metrics(color_channel, resolution_reduction):
     num_circles = len(circles[0])
     circle_radii = []
     circle_robustness = []
+    circle_confidences = []
     
     # Create a mask for edge points
     edge_points = np.where(edges > 0)
@@ -276,20 +284,24 @@ def circle_metrics(color_channel, resolution_reduction):
             circumference = 2 * np.pi * r
             points_per_length = nearby_points / (circumference + 1e-6)  # avoid division by zero
             circle_robustness.append(points_per_length)
+            
+            # Calculate confidence based on edge support
+            # This combines both the Hough accumulator value and the edge support
+            confidence = points_per_length * (nearby_points / (circumference + 1e-6))
+            circle_confidences.append(confidence)
         else:
             circle_robustness.append(0.0)
+            circle_confidences.append(0.0)
     
-    
-    # Non-normalized metric is the sum of the radii** times the robustness  (The idea is proportional to circle area times robustness
-    # because we don not want a huge number of tiny circles to dominate the metric)
-    non_normalized_circle_metric0 = np.sum( np.array((circle_robustness)))
-    non_normalized_circle_metric2 = np.sum( np.array(circle_radii)**2 * np.array(circle_robustness))
-    non_normalized_circle_metric4 = np.sum( np.array(circle_radii)**4 * np.array(circle_robustness))
+    # Non-normalized metrics weighted by confidence
+    non_normalized_circle_metric0 = np.sum(np.array(circle_confidences))
+    non_normalized_circle_metric2 = np.sum(np.array(circle_radii)**2 * np.array(circle_confidences))
+    non_normalized_circle_metric4 = np.sum(np.array(circle_radii)**4 * np.array(circle_confidences))
 
     n_circles = len(circle_radii)
     area_circles = np.sum(np.pi * np.array(circle_radii)**2)
     
-    return non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles
+    return non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles, circle_confidences
 
 def bgr_to_cmyk(b, g, r):
     """
@@ -387,7 +399,6 @@ def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
     c, m, y, k = bgr_to_cmyk(b, g, r)
     h, s, v = bgr_to_hsv(b, g, r)
 
-
     # Split into R, G, B channels
     for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("C", c), ("M", m), ("Y", y), ("K", k),
@@ -409,7 +420,7 @@ def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
         line_metric_value = lines_metric(color_channel, resolution_reduction)
         # Add circle detection metrics
 
-        non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles = circle_metrics(color_channel, resolution_reduction)
+        non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles, circle_confidences = circle_metrics(color_channel, resolution_reduction)
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -424,7 +435,7 @@ def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
         basic_metrics[f"{color_channel_name}_ci4"] = non_normalized_circle_metric4
         basic_metrics[f"{color_channel_name}_cin"] = n_circles
         basic_metrics[f"{color_channel_name}_cia"] = area_circles
-
+        basic_metrics[f"{color_channel_name}_cic"] = np.mean(circle_confidences) if circle_confidences else 0.0
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
     basic_metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
@@ -517,7 +528,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci0", "ci2", "ci4", "cin", "cia"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci0", "ci2", "ci4", "cin", "cia", "cic"]
     color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
