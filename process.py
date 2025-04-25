@@ -572,7 +572,7 @@ def process_video_to_midi(video_path,
         metrics[f"{key}-Ppos"] = normalized_metric
         metrics[f"{key}-Pneg"] = (1.-normalized_metric)
 
-
+    """
     metric_name_list = list({
         key.split("_", 1)[1]
         for key in metrics
@@ -599,6 +599,8 @@ def process_video_to_midi(video_path,
 
         maxCMY = np.maximum.reduce([c, m, y], axis=0)
         metrics[f"maxCMY_{metric_name}"] = maxCMY
+
+    """
     
     metrics_copy = metrics.copy()
     for key, values in metrics_copy.items():    
@@ -667,7 +669,7 @@ def process_video_to_midi(video_path,
                         value=midi_value,
                         channel=midi_channel,
                         time=time_tick)
-            )
+            ) 
 
         # If the inverse metric exists, add a second track for it
         if inv_key in metrics:
