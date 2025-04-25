@@ -686,7 +686,7 @@ def process_video_to_midi(video_path,
                 )
 
         # Save the MIDI file (one file per base key)
-        filename = f"video_midi/{subdir_name}/{color_channel_name}_{metric_name}.mid"
+        filename = f"../video_midi/{subdir_name}/{color_channel_name}_{metric_name}.mid"
         midi_file.save(filename)
 
 
