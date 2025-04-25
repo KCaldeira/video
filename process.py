@@ -210,7 +210,7 @@ def lines_metric(color_channel, resolution_reduction):
         
     return non_normalized_line_metric
 
-def circles_metric(color_channel, resolution_reduction, power):
+def circle_metrics(color_channel, resolution_reduction):
     """
     Detect circles in a color channel using Hough Transform.
     Returns metrics indicating the presence, size, and robustness of circles.
@@ -220,10 +220,7 @@ def circles_metric(color_channel, resolution_reduction, power):
     - resolution_reduction: Scale factor for downscaling before detection
     
     Returns:
-    - circle_metrics: Dictionary containing:
-        - 'count': Number of circles detected (normalized 0-1)
-        - 'size': Average size of detected circles (normalized 0-1)
-        - 'robustness': Confidence of circle detection (normalized 0-1)
+    - 
     """
     # Convert to uint8 if needed and scale to 0-255 range
     if color_channel.dtype != np.uint8:
@@ -247,7 +244,7 @@ def circles_metric(color_channel, resolution_reduction, power):
                               param1=50, param2=30, minRadius=min_radius, maxRadius=max_radius)
     
     if circles is None:
-        return 0.0 #no circles detected
+        return 0.0, 0.0, 0.0, 0, 0 #no circles detected
     
     # Convert circles to numpy array for easier processing
     circles = np.uint16(np.around(circles))
@@ -285,10 +282,14 @@ def circles_metric(color_channel, resolution_reduction, power):
     
     # Non-normalized metric is the sum of the radii** times the robustness  (The idea is proportional to circle area times robustness
     # because we don not want a huge number of tiny circles to dominate the metric)
-    non_normalized_circle_metric = np.sum( np.array(circle_radii)**power * np.array(circle_robustness))
+    non_normalized_circle_metric0 = np.sum( np.array((circle_robustness)))
+    non_normalized_circle_metric2 = np.sum( np.array(circle_radii)**2 * np.array(circle_robustness))
+    non_normalized_circle_metric4 = np.sum( np.array(circle_radii)**4 * np.array(circle_robustness))
 
+    n_circles = len(circle_radii)
+    area_circles = np.sum(np.pi * np.array(circle_radii)**2)
     
-    return non_normalized_circle_metric
+    return non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles
 
 def bgr_to_cmyk(b, g, r):
     """
@@ -407,8 +408,8 @@ def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel, resolution_reduction)
         # Add circle detection metrics
-        circle2_metric_value = circles_metric(color_channel, resolution_reduction, 2)  
-        circle4_metric_value = circles_metric(color_channel, resolution_reduction, 4)  
+
+        non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles = circle_metrics(color_channel, resolution_reduction)
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -418,8 +419,11 @@ def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
         basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
-        basic_metrics[f"{color_channel_name}_ci2"] = circle2_metric_value
-        basic_metrics[f"{color_channel_name}_ci4"] = circle4_metric_value
+        basic_metrics[f"{color_channel_name}_ci0"] = non_normalized_circle_metric0
+        basic_metrics[f"{color_channel_name}_ci2"] = non_normalized_circle_metric2  
+        basic_metrics[f"{color_channel_name}_ci4"] = non_normalized_circle_metric4
+        basic_metrics[f"{color_channel_name}_cin"] = n_circles
+        basic_metrics[f"{color_channel_name}_cia"] = area_circles
 
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
@@ -513,7 +517,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci2", "ci4"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci0", "ci2", "ci4", "cin", "cia"]
     color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
@@ -631,8 +635,8 @@ def process_video_to_midi(video_path,
     export_metrics_to_csv(frame_count_list, metrics, csv_filename)
     print(f"Metrics exported to {csv_filename}")
 
-    if not os.path.exists(f"./video_midi/{subdir_name}"):
-        os.makedirs(f"./video_midi/{subdir_name}")
+    if not os.path.exists(f"../video_midi/{subdir_name}"):
+        os.makedirs(f"../video_midi/{subdir_name}")
 
     # Create MIDI files for each base metric
     midi_files = {}
@@ -700,7 +704,7 @@ subdir_name = "Mz3DllgimbrV2" # output prefix
 #video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
 #subdir_name = "JuliaInJulia" # output prefix
 video_file = "MzUL2-5jm3f.wmv"
-subdir_name = "MzUL2-5jm3f_2" # output prefix
+subdir_name = "MzUL2-5jm3f_3" # output prefix
 
 process_video_to_midi(video_file, 
                       subdir_name, # output prefix
