@@ -210,7 +210,7 @@ def lines_metric(color_channel, scale_boundary):
         
     return non_normalized_line_metric
 
-def circles_metric(color_channel, scale_boundary):
+def circles_metric(color_channel, scale_boundary, power):
     """
     Detect circles in a color channel using Hough Transform.
     Returns metrics indicating the presence, size, and robustness of circles.
@@ -282,7 +282,7 @@ def circles_metric(color_channel, scale_boundary):
     
     # Non-normalized metric is the sum of the radii** times the robustness  (The idea is proportional to circle area times robustness
     # because we don not want a huge number of tiny circles to dominate the metric)
-    non_normalized_circle_metric = np.sum( np.array(circle_radii)**2 * np.array(circle_robustness))
+    non_normalized_circle_metric = np.sum( np.array(circle_radii)**power * np.array(circle_robustness))
 
     
     return non_normalized_circle_metric
@@ -404,7 +404,9 @@ def compute_basic_metrics(frame, scale_boundary):
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel, scale_boundary)
         # Add circle detection metrics
-        circle_metric_value = circles_metric(color_channel, scale_boundary)  
+        circle1_metric_value = circles_metric(color_channel, scale_boundary,1)  
+        circle2_metric_value = circles_metric(color_channel, scale_boundary, 2)  
+        circle4_metric_value = circles_metric(color_channel, scale_boundary, 4)  
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -414,7 +416,10 @@ def compute_basic_metrics(frame, scale_boundary):
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
         basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
-        basic_metrics[f"{color_channel_name}_cir"] = circle_metric_value
+        basic_metrics[f"{color_channel_name}_ci1"] = circle1_metric_value
+        basic_metrics[f"{color_channel_name}_ci2"] = circle2_metric_value
+        basic_metrics[f"{color_channel_name}_ci4"] = circle4_metric_value
+
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
     basic_metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
@@ -507,7 +512,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "cir"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci1", "ci2", "ci4"]
     color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
@@ -645,10 +650,7 @@ def process_video_to_midi(video_path,
         midi_file = MidiFile()
         track_base = MidiTrack()
         midi_file.tracks.append(track_base)
-         
-        print (base_key)
-        print (metrics[base_key].shape)
-        print (metrics[base_key])
+
         # Write base metric values
         midi_val_base = [round(104 * val) for val in metrics[base_key]]
 
