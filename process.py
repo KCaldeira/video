@@ -134,6 +134,159 @@ def radial_symmetry_metric(color_channel, scale_factor):
     return np.var(radial_mean)
 
 
+def lines_metric(color_channel, scale_boundary):
+    """
+    Detect straight lines in a color channel using Probabilistic Hough Transform.
+    Returns metrics indicating the presence, length, and robustness of straight lines.
+    
+    Parameters:
+    - color_channel: color channel
+    - scale_boundary: Scale factor for downscaling before detection
+    
+    Returns:
+    - line_metrics: Dictionary containing:
+        - 'count': Number of lines detected (normalized 0-1)
+        - 'length': Average length of detected lines (normalized 0-1)
+        - 'robustness': How well the detected lines match actual edges (normalized 0-1)
+    """
+    # Convert to uint8 if needed and scale to 0-255 range
+    if color_channel.dtype != np.uint8:
+        color_channel = (color_channel * 255).astype(np.uint8)
+    
+    # Downscale the image to reduce noise and computation time
+    h, w = color_channel.shape
+    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
+                           interpolation=cv2.INTER_AREA)
+    
+    # Apply edge detection
+    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
+    
+    # Detect line segments using Probabilistic Hough Transform
+    lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=50,
+                           minLineLength=20, maxLineGap=10)
+    
+    if lines is None:
+        return 0.0 #no lines detected
+    
+    # Calculate metrics
+    line_lengths = []
+    line_robustness = []
+    
+    # Create a mask for edge points
+    edge_points = np.where(edges > 0)
+    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
+    
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        
+        # Calculate line length
+        length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+        line_lengths.append(length)
+        
+        # Calculate line equation: ax + by + c = 0
+        a = y2 - y1
+        b = x1 - x2
+        c = x2*y1 - x1*y2
+        
+        # Calculate distance from each edge point to the line
+        if len(edge_coords) > 0:
+            distances = np.abs(a*edge_coords[:,0] + b*edge_coords[:,1] + c) / np.sqrt(a*a + b*b)
+            
+            # Count points within 2 pixels of the line
+            nearby_points = np.sum(distances <= 2.0)
+            
+            # Normalize by line length to get points per unit length
+            points_per_length = nearby_points / (length + 1e-6)  # avoid division by zero
+            line_robustness.append(points_per_length)
+        else:
+            line_robustness.append(0.0)
+    
+    # Normalize metrics
+    non_normalized_line_metric = np.sum(np.array(line_lengths) * np.array(line_robustness))
+    
+    # Return 0.0 if the metric is NaN
+    if np.isnan(non_normalized_line_metric):
+        return 0.0
+        
+    return non_normalized_line_metric
+
+def circles_metric(color_channel, scale_boundary):
+    """
+    Detect circles in a color channel using Hough Transform.
+    Returns metrics indicating the presence, size, and robustness of circles.
+    
+    Parameters:
+    - color_channel: color channel
+    - scale_boundary: Scale factor for downscaling before detection
+    
+    Returns:
+    - circle_metrics: Dictionary containing:
+        - 'count': Number of circles detected (normalized 0-1)
+        - 'size': Average size of detected circles (normalized 0-1)
+        - 'robustness': Confidence of circle detection (normalized 0-1)
+    """
+    # Convert to uint8 if needed and scale to 0-255 range
+    if color_channel.dtype != np.uint8:
+        color_channel = (color_channel * 255).astype(np.uint8)
+    
+    # Downscale the image to reduce noise and computation time
+    h, w = color_channel.shape
+    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
+                           interpolation=cv2.INTER_AREA)
+    
+    # Apply edge detection
+    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
+    
+    # Detect circles using Hough Transform
+    # param1: Upper threshold for edge detection
+    # param2: Threshold for circle detection (lower = more circles, higher = more robust)
+    circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
+                              param1=50, param2=30, minRadius=5, maxRadius=100)
+    
+    if circles is None:
+        return 0.0 #no circles detected
+    
+    # Convert circles to numpy array for easier processing
+    circles = np.uint16(np.around(circles))
+    
+    # Calculate metrics
+    num_circles = len(circles[0])
+    circle_radii = []
+    circle_robustness = []
+    
+    # Create a mask for edge points
+    edge_points = np.where(edges > 0)
+    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
+    
+    for circle in circles[0]:
+        x, y, r = circle
+        
+        # Store radius
+        circle_radii.append(r)
+        
+        # Calculate robustness by checking how many edge points lie on the circle
+        if len(edge_coords) > 0:
+            # Calculate distance from each edge point to circle center
+            distances = np.sqrt((edge_coords[:,0] - x)**2 + (edge_coords[:,1] - y)**2)
+            
+            # Count points within 2 pixels of the circle circumference
+            nearby_points = np.sum(np.abs(distances - r) <= 2.0)
+            
+            # Normalize by circumference to get points per unit length
+            circumference = 2 * np.pi * r
+            points_per_length = nearby_points / (circumference + 1e-6)  # avoid division by zero
+            circle_robustness.append(points_per_length)
+        else:
+            circle_robustness.append(0.0)
+    
+    
+    # Non-normalized metric is the sum of the radii** times the robustness  (The idea is proportional to circle area times robustness
+    # because we don not want a huge number of tiny circles to dominate the metric)
+    non_normalized_circle_metric = np.sum( np.array(circle_radii)**2 * np.array(circle_robustness))
+
+    
+    return non_normalized_circle_metric
+
 def bgr_to_cmyk(b, g, r):
     """
     Convert BGR to CMYK color space.
@@ -211,150 +364,12 @@ def scale_data(data):
     """
     min_val = np.min(data)
     max_val = np.max(data)
-    scaled_data = (data - min_val) / (max_val - min_val)
+    if max_val > min_val:
+        scaled_data = (data - min_val) / (max_val - min_val)
+    else:
+        scaled_data = np.zeros_like(data)
     return scaled_data
 
-def detect_lines(color_channel, scale_boundary):
-    """
-    Detect straight lines in a color channel using Probabilistic Hough Transform.
-    Returns metrics indicating the presence, length, and robustness of straight lines.
-    
-    Parameters:
-    - color_channel: color channel
-    - scale_boundary: Scale factor for downscaling before detection
-    
-    Returns:
-    - line_metrics: Dictionary containing:
-        - 'count': Number of lines detected (normalized 0-1)
-        - 'length': Average length of detected lines (normalized 0-1)
-        - 'robustness': How well the detected lines match actual edges (normalized 0-1)
-    """
-    # Downscale the image to reduce noise and computation time
-    h, w = color_channel.shape
-    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
-                           interpolation=cv2.INTER_AREA)
-    
-    # Apply edge detection
-    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
-    
-    # Detect line segments using Probabilistic Hough Transform
-    lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=50,
-                           minLineLength=20, maxLineGap=10)
-    
-    if lines is None:
-        return {'count': 0.0, 'length': 0.0, 'robustness': 0.0}
-    
-    # Calculate metrics
-    num_lines = len(lines)
-    line_lengths = []
-    line_robustness = []
-    
-    # Create a mask for edge points
-    edge_points = np.where(edges > 0)
-    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
-    
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        
-        # Calculate line length
-        length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-        line_lengths.append(length)
-        
-        # Calculate line equation: ax + by + c = 0
-        a = y2 - y1
-        b = x1 - x2
-        c = x2*y1 - x1*y2
-        
-        # Calculate distance from each edge point to the line
-        if len(edge_coords) > 0:
-            distances = np.abs(a*edge_coords[:,0] + b*edge_coords[:,1] + c) / np.sqrt(a*a + b*b)
-            
-            # Count points within 2 pixels of the line
-            nearby_points = np.sum(distances <= 2.0)
-            
-            # Normalize by line length to get points per unit length
-            points_per_length = nearby_points / (length + 1e-6)  # avoid division by zero
-            line_robustness.append(points_per_length)
-        else:
-            line_robustness.append(0.0)
-    
-    # Normalize metrics
-    non_normalized_line_metric = np.sum( line_lengths * line_robustness)
-    
-    return non_normalized_line_metric
-
-def detect_circles(color_channel, scale_boundary):
-    """
-    Detect circles in a color channel using Hough Transform.
-    Returns metrics indicating the presence, size, and robustness of circles.
-    
-    Parameters:
-    - color_channel: color channel
-    - scale_boundary: Scale factor for downscaling before detection
-    
-    Returns:
-    - circle_metrics: Dictionary containing:
-        - 'count': Number of circles detected (normalized 0-1)
-        - 'size': Average size of detected circles (normalized 0-1)
-        - 'robustness': Confidence of circle detection (normalized 0-1)
-    """
-    # Downscale the image to reduce noise and computation time
-    h, w = color_channel.shape
-    downscaled = cv2.resize(color_channel, (w // scale_boundary, h // scale_boundary), 
-                           interpolation=cv2.INTER_AREA)
-    
-    # Apply edge detection
-    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
-    
-    # Detect circles using Hough Transform
-    # param1: Upper threshold for edge detection
-    # param2: Threshold for circle detection (lower = more circles, higher = more robust)
-    circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
-                              param1=50, param2=30, minRadius=5, maxRadius=100)
-    
-    if circles is None:
-        return {'count': 0.0, 'size': 0.0, 'robustness': 0.0}
-    
-    # Convert circles to numpy array for easier processing
-    circles = np.uint16(np.around(circles))
-    
-    # Calculate metrics
-    num_circles = len(circles[0])
-    circle_radii = []
-    circle_robustness = []
-    
-    # Create a mask for edge points
-    edge_points = np.where(edges > 0)
-    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
-    
-    for circle in circles[0]:
-        x, y, r = circle
-        
-        # Store radius
-        circle_radii.append(r)
-        
-        # Calculate robustness by checking how many edge points lie on the circle
-        if len(edge_coords) > 0:
-            # Calculate distance from each edge point to circle center
-            distances = np.sqrt((edge_coords[:,0] - x)**2 + (edge_coords[:,1] - y)**2)
-            
-            # Count points within 2 pixels of the circle circumference
-            nearby_points = np.sum(np.abs(distances - r) <= 2.0)
-            
-            # Normalize by circumference to get points per unit length
-            circumference = 2 * np.pi * r
-            points_per_length = nearby_points / (circumference + 1e-6)  # avoid division by zero
-            circle_robustness.append(points_per_length)
-        else:
-            circle_robustness.append(0.0)
-    
-    
-    # Non-normalized metric is the sum of the radii** times the robustness  (The idea is proportional to circle area times robustness
-    # because we don not want a huge number of tiny circles to dominate the metric)
-    non_normalized_circle_metric = np.sum( circle_radii**2 * circle_robustness)
-
-    
-    return non_normalized_circle_metric
 
 def compute_basic_metrics(frame, scale_boundary):
     """
@@ -364,6 +379,7 @@ def compute_basic_metrics(frame, scale_boundary):
     basic_metrics = {}
     
     b, g, r = cv2.split(frame)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     c, m, y, k = bgr_to_cmyk(b, g, r)
     h, s, v = bgr_to_hsv(b, g, r)
 
@@ -386,9 +402,9 @@ def compute_basic_metrics(frame, scale_boundary):
         radial_symmetry_metric_value = radial_symmetry_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
         # Add line detection metrics
-        line_metrics_value = detect_lines(color_channel, scale_boundary)
+        line_metric_value = lines_metric(color_channel, scale_boundary)
         # Add circle detection metrics
-        circle_metrics_value = detect_circles(color_channel, scale_boundary)  
+        circle_metric_value = circles_metric(color_channel, scale_boundary)  
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -397,8 +413,8 @@ def compute_basic_metrics(frame, scale_boundary):
         basic_metrics[f"{color_channel_name}_xps"] = transpose_metric_value
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
-        basic_metrics[f"{color_channel_name}_lin"] = line_metrics_value
-        basic_metrics[f"{color_channel_name}_cir"] = circle_metrics_value
+        basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
+        basic_metrics[f"{color_channel_name}_cir"] = circle_metric_value
 
     #monochromicity metric is the standard deviation of hue weighted by saturation
     basic_metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
@@ -491,7 +507,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "large", "transpose", "reflect", "radial"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "cir"]
     color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
@@ -537,6 +553,7 @@ def process_video_to_midi(video_path,
         # min_val = np.min(metric)
         # normalized_metric = (metric - min_val) / (max_val - min_val)
         # scale data by rescaling metric form 0 to 1
+
         scaled_metric = scale_data(metric)
         metrics[f"{key}-pos"] = scaled_metric
         metrics[f"{key}-neg"] = (1.-scaled_metric)
@@ -628,7 +645,10 @@ def process_video_to_midi(video_path,
         midi_file = MidiFile()
         track_base = MidiTrack()
         midi_file.tracks.append(track_base)
-
+         
+        print (base_key)
+        print (metrics[base_key].shape)
+        print (metrics[base_key])
         # Write base metric values
         midi_val_base = [round(104 * val) for val in metrics[base_key]]
 
@@ -667,22 +687,24 @@ def process_video_to_midi(video_path,
 
 
 # Example usage
-#video_file = "Mz3DllgimbrV2.wmv"  #  small test video file
-#subdir_name = "Mz3DllgimbrV2" # output prefix
+video_file = "Mz3DllgimbrV2.wmv"  #  small test video file
+subdir_name = "Mz3DllgimbrV2" # output prefix
 #video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
 #video_file = "Mz3DllgimbrV2B.wmv"
 #subdir_name = "Mz3DllgimbrV2B" # output prefix
 #video_file = "M10zul.wmv"
 #subdir_name = "M10zul" # output prefix
-video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
-subdir_name = "JuliaInJulia" # output prefix
+#video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
+#subdir_name = "JuliaInJulia" # output prefix
+video_file = "MzUL2-5jm3f.wmv"
+subdir_name = "MzUL2-5jm3f" # output prefix
 
 process_video_to_midi(video_file, 
                       subdir_name, # output prefix
                       frames_per_second=30, 
-                      beats_per_frame=1,
+                      beats_per_frame=2,
                       ticks_per_beat=480, 
-                      beats_per_minute=111,  
+                      beats_per_minute=96,  
                       cc_number=1, 
                       midi_channel=0,
                       scale_boundary=12, # scale boundary means divide so 12x12 pixels in a cell
