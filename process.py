@@ -277,29 +277,46 @@ def error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2
     # how far is the highres error from the center of the image?
     # how dispersed is the low res error around the center of the low res error?
     # how dispersed is the high res error around the center of the high res error?
+    # _std is the standard deviation of the variability of the channel.
+    # now let's see what is the standard deviation 
+    info_total = np.var(color_channel)
+    info_large = 1. - (color_channel - restored1)**2 / info_total**2 # fraction of variance in large scale
+    info_medium = (restored1 - restored2)**2 / info_total**2 # fraction of variance in medium scale
+    info_small = (color_channel - restored2)**2 / info_total**2 # fraction of variance in small scale
 
-    sqerror1 = (color_channel - restored1) ** 2
-    sqerror2 = (restored1 - restored2) ** 2
+    sqerror1 = (restored1 - np.mean(color_channel)) ** 2 # hor much variance is in departure of large scale from mean
+    sqerror2 = (restored2 - restored1) ** 2 # how much variance is in departure of medium scale from large scale
+    sqerror3 = (color_channel - restored2) ** 2 # how much variance is in the departure of the actual from the chigh res
 
     # Compute mean squared error (MSE) between original and restored image
-    meanx1 = np.average( X, weights= sqerror1)
-    meanx2 = np.average( X, weights= sqerror2)
-    meany1 = np.average( Y, weights= sqerror1)
-    meany2 = np.average( Y, weights= sqerror2)
+    meanx1 = np.average( X, weights= info_large)
+    meanx2 = np.average( X, weights= info_medium)
+    meanx3 = np.average( X, weights= info_small)
+ 
+    meany1 = np.average( Y, weights= info_large)
+    meany2 = np.average( Y, weights= info_medium)
+    meany3 = np.average( Y, weights= info_small)
 
     stddevx1 = weighted_std( X, sqerror1)
     stddevx2 = weighted_std( X, sqerror2)
+    stddevx3 = weighted_std( X, sqerror3)
     stddevy1 = weighted_std( Y, sqerror1)
     stddevy2 = weighted_std( Y, sqerror2)
+    stddevy3 = weighted_std( Y, sqerror3)
 
     mnsqerror1 = np.average(sqerror1)
     mnsqerror2 = np.average(sqerror2)
+    mnsqerror3 = np.average(sqerror3)
+
     dist1 = np.sqrt((meanx1 - centerx)**2 + (meany1 - centery)**2)
     dist2 = np.sqrt((meanx2 - centerx)**2 + (meany2 - centery)**2)
+    dist3 = np.sqrt((meanx3 - centerx)**2 + (meany3 - centery)**2)
+
     stdev1 = np.sqrt(stddevx1**2 + stddevy1**2)
     stdev2 = np.sqrt(stddevx2**2 + stddevy2**2)
+    stdev3 = np.sqrt(stddevx3**2 + stddevy3**2)
 
-    return mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2
+    return mnsqerror1, mnsqerror2, mnsqerror3, dist1, dist2, dist3, stdev1, stdev2, stdev3
 
 
 def bgr_to_hsv(b, g, r):
@@ -401,7 +418,7 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel)
         # Add circle detection metrics
-        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2)
+        mnsqerror1, mnsqerror2, mnsqerror3, dist1, dist2, dist3, stdev1, stdev2, stdev3 = error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2)
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -413,21 +430,24 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
         basic_metrics[f"{color_channel_name}_ee1"] = mnsqerror1  # mean squared error of low res
         basic_metrics[f"{color_channel_name}_ee2"] = mnsqerror2  # mean squared error of high res
+        basic_metrics[f"{color_channel_name}_ee3"] = mnsqerror3  # mean squared error of high res
         basic_metrics[f"{color_channel_name}_ed1"] = dist1  # distance of low res error from center of image
         basic_metrics[f"{color_channel_name}_ed2"] = dist2  # distance of high res error from center of image
+        basic_metrics[f"{color_channel_name}_ed3"] = dist3  # distance of high res error from center of image
         basic_metrics[f"{color_channel_name}_es1"] = stdev1  # standard deviation of low res error
         basic_metrics[f"{color_channel_name}_es2"] = stdev2
+        basic_metrics[f"{color_channel_name}_es3"] = stdev3
 
     #monochrome metric is the standard deviation of hue weighted by saturation
-    basic_metrics["HSV_monochrome"] = weighted_circular_std_deg(h, s)
+    basic_metrics["HSV_monos"] = weighted_circular_std_deg(h, s)
 
     # measure the degree to which the hue is close to each of the 6 cardinal hues
-    basic_metrics["HSV_hue000-std"] = np.mean((((h + 180 - 0) % 360) - 180)**2)**(1/2)
-    basic_metrics["HSV_hue060-std"] = np.mean((((h + 180 - 60) % 360) - 180)**2)**(1/2)
-    basic_metrics["HSV_hue120-std"] = np.mean((((h + 180 - 120) % 360) - 180)**2)**(1/2)
-    basic_metrics["HSV_hue180-std"] = np.mean((((h + 180 - 180) % 360) - 180)**2)**(1/2)    
-    basic_metrics["HSV_hue240-std"] = np.mean((((h + 180 - 240) % 360) - 180)**2)**(1/2)  
-    basic_metrics["HSV_hue300-std"] = np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
+    basic_metrics["HSV_h000s"] = np.mean((((h + 180 - 0) % 360) - 180)**2)**(1/2)
+    basic_metrics["HSV_h060s"] = np.mean((((h + 180 - 60) % 360) - 180)**2)**(1/2)
+    basic_metrics["HSV_h120s"] = np.mean((((h + 180 - 120) % 360) - 180)**2)**(1/2)
+    basic_metrics["HSV_h180s"] = np.mean((((h + 180 - 180) % 360) - 180)**2)**(1/2)    
+    basic_metrics["HSV_h240s"] = np.mean((((h + 180 - 240) % 360) - 180)**2)**(1/2)  
+    basic_metrics["HSV_h300s"] = np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
 
     return basic_metrics
 
@@ -517,18 +537,18 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3"]
     color_channel_names = ["R", "G", "B", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
     # add metrics that are outside of the normal grouping
-    basic_metrics["HSV_monochrome"] = []
-    basic_metrics["HSV_hue000-std"] = []
-    basic_metrics["HSV_hue060-std"] = []
-    basic_metrics["HSV_hue120-std"] = []
-    basic_metrics["HSV_hue180-std"] = []
-    basic_metrics["HSV_hue240-std"] = []
-    basic_metrics["HSV_hue300-std"] = []
+    basic_metrics["HSV_monos"] = []
+    basic_metrics["HSV_h000s"] = []
+    basic_metrics["HSV_h060s"] = []
+    basic_metrics["HSV_h120s"] = []
+    basic_metrics["HSV_h180s"] = []
+    basic_metrics["HSV_h240s"] = []
+    basic_metrics["HSV_h300s"] = []
 
     # open rhe video file
     cap = cv2.VideoCapture(video_path)
@@ -559,19 +579,13 @@ def process_video_to_midi(video_path,
     cap.release()
 
     #now compute derivative metrics that are computed after all frames are processed
-    basic_metrics["HSV_monochrome"] = np.array(basic_metrics["HSV_monochrome"])
-    basic_metrics["HSV_hue000-std"] = np.array(basic_metrics["HSV_hue000-std"])
-    basic_metrics["HSV_hue060-std"] = np.array(basic_metrics["HSV_hue060-std"])
-    basic_metrics["HSV_hue120-std"] = np.array(basic_metrics["HSV_hue120-std"])
-    basic_metrics["HSV_hue180-std"] = np.array(basic_metrics["HSV_hue180-std"])
-    basic_metrics["HSV_hue240-std"] = np.array(basic_metrics["HSV_hue240-std"])
-    basic_metrics["HSV_hue300-std"] = np.array(basic_metrics["HSV_hue300-std"])
-    basic_metrics["HSV_hue000-int"] = (180 - basic_metrics["HSV_hue000-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])
-    basic_metrics["HSV_hue060-int"] = (180 - basic_metrics["HSV_hue060-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])   
-    basic_metrics["HSV_hue120-int"] = (180 - basic_metrics["HSV_hue120-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])    
-    basic_metrics["HSV_hue180-int"] = (180 - basic_metrics["HSV_hue180-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])   
-    basic_metrics["HSV_hue240-int"] = (180 - basic_metrics["HSV_hue240-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])   
-    basic_metrics["HSV_hue300-int"] = (180 - basic_metrics["HSV_hue300-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])
+    basic_metrics["HSV_monos"] = np.array(basic_metrics["HSV_monos"])
+    diff_monos = np.max(basic_metrics["HSV_monos"]) - basic_metrics["HSV_monos"]
+
+    for key in ["HSV_h000s", "HSV_h060s", "HSV_h120s", "HSV_h180s", "HSV_h240s", "HSV_h300s"]:
+        basic_metrics[key] = np.array(basic_metrics[key])
+        basic_metrics[key + "i"] = (180 - basic_metrics[key]) * diff_monos
+
 
     # normalize all metrics to be between 0 and 1, with a percentile mapping
     #iterate over copy to avoid modifying the dictionary while iterating
@@ -697,7 +711,7 @@ subdir_name = "Mz3DllgimbrV2" # output prefix
 #subdir_name = "JuliaInJulia" # output prefix
 video_file = "MzUL2-5jm3f.wmv"
 subdir_name = "MzUL2-5jm3f_3" # output prefix
-video_file = "WhatsApp Video 2023-09-06 at 7.38.17 AM.mp4"
+#video_file = "WhatsApp Video 2023-09-06 at 7.38.17 AM.mp4"
 subdir_name = "WhatsApp" # output prefix
 
 process_video_to_midi(video_file, 
@@ -705,7 +719,7 @@ process_video_to_midi(video_file,
                       frames_per_second=30, 
                       beats_per_frame=2,
                       ticks_per_beat=480, 
-                      beats_per_minute=96,  
+                      beats_per_minute=92,  
                       cc_number=1, 
                       midi_channel=0,
                       downscale_factor1=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
