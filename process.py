@@ -559,6 +559,13 @@ def process_video_to_midi(video_path,
     cap.release()
 
     #now compute derivative metrics that are computed after all frames are processed
+    basic_metrics["HSV_monochrome"] = np.array(basic_metrics["HSV_monochrome"])
+    basic_metrics["HSV_hue000-std"] = np.array(basic_metrics["HSV_hue000-std"])
+    basic_metrics["HSV_hue060-std"] = np.array(basic_metrics["HSV_hue060-std"])
+    basic_metrics["HSV_hue120-std"] = np.array(basic_metrics["HSV_hue120-std"])
+    basic_metrics["HSV_hue180-std"] = np.array(basic_metrics["HSV_hue180-std"])
+    basic_metrics["HSV_hue240-std"] = np.array(basic_metrics["HSV_hue240-std"])
+    basic_metrics["HSV_hue300-std"] = np.array(basic_metrics["HSV_hue300-std"])
     basic_metrics["HSV_hue000-int"] = (180 - basic_metrics["HSV_hue000-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])
     basic_metrics["HSV_hue060-int"] = (180 - basic_metrics["HSV_hue060-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])   
     basic_metrics["HSV_hue120-int"] = (180 - basic_metrics["HSV_hue120-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])    
