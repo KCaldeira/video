@@ -422,12 +422,12 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
     basic_metrics["HSV_monochrome"] = weighted_circular_std_deg(h, s)
 
     # measure the degree to which the hue is close to each of the 6 cardinal hues
-    basic_metrics["HSV_hue000_std"] = np.mean(((h - 180) % 360)**2)**(1/2)
-    basic_metrics["HSV_hue060_std"] = np.mean(((h - 120) % 360)**2)**(1/2)
-    basic_metrics["HSV_hue120_std"] = np.mean(((h - 60) % 360)**2)**(1/2)
-    basic_metrics["HSV_hue180_std"] = np.mean(((h - 0) % 360)**2)**(1/2)    
-    basic_metrics["HSV_hue240_std"] = np.mean(((h - 300) % 360)**2)**(1/2)  
-    basic_metrics["HSV_hue300_std"] = np.mean(((h - 240) % 360)**2)**(1/2)
+    basic_metrics["HSV_hue000-std"] = np.mean((((h + 180 - 0) % 360) - 180)**2)**(1/2)
+    basic_metrics["HSV_hue060-std"] = np.mean((((h + 180 - 60) % 360) - 180)**2)**(1/2)
+    basic_metrics["HSV_hue120-std"] = np.mean((((h + 180 - 120) % 360) - 180)**2)**(1/2)
+    basic_metrics["HSV_hue180-std"] = np.mean((((h + 180 - 180) % 360) - 180)**2)**(1/2)    
+    basic_metrics["HSV_hue240-std"] = np.mean((((h + 180 - 240) % 360) - 180)**2)**(1/2)  
+    basic_metrics["HSV_hue300-std"] = np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
 
     return basic_metrics
 
