@@ -3,6 +3,34 @@ import cv2 as cv
 import numpy as np
 import os
 
+import numpy
+import cv2
+
+def test_hough_circle(image):
+
+    output = image.copy()
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    hist = cv2.equalizeHist(gray)
+
+    blur = cv2.GaussianBlur(hist, (31,31), cv2.BORDER_DEFAULT)
+    height, width = blur.shape[:2]
+
+    minR = round(width/65)
+    maxR = round(width/11)
+    minDis = round(width/7)
+
+    circles = cv2.HoughCircles(blur, cv2.HOUGH_GRADIENT, 1, minDis, param1=14, param2=25, minRadius=minR, maxRadius=maxR)
+
+    if circles is not None:
+        circles = numpy.round(circles[0, :]).astype("int")
+        for (x, y, r) in circles:
+            cv2.circle(output, (x, y), r, (0, 255, 0), 2)
+            cv2.rectangle(output, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
+    cv2.imshow("result", numpy.hstack([image, output]))
+    cv2.waitKey()
+
 def test_radial_symmetry(image, center_x, center_y, max_radius=None, num_angles=36):
     """
     Test radial symmetry around a specified point in an image.
@@ -87,11 +115,11 @@ def houghCircleTransform(dp=2, minDist=10, param1=100, param2=2, minRadius=0, ma
     imgRGB = cv.cvtColor(cv.imread(imgPath), cv.COLOR_BGR2RGB)
     imgGray = cv.cvtColor(imgRGB, cv.COLOR_BGR2GRAY)
 
-    #imgGray = cv.medianBlur(imgGray, 21)
+    imgGray = cv.medianBlur(imgGray, 21)
 
     # Process each set of circles and calculate confidence
     for imageChannel, color in [(imgGray, 'Gray'), (imgRGB[0], 'Red'), (imgRGB[1], 'Green'), (imgRGB[2], 'Blue')]:
-        circle_set = cv.HoughCircles(imageChannel, cv.HOUGH_GRADIENT, dp, minDist=minDist, param1=param1, 
+        circle_set = cv.HoughCircles(cv.equalizeHist(cv.medianBlur(imageChannel, 21))  , cv.HOUGH_GRADIENT, dp, minDist=minDist, param1=param1, 
                                     param2=param2, minRadius=minRadius, maxRadius=maxRadius)
         if circle_set is not None:
             print(f"\n{color} channel circles:")
@@ -133,4 +161,12 @@ def houghCircleTransform(dp=2, minDist=10, param1=100, param2=2, minRadius=0, ma
     plt.show()
 
 if __name__ == '__main__':
-    houghCircleTransform(dp=2, minDist=100, param1=50, param2=30, minRadius=200, maxRadius=1500)
+ 
+    houghCircleTransform(dp=2, minDist=200, param1=200, param2=200, minRadius=200, maxRadius=2000)
+    """
+    root = os.getcwd()
+    imgPath = os.path.join(root, "Screenshot 2025-04-25 132550.png")
+    imgRGB = cv.cvtColor(cv.imread(imgPath), cv.COLOR_BGR2RGB)
+    imgGray = cv.cvtColor(imgRGB, cv.COLOR_BGR2GRAY)
+    test_hough_circle(imgGray)
+    """

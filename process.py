@@ -23,20 +23,20 @@ from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from collections import defaultdict
 
-def information_metric(color_channel, downscale_factor=4):
+def information_metric(color_channel, downscale_factor1):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
     
     frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
+    downscale_factor1: how much to shrink (e.g., 4 means 1/4 size)
     """
 
     # Original size
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
     restored = cv2.resize(downscaled, (w, h), interpolation=cv2.INTER_LINEAR)
 
     # Compute mean squared error (MSE) between original and restored image
@@ -49,20 +49,20 @@ def information_metric(color_channel, downscale_factor=4):
 
     return normalized_mse
 
-def tranpose_metric(color_channel, downscale_factor=4):
+def tranpose_metric(color_channel, downscale_factor1=4):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
     
     frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
+    downscale_factor1: how much to shrink (e.g., 4 means 1/4 size)
     """
 
     # Original size
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
 
     # Compute mean squared error (MSE) between original and restored image
     mse = np.mean((downscaled - downscaled[::-1,::-1]) ** 2)
@@ -74,20 +74,20 @@ def tranpose_metric(color_channel, downscale_factor=4):
 
     return normalized_mse
 
-def reflect_metric(color_channel, downscale_factor=4):
+def reflect_metric(color_channel, downscale_factor1=4):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
     
     frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
+    downscale_factor1: how much to shrink (e.g., 4 means 1/4 size)
     """
 
     # Original size
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
 
     # Compute mean squared error (MSE) between original and vertically reflected image
     mse0 = np.mean((downscaled - downscaled[::-1]) ** 2)
@@ -102,7 +102,7 @@ def reflect_metric(color_channel, downscale_factor=4):
 
     return normalized_mse
 
-def radial_symmetry_metric(color_channel, scale_factor):
+def radial_symmetry_metric(color_channel, dowscale_factor):
     """
     Compute radial symmetry metric for a color channel with distance bins of width `scale_factor`.
     """
@@ -115,7 +115,7 @@ def radial_symmetry_metric(color_channel, scale_factor):
     r = np.sqrt((x - center_x)**2 + (y - center_y)**2)
 
     # Step 2b: Bin distances into scale_factor-wide bins
-    r_bin = (r / scale_factor).astype(np.int32)
+    r_bin = (r / dowscale_factor).astype(np.int32)
 
     # Step 3: Compute mean value for each radial bin
     max_bin = r_bin.max()
@@ -134,14 +134,14 @@ def radial_symmetry_metric(color_channel, scale_factor):
     return np.var(radial_mean)
 
 
-def lines_metric(color_channel, resolution_reduction):
+def lines_metric(color_channel_original):
     """
     Detect straight lines in a color channel using Probabilistic Hough Transform.
     Returns metrics indicating the presence, length, and robustness of straight lines.
     
     Parameters:
     - color_channel: color channel
-    - resolution_reduction: Scale factor for downscaling before detection
+    - downscale_factor1: Scale factor for downscaling before detection
     
     Returns:
     - line_metrics: Dictionary containing:
@@ -149,17 +149,24 @@ def lines_metric(color_channel, resolution_reduction):
         - 'length': Average length of detected lines (normalized 0-1)
         - 'robustness': How well the detected lines match actual edges (normalized 0-1)
     """
+    # copy the color channel
+    color_channel = color_channel_original.copy()
+    
     # Convert to uint8 if needed and scale to 0-255 range
     if color_channel.dtype != np.uint8:
-        color_channel = (color_channel * 255).astype(np.uint8)
+        if np.max(color_channel) > 1:
+            color_channel = (color_channel / 255.0).astype(np.uint8)
+        else:
+            color_channel = color_channel.astype(np.uint8)
+
+    color_channel = cv2.equalizeHist(cv2.GaussianBlur(color_channel, (21,21), 0))
+
     
     # Downscale the image to reduce noise and computation time
     h, w = color_channel.shape
-    downscaled = cv2.resize(color_channel, (w // resolution_reduction, h // resolution_reduction), 
-                           interpolation=cv2.INTER_AREA)
     
     # Apply edge detection
-    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
+    edges = cv2.Canny(color_channel, 50, 150, apertureSize=3)
     
     # Detect line segments using Probabilistic Hough Transform
     lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=50,
@@ -210,14 +217,35 @@ def lines_metric(color_channel, resolution_reduction):
         
     return non_normalized_line_metric
 
-def circle_metrics(color_channel, resolution_reduction):
+def weighted_std(values, weights):
+    """
+    Calculate weighted standard deviation
+    
+    Parameters:
+    - values: array of values
+    - weights: array of weights (must be same length as values)
+    
+    Returns:
+    - weighted standard deviation
+    """
+    # Calculate weighted mean
+    weighted_mean = np.average(values, weights=weights)
+    
+    # Calculate weighted variance
+    weighted_variance = np.average((values - weighted_mean)**2, weights=weights)
+    
+    # Return standard deviation (square root of variance)
+    return np.sqrt(weighted_variance)
+
+def error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2):
     """
     Detect circles in a color channel using Hough Transform.
     Returns metrics indicating the presence, size, and robustness of circles.
     
     Parameters:
     - color_channel: color channel
-    - resolution_reduction: Scale factor for downscaling before detection
+    - downscale_factor1: Scale factor for downscaling before detection
+    - downscale_factor2: Scale factor for downscaling before detection
     
     Returns:
     - non_normalized_circle_metric0: Sum of circle confidences
@@ -227,96 +255,52 @@ def circle_metrics(color_channel, resolution_reduction):
     - area_circles: Total area of detected circles
     - circle_confidences: List of confidence values for each circle
     """
-    # Convert to uint8 if needed and scale to 0-255 range
-    if color_channel.dtype != np.uint8:
-        color_channel = (color_channel * 255).astype(np.uint8)
-    
-    # Downscale the image to reduce noise and computation time
-    h, w = color_channel.shape
-    downscaled = cv2.resize(color_channel, (w // resolution_reduction, h // resolution_reduction), 
-                           interpolation=cv2.INTER_AREA)
-    
-    # Apply edge detection
-    edges = cv2.Canny(downscaled, 50, 150, apertureSize=3)
-    
-    # Detect circles using Hough Transform
-    # param1: Upper threshold for edge detection
-    # param2: Threshold for circle detection (lower = more circles, higher = more robust)
-    h0, w0 = downscaled.shape
-    min_radius = min(h0, w0) // 10 # min radius is 1/10 of the smaller dimension of the image
-    max_radius = min(h0, w0) // 2 # max radius is 1/2 of the smaller dimension of the image
-    
-    # First call to get circles with confidence values
-    circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
-                              param1=50, param2=30, minRadius=min_radius, maxRadius=max_radius)
-    
-    if circles is None:
-        return 0.0, 0.0, 0.0, 0, 0, [] #no circles detected
-    
-    # Convert circles to numpy array for easier processing
-    circles = np.uint16(np.around(circles))
-    
-    # Calculate metrics
-    num_circles = len(circles[0])
-    circle_radii = []
-    circle_robustness = []
-    circle_confidences = []
-    
-    # Create a mask for edge points
-    edge_points = np.where(edges > 0)
-    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
-    
-    for circle in circles[0]:
-        x, y, r = circle
-        
-        # Store radius
-        circle_radii.append(r)
-        
-        # Calculate robustness by checking how many edge points lie on the circle
-        if len(edge_coords) > 0:
-            # Calculate distance from each edge point to circle center
-            distances = np.sqrt((edge_coords[:,0] - x)**2 + (edge_coords[:,1] - y)**2)
-            
-            # Count points within 2 pixels of the circle circumference
-            nearby_points = np.sum(np.abs(distances - r) <= 2.0)
-            
-            # Normalize by circumference to get points per unit length
-            circumference = 2 * np.pi * r
-            points_per_length = nearby_points / (circumference + 1e-6)  # avoid division by zero
-            circle_robustness.append(points_per_length)
-            
-            # Calculate confidence based on edge support
-            # This combines both the Hough accumulator value and the edge support
-            confidence = points_per_length * (nearby_points / (circumference + 1e-6))
-            circle_confidences.append(confidence)
-        else:
-            circle_robustness.append(0.0)
-            circle_confidences.append(0.0)
-    
-    # Non-normalized metrics weighted by confidence
-    non_normalized_circle_metric0 = np.sum(np.array(circle_confidences))
-    non_normalized_circle_metric2 = np.sum(np.array(circle_radii)**2 * np.array(circle_confidences))
-    non_normalized_circle_metric4 = np.sum(np.array(circle_radii)**4 * np.array(circle_confidences))
 
-    n_circles = len(circle_radii)
-    area_circles = np.sum(np.pi * np.array(circle_radii)**2)
-    
-    return non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles, circle_confidences
+    h, w = color_channel.shape[0:2]
 
-def bgr_to_cmyk(b, g, r):
-    """
-    Convert BGR to CMYK color space.
-    """
-    b = b.astype(float) / 255.0
-    g = g.astype(float) / 255.0
-    r = r.astype(float) / 255.0
+    # Downscale and then upscale
+    downscaled1  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
+    restored1 = cv2.resize(downscaled1, (w, h), interpolation=cv2.INTER_LINEAR)
+    downscaled2  = cv2.resize(color_channel, (w // downscale_factor2, h // downscale_factor2), interpolation=cv2.INTER_AREA)
+    restored2 = cv2.resize(downscaled2, (w, h), interpolation=cv2.INTER_LINEAR)
 
-    k = 1 - np.max([b, g, r], axis=0) # 1 if black or highest color intensity, 0 if white
-    c = (1 - b - k) / (1 - k + 1e-10)
-    m = (1 - g - k) / (1 - k + 1e-10)
-    y = (1 - r - k) / (1 - k + 1e-10)
+    xvals = np.arange(0, w)
+    yvals = np.arange(0, h)
 
-    return c, m, y, k
+    centerx = w/2
+    centery = h/2   
+
+    X, Y = np.meshgrid(xvals, yvals)
+
+    # what is the magnitude of the lowres error?
+    # how far is the lowres error from the center of the image?
+    # how far is the highres error from the center of the image?
+    # how dispersed is the low res error around the center of the low res error?
+    # how dispersed is the high res error around the center of the high res error?
+
+    sqerror1 = (color_channel - restored1) ** 2
+    sqerror2 = (restored1 - restored2) ** 2
+
+    # Compute mean squared error (MSE) between original and restored image
+    meanx1 = np.average( X, weights= sqerror1)
+    meanx2 = np.average( X, weights= sqerror2)
+    meany1 = np.average( Y, weights= sqerror1)
+    meany2 = np.average( Y, weights= sqerror2)
+
+    stddevx1 = weighted_std( X, sqerror1)
+    stddevx2 = weighted_std( X, sqerror2)
+    stddevy1 = weighted_std( Y, sqerror1)
+    stddevy2 = weighted_std( Y, sqerror2)
+
+    mnsqerror1 = np.average(sqerror1)
+    mnsqerror2 = np.average(sqerror2)
+    dist1 = np.sqrt((meanx1 - centerx)**2 + (meany1 - centery)**2)
+    dist2 = np.sqrt((meanx2 - centerx)**2 + (meany2 - centery)**2)
+    stdev1 = np.sqrt(stddevx1**2 + stddevy1**2)
+    stdev2 = np.sqrt(stddevx2**2 + stddevy2**2)
+
+    return mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2
+
 
 def bgr_to_hsv(b, g, r):
     """
@@ -387,7 +371,7 @@ def scale_data(data):
     return scaled_data
 
 
-def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
+def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
     """
     Compute different intensity-based metrics on R, G, B, and color channels.
     Returns a dictionary of results.
@@ -396,31 +380,28 @@ def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
     
     b, g, r = cv2.split(frame)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    c, m, y, k = bgr_to_cmyk(b, g, r)
     h, s, v = bgr_to_hsv(b, g, r)
 
     # Split into R, G, B channels
     for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
-                                ("C", c), ("M", m), ("Y", y), ("K", k),
                                 ("Gray", gray),("V", v)]:
         avg_intensity = np.mean(color_channel)
         variance = np.var(color_channel)
 
         # 1 means all information is at finer spatial scales,
         # 0 means all information is at coarser spatial scales
-        large_scale_info = information_metric(color_channel, scale_boundary) # fraction info at small and medium scales
+        large_scale_info = information_metric(color_channel, downscale_factor1) # fraction info at small and medium scales
 
-        transpose_metric_value = tranpose_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
+        transpose_metric_value = tranpose_metric(color_channel, downscale_factor1) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        reflect_metric_value = reflect_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
+        reflect_metric_value = reflect_metric(color_channel, downscale_factor1) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, scale_boundary) # degree of symmettry for flipping around the center point
+        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_factor1) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
         # Add line detection metrics
-        line_metric_value = lines_metric(color_channel, resolution_reduction)
+        line_metric_value = lines_metric(color_channel)
         # Add circle detection metrics
-
-        non_normalized_circle_metric0, non_normalized_circle_metric2, non_normalized_circle_metric4, n_circles, area_circles, circle_confidences = circle_metrics(color_channel, resolution_reduction)
+        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2)
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -430,15 +411,23 @@ def compute_basic_metrics(frame, scale_boundary, resolution_reduction):
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
         basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
-        basic_metrics[f"{color_channel_name}_ci0"] = non_normalized_circle_metric0
-        basic_metrics[f"{color_channel_name}_ci2"] = non_normalized_circle_metric2  
-        basic_metrics[f"{color_channel_name}_ci4"] = non_normalized_circle_metric4
-        basic_metrics[f"{color_channel_name}_cin"] = n_circles
-        basic_metrics[f"{color_channel_name}_cia"] = area_circles
-        basic_metrics[f"{color_channel_name}_cic"] = np.mean(circle_confidences) if circle_confidences else 0.0
+        basic_metrics[f"{color_channel_name}_ee1"] = mnsqerror1  # mean squared error of low res
+        basic_metrics[f"{color_channel_name}_ee2"] = mnsqerror2  # mean squared error of high res
+        basic_metrics[f"{color_channel_name}_ed1"] = dist1  # distance of low res error from center of image
+        basic_metrics[f"{color_channel_name}_ed2"] = dist2  # distance of high res error from center of image
+        basic_metrics[f"{color_channel_name}_es1"] = stdev1  # standard deviation of low res error
+        basic_metrics[f"{color_channel_name}_es2"] = stdev2
 
-    #monochromicity metric is the standard deviation of hue weighted by saturation
-    basic_metrics["HSV_monochromicity"] = weighted_circular_std_deg(h, s) 
+    #monochrome metric is the standard deviation of hue weighted by saturation
+    basic_metrics["HSV_monochrome"] = weighted_circular_std_deg(h, s)
+
+    # measure the degree to which the hue is close to each of the 6 cardinal hues
+    basic_metrics["HSV_hue000_std"] = np.mean(((h - 180) % 360)**2)**(1/2)
+    basic_metrics["HSV_hue060_std"] = np.mean(((h - 120) % 360)**2)**(1/2)
+    basic_metrics["HSV_hue120_std"] = np.mean(((h - 60) % 360)**2)**(1/2)
+    basic_metrics["HSV_hue180_std"] = np.mean(((h - 0) % 360)**2)**(1/2)    
+    basic_metrics["HSV_hue240_std"] = np.mean(((h - 300) % 360)**2)**(1/2)  
+    basic_metrics["HSV_hue300_std"] = np.mean(((h - 240) % 360)**2)**(1/2)
 
     return basic_metrics
 
@@ -494,8 +483,8 @@ def process_video_to_midi(video_path,
                           beats_per_minute, 
                           cc_number, 
                           midi_channel,
-                          scale_boundary,
-                          resolution_reduction,
+                          downscale_factor1,
+                          downscale_factor2,
                           filter_width):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
@@ -508,8 +497,8 @@ def process_video_to_midi(video_path,
     :param beats_per_minute (number of beats per minute in DAW)
     :param cc_number: MIDI CC number (default 7 for volume).
     :param channel: MIDI channel (0-15).
-    :param scale_boundary: spatial scale for computing metrics
-    :param resolution_reduction: resolution reduction for computing metrics
+    :param downscale_factor1: spatial scale for computing metrics
+    :param downscale_factor2: resolution reduction for computing metrics
     :param filter_width: width of boxcar filter for smoothing
 
     """
@@ -528,12 +517,18 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin", "ci0", "ci2", "ci4", "cin", "cia", "cic"]
-    color_channel_names = ["R", "G", "B", "C", "M", "Y", "K", "Gray","V"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2"]
+    color_channel_names = ["R", "G", "B", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
-    # add metric that is outside of the normal grouping
-    basic_metrics["HSV_monochromicity"] = []
+    # add metrics that are outside of the normal grouping
+    basic_metrics["HSV_monochrome"] = []
+    basic_metrics["HSV_hue000_std"] = []
+    basic_metrics["HSV_hue060_std"] = []
+    basic_metrics["HSV_hue120_std"] = []
+    basic_metrics["HSV_hue180_std"] = []
+    basic_metrics["HSV_hue240_std"] = []
+    basic_metrics["HSV_hue300_std"] = []
 
     # open rhe video file
     cap = cv2.VideoCapture(video_path)
@@ -553,7 +548,7 @@ def process_video_to_midi(video_path,
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
 
-            metric_results = compute_basic_metrics(frame, scale_boundary, resolution_reduction)
+            metric_results = compute_basic_metrics(frame, downscale_factor1, downscale_factor2)
 
             #append to the dictionary of results
             for key, value in metric_results.items():
@@ -583,41 +578,12 @@ def process_video_to_midi(video_path,
         metrics[f"{key}-Ppos"] = normalized_metric
         metrics[f"{key}-Pneg"] = (1.-normalized_metric)
 
-    """
-    metric_name_list = list({
-        key.split("_", 1)[1]
-        for key in metrics
-        if key.startswith(("R_", "G_", "B_","C_", "M_", "Y_"))})
-
-    # create derived metrics that involve combining color channels
-    for metric_name in metric_name_list:
-
-        r = metrics[f"R_{metric_name}"]
-        g = metrics[f"G_{metric_name}"]
-        b = metrics[f"B_{metric_name}"]
-        c = metrics[f"C_{metric_name}"]
-        m = metrics[f"M_{metric_name}"]
-        y = metrics[f"Y_{metric_name}"]
-
-        minRGB = np.minimum.reduce([r, g, b], axis=0)
-        metrics[f"minRGB_{metric_name}"] = minRGB
-
-        minCMY = np.minimum.reduce([c, m, y], axis=0)
-        metrics[f"minCMY_{metric_name}"] = minCMY
-
-        maxRGB = np.maximum.reduce([r, g, b], axis=0)
-        metrics[f"maxRGB_{metric_name}"] = maxRGB
-
-        maxCMY = np.maximum.reduce([c, m, y], axis=0)
-        metrics[f"maxCMY_{metric_name}"] = maxCMY
-
-    """
     
     metrics_copy = metrics.copy()
     for key, values in metrics_copy.items():    
         # add square and square root of metric to give different scaling choices
-        metrics[f"{key}-05"] = np.sqrt(values)
-        metrics[f"{key}-2"] = np.square(values)
+        #metrics[f"{key}-05"] = np.sqrt(values)
+        #metrics[f"{key}-2"] = np.square(values)
         #metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-values))  
         #metrics[f"{key}-Nsquare"] = (1.-np.square(1.-values))
         metrics[f"{key}-025"] = np.power(values,0.25)
@@ -718,6 +684,8 @@ subdir_name = "Mz3DllgimbrV2" # output prefix
 #subdir_name = "JuliaInJulia" # output prefix
 video_file = "MzUL2-5jm3f.wmv"
 subdir_name = "MzUL2-5jm3f_3" # output prefix
+video_file = "WhatsApp Video 2023-09-06 at 7.38.17 AM.mp4"
+subdir_name = "WhatsApp" # output prefix
 
 process_video_to_midi(video_file, 
                       subdir_name, # output prefix
@@ -727,8 +695,8 @@ process_video_to_midi(video_file,
                       beats_per_minute=96,  
                       cc_number=1, 
                       midi_channel=0,
-                      scale_boundary=12, # scale boundary means divide so 12x12 pixels in a cell
-                      resolution_reduction=6, # resolution reduction means divide so 12x12 pixels in a cell
+                      downscale_factor1=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
+                      downscale_factor2=10, # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
                       filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
 # process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
