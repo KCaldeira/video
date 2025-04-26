@@ -523,12 +523,12 @@ def process_video_to_midi(video_path,
                for color_channel_name in color_channel_names for metric_name in metric_names}
     # add metrics that are outside of the normal grouping
     basic_metrics["HSV_monochrome"] = []
-    basic_metrics["HSV_hue000_std"] = []
-    basic_metrics["HSV_hue060_std"] = []
-    basic_metrics["HSV_hue120_std"] = []
-    basic_metrics["HSV_hue180_std"] = []
-    basic_metrics["HSV_hue240_std"] = []
-    basic_metrics["HSV_hue300_std"] = []
+    basic_metrics["HSV_hue000-std"] = []
+    basic_metrics["HSV_hue060-std"] = []
+    basic_metrics["HSV_hue120-std"] = []
+    basic_metrics["HSV_hue180-std"] = []
+    basic_metrics["HSV_hue240-std"] = []
+    basic_metrics["HSV_hue300-std"] = []
 
     # open rhe video file
     cap = cv2.VideoCapture(video_path)
@@ -559,6 +559,12 @@ def process_video_to_midi(video_path,
     cap.release()
 
     #now compute derivative metrics that are computed after all frames are processed
+    basic_metrics["HSV_hue000-int"] = (180 - basic_metrics["HSV_hue000-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])
+    basic_metrics["HSV_hue060-int"] = (180 - basic_metrics["HSV_hue060-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])   
+    basic_metrics["HSV_hue120-int"] = (180 - basic_metrics["HSV_hue120-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])    
+    basic_metrics["HSV_hue180-int"] = (180 - basic_metrics["HSV_hue180-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])   
+    basic_metrics["HSV_hue240-int"] = (180 - basic_metrics["HSV_hue240-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])   
+    basic_metrics["HSV_hue300-int"] = (180 - basic_metrics["HSV_hue300-std"]) * (np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"])
 
     # normalize all metrics to be between 0 and 1, with a percentile mapping
     #iterate over copy to avoid modifying the dictionary while iterating
