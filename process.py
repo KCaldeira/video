@@ -280,13 +280,10 @@ def error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2
     # _std is the standard deviation of the variability of the channel.
     # now let's see what is the standard deviation 
     info_total = np.var(color_channel)
-    info_large = 1. - (color_channel - restored1)**2 / info_total**2 # fraction of variance in large scale
-    info_medium = (restored1 - restored2)**2 / info_total**2 # fraction of variance in medium scale
-    info_small = (color_channel - restored2)**2 / info_total**2 # fraction of variance in small scale
+    info_large = (restored1 - np.mean(color_channel))**2 / info_total # fraction of variance in large scale
+    info_medium = (restored1 - restored2)**2 / info_total # fraction of variance in medium scale
+    info_small = (color_channel - restored2)**2 / info_total # fraction of variance in small scale
 
-    sqerror1 = (restored1 - np.mean(color_channel)) ** 2 # hor much variance is in departure of large scale from mean
-    sqerror2 = (restored2 - restored1) ** 2 # how much variance is in departure of medium scale from large scale
-    sqerror3 = (color_channel - restored2) ** 2 # how much variance is in the departure of the actual from the chigh res
 
     # Compute mean squared error (MSE) between original and restored image
     meanx1 = np.average( X, weights= info_large)
@@ -297,16 +294,16 @@ def error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2
     meany2 = np.average( Y, weights= info_medium)
     meany3 = np.average( Y, weights= info_small)
 
-    stddevx1 = weighted_std( X, sqerror1)
-    stddevx2 = weighted_std( X, sqerror2)
-    stddevx3 = weighted_std( X, sqerror3)
-    stddevy1 = weighted_std( Y, sqerror1)
-    stddevy2 = weighted_std( Y, sqerror2)
-    stddevy3 = weighted_std( Y, sqerror3)
+    stddevx1 = weighted_std( X, info_large)
+    stddevx2 = weighted_std( X, info_medium)
+    stddevx3 = weighted_std( X, info_small)
+    stddevy1 = weighted_std( Y, info_large)
+    stddevy2 = weighted_std( Y, info_medium)
+    stddevy3 = weighted_std( Y, info_small)
 
-    mnsqerror1 = np.average(sqerror1)
-    mnsqerror2 = np.average(sqerror2)
-    mnsqerror3 = np.average(sqerror3)
+    mnsqerror1 = np.average(info_large)
+    mnsqerror2 = np.average(info_medium)
+    mnsqerror3 = np.average(info_small)
 
     dist1 = np.sqrt((meanx1 - centerx)**2 + (meany1 - centery)**2)
     dist2 = np.sqrt((meanx2 - centerx)**2 + (meany2 - centery)**2)
@@ -584,7 +581,9 @@ def process_video_to_midi(video_path,
 
     for key in ["HSV_h000s", "HSV_h060s", "HSV_h120s", "HSV_h180s", "HSV_h240s", "HSV_h300s"]:
         basic_metrics[key] = np.array(basic_metrics[key])
-        basic_metrics[key + "i"] = (180 - basic_metrics[key]) * diff_monos
+        # replace trailing s in key with i      
+        key_i = key.replace("s", "i") # i for intensity !
+        basic_metrics[key_i] = (180 - basic_metrics[key]) * diff_monos
 
 
     # normalize all metrics to be between 0 and 1, with a percentile mapping
@@ -700,8 +699,8 @@ def process_video_to_midi(video_path,
 
 
 # Example usage
-video_file = "Mz3DllgimbrV2.wmv"  #  small test video file
-subdir_name = "Mz3DllgimbrV2" # output prefix
+#video_file = "Mz3DllgimbrV2.wmv"  #  small test video file
+#subdir_name = "Mz3DllgimbrV2" # output prefix
 #video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
 #video_file = "Mz3DllgimbrV2B.wmv"
 #subdir_name = "Mz3DllgimbrV2B" # output prefix
@@ -710,9 +709,9 @@ subdir_name = "Mz3DllgimbrV2" # output prefix
 #video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
 #subdir_name = "JuliaInJulia" # output prefix
 video_file = "MzUL2-5jm3f.wmv"
-subdir_name = "MzUL2-5jm3f_3" # output prefix
+subdir_name = "MzUL2-5jm3f" # output prefix
 #video_file = "WhatsApp Video 2023-09-06 at 7.38.17 AM.mp4"
-subdir_name = "WhatsApp" # output prefix
+#subdir_name = "WhatsApp" # output prefix
 
 process_video_to_midi(video_file, 
                       subdir_name, # output prefix
