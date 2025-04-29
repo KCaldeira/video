@@ -68,7 +68,7 @@ def tranpose_metric(color_channel, downscale_factor1=4):
     mse = np.mean((downscaled - downscaled[::-1,::-1]) ** 2)
 
     # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse = 1 - mse / np.var(downscaled) 
+    normalized_mse = 1 - mse / np.var(color_channel) 
     # 1 means perfect symmetry at this scale 
     # 0 means no symmetry at this scale
 
@@ -363,26 +363,7 @@ def weighted_circular_std_deg(hue, saturation):
     return np.rad2deg(np.sqrt(-2 * np.log(R_w)))
 
 
-def percentile_data(data):
-    """
-    Transform the vector <data> into a percentile list where 0 is the lowest and 1 the highest.
-    """
-    ranks = rankdata(data, method='average')
-    percentiles = (ranks-1) / (len(data)-1)
-    return percentiles
 
-
-def scale_data(data):
-    """
-    Scale the vector <data> so that 0 is the lowest and 1 the highest.
-    """
-    min_val = np.min(data)
-    max_val = np.max(data)
-    if max_val > min_val:
-        scaled_data = (data - min_val) / (max_val - min_val)
-    else:
-        scaled_data = np.zeros_like(data)
-    return scaled_data
 
 
 def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
@@ -406,11 +387,11 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         # 0 means all information is at coarser spatial scales
         large_scale_info = information_metric(color_channel, downscale_factor1) # fraction info at small and medium scales
 
-        transpose_metric_value = tranpose_metric(color_channel, downscale_factor1) # degree of symmettry for flipping around the center point
+        transpose_metric_value = tranpose_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        reflect_metric_value = reflect_metric(color_channel, downscale_factor1) # degree of symmettry for flipping around the center point
+        reflect_metric_value = reflect_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_factor1) # degree of symmettry for flipping around the center point
+        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel)
@@ -447,27 +428,6 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
     basic_metrics["HSV_h300s"] = np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
 
     return basic_metrics
-
-def triangular_filter_odd(data, N):
-    if N < 1:
-        raise ValueError("Filter length N must be at least 1.")
-    if N % 2 == 0:
-        raise ValueError("Triangular filter requires odd N.")
-
-    data = np.asarray(data)
-    half_window = N // 2
-
-    # Create triangular weights
-    weights = np.arange(1, half_window + 2)
-    weights = np.concatenate([weights, weights[:-1][::-1]])
-    weights = weights / weights.sum()  # Normalize to sum to 1
-
-    # Pad data at both ends using edge values
-    padded = np.pad(data, pad_width=half_window, mode='edge')
-
-    # Apply convolution
-    filtered = np.convolve(padded, weights, mode='valid')
-    return filtered
 
 # Export metrics to CSV
 def export_metrics_to_csv(frame_count_list, metrics, filename):
@@ -586,114 +546,12 @@ def process_video_to_midi(video_path,
         basic_metrics[key_i] = (180 - basic_metrics[key]) * diff_monos
 
 
-    # normalize all metrics to be between 0 and 1, with a percentile mapping
-    #iterate over copy to avoid modifying the dictionary while iterating
-    metrics = {}
-    for key, values in basic_metrics.items():
-        metric = np.array(values)
-        # max_val = np.max(metric)
-        # min_val = np.min(metric)
-        # normalized_metric = (metric - min_val) / (max_val - min_val)
-        # scale data by rescaling metric form 0 to 1
-
-        scaled_metric = scale_data(metric)
-        metrics[f"{key}-pos"] = scaled_metric
-        metrics[f"{key}-neg"] = (1.-scaled_metric)
-        # rank the data and convert to percentiles
-        normalized_metric = percentile_data(metric)
-        metrics[f"{key}-Ppos"] = normalized_metric
-        metrics[f"{key}-Pneg"] = (1.-normalized_metric)
-
-    
-    metrics_copy = metrics.copy()
-    for key, values in metrics_copy.items():    
-        # add square and square root of metric to give different scaling choices
-        #metrics[f"{key}-05"] = np.sqrt(values)
-        #metrics[f"{key}-2"] = np.square(values)
-        #metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-values))  
-        #metrics[f"{key}-Nsquare"] = (1.-np.square(1.-values))
-        metrics[f"{key}-025"] = np.power(values,0.25)
-        metrics[f"{key}-4"] = np.power(values,4)
-        #metrics[f"{key}-Nqtr"] = (1.-np.power(1.-values,0.25))  
-        #metrics[f"{key}-Nfourth"] = (1.-np.power(1.-values,4))
-
-    # Smooth the data with a boxcar filter
-    if filter_width > 1:
-        for key, values in metrics.items():
-            metrics[key] = triangular_filter_odd(np.array(values), filter_width)    
-            
-    # renomalize between 0 and 1
-    for key, values in metrics.items():
-        metric = np.array(values)
-        # max_val = np.max(metric)
-        # min_val = np.min(metric)
-        # normalized_metric = (metric - min_val) / (max_val - min_val)
-        # scale data by rescaling metric form 0 to 1
-        scaled_metric = scale_data(metric)
-        metrics[key] = scaled_metric
-
-    # create inverse of each metric
-    metrics.update({f"{k}_inv": 1. - v for k, v in metrics.items()})
-
     # Export metrics to CSV
     csv_filename = f"{subdir_name}.csv"
-    export_metrics_to_csv(frame_count_list, metrics, csv_filename)
+    export_metrics_to_csv(frame_count_list, basic_metrics, csv_filename)
     print(f"Metrics exported to {csv_filename}")
 
-    if not os.path.exists(f"../video_midi/{subdir_name}"):
-        os.makedirs(f"../video_midi/{subdir_name}")
-
-    # Create MIDI files for each base metric
-    midi_files = {}
-
-    for key in metrics:
-        # Skip keys that are "_inv" variants
-        if key.endswith("_inv"):
-            continue
-
-        base_key = key
-        inv_key = f"{key}_inv"
-        
-        color_channel_name, metric_name = base_key.split("_", 1)
-        
-        # Initialize MIDI file and tracks
-        midi_file = MidiFile()
-        track_base = MidiTrack()
-        midi_file.tracks.append(track_base)
-
-        # Write base metric values
-        midi_val_base = [round(104 * val) for val in metrics[base_key]]
-
-        for i, midi_value in enumerate(midi_val_base):
-            time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-            track_base.append(
-                Message('control_change',
-                        control=cc_number,
-                        value=midi_value,
-                        channel=midi_channel,
-                        time=time_tick)
-            ) 
-
-        # If the inverse metric exists, add a second track for it
-        if inv_key in metrics:
-            track_inv = MidiTrack()
-            midi_file.tracks.append(track_inv)
-
-            midi_val_inv = [round(104 * val) for val in metrics[inv_key]]
-            for i, midi_value in enumerate(midi_val_inv):
-                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-                track_inv.append(
-                    Message('control_change',
-                            control=cc_number,
-                            value=midi_value,
-                            channel=midi_channel,
-                            time=time_tick)
-                )
-
-        # Save the MIDI file (one file per base key)
-        filename = f"../video_midi/{subdir_name}/{color_channel_name}_{metric_name}.mid"
-        midi_file.save(filename)
-
+    
 
 
 
