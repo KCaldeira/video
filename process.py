@@ -237,7 +237,7 @@ def weighted_std(values, weights):
     # Return standard deviation (square root of variance)
     return np.sqrt(weighted_variance)
 
-def error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2):
+def error_dispersion_metrics(color_channel, downscale_factor1):
     """
     Detect circles in a color channel using Hough Transform.
     Returns metrics indicating the presence, size, and robustness of circles.
@@ -261,8 +261,6 @@ def error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2
     # Downscale and then upscale
     downscaled1  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
     restored1 = cv2.resize(downscaled1, (w, h), interpolation=cv2.INTER_LINEAR)
-    downscaled2  = cv2.resize(color_channel, (w // downscale_factor2, h // downscale_factor2), interpolation=cv2.INTER_AREA)
-    restored2 = cv2.resize(downscaled2, (w, h), interpolation=cv2.INTER_LINEAR)
 
     xvals = np.arange(0, w)
     yvals = np.arange(0, h)
@@ -281,39 +279,33 @@ def error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2
     # now let's see what is the standard deviation 
     info_total = np.var(color_channel)
     info_large = (restored1 - np.mean(color_channel))**2 / info_total # fraction of variance in large scale
-    info_medium = (restored1 - restored2)**2 / info_total # fraction of variance in medium scale
-    info_small = (color_channel - restored2)**2 / info_total # fraction of variance in small scale
+    info_small = (color_channel - restored1)**2 / info_total # fraction of variance in small scale
 
 
     # Compute mean squared error (MSE) between original and restored image
     meanx1 = np.average( X, weights= info_large)
-    meanx2 = np.average( X, weights= info_medium)
-    meanx3 = np.average( X, weights= info_small)
+    meanx2 = np.average( X, weights= info_small)
  
     meany1 = np.average( Y, weights= info_large)
-    meany2 = np.average( Y, weights= info_medium)
-    meany3 = np.average( Y, weights= info_small)
+    meany2 = np.average( Y, weights= info_small)
 
     stddevx1 = weighted_std( X, info_large)
-    stddevx2 = weighted_std( X, info_medium)
-    stddevx3 = weighted_std( X, info_small)
+    stddevx2 = weighted_std( X, info_small)
     stddevy1 = weighted_std( Y, info_large)
-    stddevy2 = weighted_std( Y, info_medium)
-    stddevy3 = weighted_std( Y, info_small)
+    stddevy2 = weighted_std( Y, info_small)
 
     mnsqerror1 = np.average(info_large)
-    mnsqerror2 = np.average(info_medium)
-    mnsqerror3 = np.average(info_small)
+    mnsqerror2 = np.average(info_small)
 
     dist1 = np.sqrt((meanx1 - centerx)**2 + (meany1 - centery)**2)
     dist2 = np.sqrt((meanx2 - centerx)**2 + (meany2 - centery)**2)
-    dist3 = np.sqrt((meanx3 - centerx)**2 + (meany3 - centery)**2)
+
 
     stdev1 = np.sqrt(stddevx1**2 + stddevy1**2)
     stdev2 = np.sqrt(stddevx2**2 + stddevy2**2)
-    stdev3 = np.sqrt(stddevx3**2 + stddevy3**2)
 
-    return mnsqerror1, mnsqerror2, mnsqerror3, dist1, dist2, dist3, stdev1, stdev2, stdev3
+
+    return mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 
 
 
 def bgr_to_hsv(b, g, r):
@@ -408,13 +400,10 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
         basic_metrics[f"{color_channel_name}_ee1"] = mnsqerror1  # mean squared error of low res
         basic_metrics[f"{color_channel_name}_ee2"] = mnsqerror2  # mean squared error of high res
-        basic_metrics[f"{color_channel_name}_ee3"] = mnsqerror3  # mean squared error of high res
         basic_metrics[f"{color_channel_name}_ed1"] = dist1  # distance of low res error from center of image
         basic_metrics[f"{color_channel_name}_ed2"] = dist2  # distance of high res error from center of image
-        basic_metrics[f"{color_channel_name}_ed3"] = dist3  # distance of high res error from center of image
         basic_metrics[f"{color_channel_name}_es1"] = stdev1  # standard deviation of low res error
         basic_metrics[f"{color_channel_name}_es2"] = stdev2
-        basic_metrics[f"{color_channel_name}_es3"] = stdev3
 
     #monochrome metric is the standard deviation of hue weighted by saturation
     basic_metrics["HSV_monos"] = weighted_circular_std_deg(h, s)
@@ -494,7 +483,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2"]
     color_channel_names = ["R", "G", "B", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
