@@ -23,32 +23,6 @@ from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from collections import defaultdict
 
-def information_metric(color_channel, downscale_factor1):
-    """
-    Returns a metric of information loss when a color channel from a frame 
-    is downscaled and then upscaled.
-    
-    frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor1: how much to shrink (e.g., 4 means 1/4 size)
-    """
-
-    # Original size
-    h, w = color_channel.shape[0:2]
-
-    # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
-    restored = cv2.resize(downscaled, (w, h), interpolation=cv2.INTER_LINEAR)
-
-    # Compute mean squared error (MSE) between original and restored image
-    mse = np.mean((color_channel - restored) ** 2)
-
-    # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse = 1.- mse / np.var(color_channel) 
-    # 1 means all information is at coarser spatial scales, 
-    # 0 means all information is at finer spatial scales
-
-    return normalized_mse
-
 def tranpose_metric(color_channel, downscale_factor1=4):
     """
     Returns a metric of information loss when a color channel from a frame 
@@ -375,9 +349,6 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         avg_intensity = np.mean(color_channel)
         variance = np.var(color_channel)
 
-        # 1 means all information is at finer spatial scales,
-        # 0 means all information is at coarser spatial scales
-        large_scale_info = information_metric(color_channel, downscale_factor1) # fraction info at small and medium scales
 
         transpose_metric_value = tranpose_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
@@ -388,12 +359,11 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel)
         # Add circle detection metrics
-        mnsqerror1, mnsqerror2, mnsqerror3, dist1, dist2, dist3, stdev1, stdev2, stdev3 = error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2)
+        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2)
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
         basic_metrics[f"{color_channel_name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
-        basic_metrics[f"{color_channel_name}_lrg"] =  large_scale_info # fraction of info at large scales
         basic_metrics[f"{color_channel_name}_xps"] = transpose_metric_value
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
