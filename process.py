@@ -23,45 +23,45 @@ from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from collections import defaultdict
 
-def tranpose_metric(color_channel, downscale_factor1=4):
+def tranpose_metric(color_channel, downscale_factor):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
     
     frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor1: how much to shrink (e.g., 4 means 1/4 size)
+    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
     """
 
     # Original size
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
 
     # Compute mean squared error (MSE) between original and restored image
     mse = np.mean((downscaled - downscaled[::-1,::-1]) ** 2)
 
     # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse = 1 - mse / np.var(color_channel) 
+    normalized_mse =  mse / np.var(downscaled) 
     # 1 means perfect symmetry at this scale 
     # 0 means no symmetry at this scale
 
     return normalized_mse
 
-def reflect_metric(color_channel, downscale_factor1=4):
+def reflect_metric(color_channel, downscale_factor=4):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
     
     frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor1: how much to shrink (e.g., 4 means 1/4 size)
+    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
     """
 
     # Original size
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
 
     # Compute mean squared error (MSE) between original and vertically reflected image
     mse0 = np.mean((downscaled - downscaled[::-1]) ** 2)
@@ -70,7 +70,7 @@ def reflect_metric(color_channel, downscale_factor1=4):
     mse1 = np.mean((downscaled - downscaled[:,::-1]) ** 2)
 
     # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse = 1 -(mse0 + mse1) / (2. * np.var(downscaled) )
+    normalized_mse = (mse0 + mse1) / (2. * np.var(downscaled) )
     # 1 means perfect symmetry at this scale 
     # 0 means no symmetry at this scale
 
@@ -115,7 +115,7 @@ def lines_metric(color_channel_original):
     
     Parameters:
     - color_channel: color channel
-    - downscale_factor1: Scale factor for downscaling before detection
+    - downscale_factor: Scale factor for downscaling before detection
     
     Returns:
     - line_metrics: Dictionary containing:
@@ -211,14 +211,14 @@ def weighted_std(values, weights):
     # Return standard deviation (square root of variance)
     return np.sqrt(weighted_variance)
 
-def error_dispersion_metrics(color_channel, downscale_factor1):
+def error_dispersion_metrics(color_channel, downscale_factor):
     """
     Detect circles in a color channel using Hough Transform.
     Returns metrics indicating the presence, size, and robustness of circles.
     
     Parameters:
     - color_channel: color channel
-    - downscale_factor1: Scale factor for downscaling before detection
+    - downscale_factor: Scale factor for downscaling before detection
     - downscale_factor2: Scale factor for downscaling before detection
     
     Returns:
@@ -233,7 +233,7 @@ def error_dispersion_metrics(color_channel, downscale_factor1):
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
-    downscaled1  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
+    downscaled1  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
     restored1 = cv2.resize(downscaled1, (w, h), interpolation=cv2.INTER_LINEAR)
 
     xvals = np.arange(0, w)
@@ -359,7 +359,7 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel)
         # Add circle detection metrics
-        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2)
+        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1)
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -506,7 +506,7 @@ def process_video_to_midi(video_path,
 
 
     # Export metrics to CSV
-    csv_filename = f"{subdir_name}.csv"
+    csv_filename = f"{subdir_name}_basic.csv"
     export_metrics_to_csv(frame_count_list, basic_metrics, csv_filename)
     print(f"Metrics exported to {csv_filename}")
 
