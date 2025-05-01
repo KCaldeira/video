@@ -61,9 +61,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_frame, cc_n
             if key not in csv.columns:
                 continue
             process_dict = {}
-            triangle_filter = triangular_filter_odd(csv[key], filter_width)
-            process_dict[var + "_" + metric + "_p" ] = scale_data(triangle_filter)
-
+            # first apply a narrow triangular filter
+            process_dict[var + "_" + metric + "_p" ] = triangular_filter_odd(csv[key], filter_width)
 
             if "rank" in process_list:
                 process_dict_copy = process_dict.copy()
@@ -72,15 +71,14 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_frame, cc_n
                     process_dict[key + "_r"] = normalized_metric
 
             # apply an additional 25 imot wode troamgular filter upon request
-            if "f25" in process_list:
+            if "f33" in process_list:
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
                     process_dict[key+"_f33"] = triangular_filter_odd(process_dict_copy[key], 33)
 
-            if "neg" in process_list:
-                process_dict_copy = process_dict.copy()
-                for key in process_dict_copy:
-                    process_dict[key + "_n"] = 1.0 - scale_data(process_dict_copy[key])
+            # scale the data to 0-1
+            for key in process_dict_copy:
+                process_dict[key] = scale_data(process_dict[key])
 
             if "power" in process_list:
                 process_dict_copy = process_dict.copy()
@@ -91,9 +89,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_frame, cc_n
             if "inv" in process_list:
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
-                    # we only want the inverse of the metric if there is a p4 or n4 version
-                    if "_p4" in key or "_n4" in key:
-                        process_dict[key + "_i"] = 1.0 - process_dict_copy[key]
+                    process_dict[key + "_i"] = 1.0 - process_dict_copy[key]
 
             master_dict.update(process_dict)
 
