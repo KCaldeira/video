@@ -23,6 +23,71 @@ from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from collections import defaultdict
 
+def line_symmetry_metric(color_channel, downscale_factor):
+    """
+    If there were a set of concentric circles in the image, then any vertical or horizontal slice should have a symmetry around some point.
+    It would be the central point if the concentric circles were at the center of the image.
+    
+    The algorithm sweeps through all vertical lines in the central 50% of the image and then all horizontal lines in the central 50% of the image.
+    For each line segment, the maximum correlation between the left and right parts of the line segment are computed.
+
+    """
+
+    # Original size
+    h, w = color_channel.shape[0:2]
+
+
+    # Downscale and then upscale
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
+    hd, wd = downscaled.shape[0:2]
+
+    corrlistx = []
+    # sweep through all vertical lines in the central 50% of the image
+    for ix in range(wd//4, 3*wd//4):
+        vec = downscaled[:, ix]
+        corrlist_column = []
+        half_width = hd // 4
+        for iy in range(half_width, 3*half_width):
+            corrlist_column.append(
+                np.corrcoef(
+                    vec[iy - half_width:iy],
+                    vec[iy + 1:iy + 1 + half_width][::-1]
+                )[0, 1]
+            )
+        corrlistx.append(max(corrlist_column))
+
+    corrlisty = []
+    # sweep through all horizontal lines in the central 50% of the image
+    for iy in range(hd//4, 3*hd//4):
+        vec = downscaled[iy, :]
+        corrlist_column = []
+        half_width = hd // 4
+        for iy in range(half_width, 3*half_width):
+            corrlist_column.append(
+                np.corrcoef(
+                    vec[iy - half_width:iy],
+                    vec[iy + 1:iy + 1 + half_width][::-1]
+                )[0, 1]
+            )
+        corrlisty.append(max(corrlist_column))
+
+    # Compute statistics
+    meancorrx = np.mean(corrlistx)
+    meancorry = np.mean(corrlisty)
+    meancorr = np.sqrt(meancorrx * meancorry)
+    mediancorrx = np.median(corrlistx)
+    mediancorry = np.median(corrlisty)
+    mediancorr = np.sqrt(mediancorrx * mediancorry)
+    # 10th and 90th percentiles
+    tenthcorrx = np.percentile(corrlistx, 10)
+    tenthcorry = np.percentile(corrlisty, 10)
+    tenthcorr = np.sqrt(tenthcorrx * tenthcorry)
+    ninetiethcorrx = np.percentile(corrlistx, 90)
+    ninetiethcorry = np.percentile(corrlisty, 90)   
+    ninetiethcorr = np.sqrt(ninetiethcorrx * ninetiethcorry)
+
+    return meancorr, mediancorr, tenthcorr, ninetiethcorr
+
 def tranpose_metric(color_channel, downscale_factor):
     """
     Returns a metric of information loss when a color channel from a frame 
@@ -219,7 +284,7 @@ def error_dispersion_metrics(color_channel, downscale_factor):
     Parameters:
     - color_channel: color channel
     - downscale_factor: Scale factor for downscaling before detection
-    - downscale_factor2: Scale factor for downscaling before detection
+    - downscale_medium: Scale factor for downscaling before detection
     
     Returns:
     - non_normalized_circle_metric0: Sum of circle confidences
@@ -332,7 +397,7 @@ def weighted_circular_std_deg(hue, saturation):
 
 
 
-def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
+def compute_basic_metrics(frame, downscale_large, downscale_medium):
     """
     Compute different intensity-based metrics on R, G, B, and color channels.
     Returns a dictionary of results.
@@ -345,21 +410,24 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
 
     # Split into R, G, B channels
     for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
-                                ("Gray", gray),("V", v)]:
+                                ("Gray", gray),("S", s),("V", v)]:
         avg_intensity = np.mean(color_channel)
         variance = np.var(color_channel)
 
 
-        transpose_metric_value = tranpose_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
+        transpose_metric_value = tranpose_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        reflect_metric_value = reflect_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
+        reflect_metric_value = reflect_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
+        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel)
-        # Add circle detection metrics
-        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1)
+        # Add error detection metrics
+        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_large)
+        # Add line symmetry metrics, aimed at detecting circles in an image
+        meancorr, mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_medium)
+
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -374,6 +442,10 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         basic_metrics[f"{color_channel_name}_ed2"] = dist2  # distance of high res error from center of image
         basic_metrics[f"{color_channel_name}_es1"] = stdev1  # standard deviation of low res error
         basic_metrics[f"{color_channel_name}_es2"] = stdev2
+        basic_metrics[f"{color_channel_name}_lmn"] = meancorr
+        basic_metrics[f"{color_channel_name}_lmd"] = mediancorr
+        basic_metrics[f"{color_channel_name}_l10"] = tenthcorr
+        basic_metrics[f"{color_channel_name}_l90"] = ninetiethcorr
 
     #monochrome metric is the standard deviation of hue weighted by saturation
     basic_metrics["HSV_monos"] = weighted_circular_std_deg(h, s)
@@ -411,16 +483,14 @@ def export_metrics_to_csv(frame_count_list, metrics, filename):
     df = pd.DataFrame(data)
     df.to_csv(filename, index=False)
 
-def process_video_to_midi(video_path, 
+def process_video_to_csv(video_path, 
                           subdir_name, # output prefix 
                           frames_per_second, 
                           beats_per_frame,
                           ticks_per_beat, 
                           beats_per_minute, 
-                          cc_number, 
-                          midi_channel,
-                          downscale_factor1,
-                          downscale_factor2,
+                          downscale_large,
+                          downscale_medium,
                           filter_width):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
@@ -433,8 +503,8 @@ def process_video_to_midi(video_path,
     :param beats_per_minute (number of beats per minute in DAW)
     :param cc_number: MIDI CC number (default 7 for volume).
     :param channel: MIDI channel (0-15).
-    :param downscale_factor1: spatial scale for computing metrics
-    :param downscale_factor2: resolution reduction for computing metrics
+    :param downscale_large: spatial scale for computing metrics
+    :param downscale_medium: resolution reduction for computing metrics
     :param filter_width: width of boxcar filter for smoothing
 
     """
@@ -453,8 +523,8 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2"]
-    color_channel_names = ["R", "G", "B", "Gray","V"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2","lmn","lmd","l10","l90"]
+    color_channel_names = ["R", "G", "B", "Gray","S","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
     # add metrics that are outside of the normal grouping
@@ -484,7 +554,7 @@ def process_video_to_midi(video_path,
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
 
-            metric_results = compute_basic_metrics(frame, downscale_factor1, downscale_factor2)
+            metric_results = compute_basic_metrics(frame, downscale_large, downscale_medium)
 
             #append to the dictionary of results
             for key, value in metric_results.items():
@@ -521,26 +591,24 @@ def process_video_to_midi(video_path,
 #video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
 #video_file = "Mz3DllgimbrV2B.wmv"
 #subdir_name = "Mz3DllgimbrV2B" # output prefix
-#video_file = "M10zul.wmv"
-#subdir_name = "M10zul" # output prefix
+video_file = "M10zul.mp4"
+subdir_name = "M10zul" # output prefix
 #video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
 #subdir_name = "JuliaInJulia" # output prefix
-video_file = "MzUL2-5jm3f.wmv"
-subdir_name = "MzUL2-5jm3f" # output prefix
+#video_file = "MzUL2-5jm3f.wmv"
+#subdir_name = "MzUL2-5jm3f" # output prefix
 #video_file = "WhatsApp Video 2023-09-06 at 7.38.17 AM.mp4"
 #subdir_name = "WhatsApp" # output prefix
 
-process_video_to_midi(video_file, 
+process_video_to_csv(video_file, 
                       subdir_name, # output prefix
                       frames_per_second=30, 
-                      beats_per_frame=2,
+                      beats_per_frame=8,
                       ticks_per_beat=480, 
                       beats_per_minute=92,  
-                      cc_number=1, 
-                      midi_channel=0,
-                      downscale_factor1=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
-                      downscale_factor2=10, # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
+                      downscale_large=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
+                      downscale_medium=10, # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
                       filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
-# process_video_to_midi("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
+# process_video_to_csv("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
 
