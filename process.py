@@ -23,71 +23,7 @@ from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from collections import defaultdict
 
-def line_symmetry_metric(color_channel, downscale_factor):
-    """
-    If there were a set of concentric circles in the image, then any vertical or horizontal slice should have a symmetry around some point.
-    It would be the central point if the concentric circles were at the center of the image.
-    
-    The algorithm sweeps through all vertical lines in the central 50% of the image and then all horizontal lines in the central 50% of the image.
-    For each line segment, the maximum correlation between the left and right parts of the line segment are computed.
-
-    """
-
-    # Original size
-    h, w = color_channel.shape[0:2]
-
-
-    # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
-    hd, wd = downscaled.shape[0:2]
-
-    corrlistx = []
-    # sweep through all vertical lines in the central 50% of the image
-    for ix in range(wd//4, 3*wd//4):
-        vec = downscaled[:, ix]
-        corrlist_column = []
-        half_width = hd // 4
-        for iy in range(half_width, 3*half_width):
-            corrlist_column.append(
-                np.corrcoef(
-                    vec[iy - half_width:iy],
-                    vec[iy + 1:iy + 1 + half_width][::-1]
-                )[0, 1]
-            )
-        corrlistx.append(max(corrlist_column))
-
-    corrlisty = []
-    # sweep through all horizontal lines in the central 50% of the image
-    for iy in range(hd//4, 3*hd//4):
-        vec = downscaled[iy, :]
-        corrlist_column = []
-        half_width = hd // 4
-        for iy in range(half_width, 3*half_width):
-            corrlist_column.append(
-                np.corrcoef(
-                    vec[iy - half_width:iy],
-                    vec[iy + 1:iy + 1 + half_width][::-1]
-                )[0, 1]
-            )
-        corrlisty.append(max(corrlist_column))
-
-    # Compute statistics
-    meancorrx = np.mean(corrlistx)
-    meancorry = np.mean(corrlisty)
-    meancorr = np.sqrt(meancorrx * meancorry)
-    mediancorrx = np.median(corrlistx)
-    mediancorry = np.median(corrlisty)
-    mediancorr = np.sqrt(mediancorrx * mediancorry)
-    # 10th and 90th percentiles
-    tenthcorrx = np.percentile(corrlistx, 10)
-    tenthcorry = np.percentile(corrlisty, 10)
-    tenthcorr = np.sqrt(tenthcorrx * tenthcorry)
-    ninetiethcorrx = np.percentile(corrlistx, 90)
-    ninetiethcorry = np.percentile(corrlisty, 90)   
-    ninetiethcorr = np.sqrt(ninetiethcorrx * ninetiethcorry)
-
-    return meancorr, mediancorr, tenthcorr, ninetiethcorr
-def information_metric(color_channel, downscale_factor1):
+def tranpose_metric(color_channel, downscale_factor):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
@@ -100,39 +36,13 @@ def information_metric(color_channel, downscale_factor1):
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
-    restored = cv2.resize(downscaled, (w, h), interpolation=cv2.INTER_LINEAR)
-
-    # Compute mean squared error (MSE) between original and restored image
-    mse = np.mean((color_channel - restored) ** 2)
-
-    # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse =  mse / np.var(color_channel) 
-    # 1 means all information is at coarser spatial scales, 
-    # 0 means all information is at finer spatial scales
-
-    return normalized_mse
-
-def tranpose_metric(color_channel, downscale_factor1=4):
-    """
-    Returns a metric of information loss when a color channel from a frame 
-    is downscaled and then upscaled.
-    
-    frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor1: how much to shrink (e.g., 4 means 1/4 size)
-    """
-
-    # Original size
-    h, w = color_channel.shape[0:2]
-
-    # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor1, h // downscale_factor1), interpolation=cv2.INTER_AREA)
+    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
 
     # Compute mean squared error (MSE) between original and restored image
     mse = np.mean((downscaled - downscaled[::-1,::-1]) ** 2)
 
     # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse = mse / np.var(downscaled) 
+    normalized_mse =  mse / np.var(downscaled) 
     # 1 means perfect symmetry at this scale 
     # 0 means no symmetry at this scale
 
@@ -439,14 +349,9 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         avg_intensity = np.mean(color_channel)
         variance = np.var(color_channel)
 
-        # 1 means all information is at finer spatial scales,
-        # 0 means all information is at coarser spatial scales
-        large_scale_info = information_metric(color_channel, downscale_factor2) # fraction info at small and medium scales
 
         transpose_metric_value = tranpose_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
-        transpose_metric_value = tranpose_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        reflect_metric_value = reflect_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
         reflect_metric_value = reflect_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
         radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_factor2) # degree of symmettry for flipping around the center point
@@ -454,10 +359,7 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         # Add line detection metrics
         line_metric_value = lines_metric(color_channel)
         # Add circle detection metrics
-        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1, downscale_factor2)
-
-        # Add line symmetry metrics, aimed at detecting circles in an image
-        meancorr, mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_factor2)
+        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_factor1)
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -472,10 +374,6 @@ def compute_basic_metrics(frame, downscale_factor1, downscale_factor2):
         basic_metrics[f"{color_channel_name}_ed2"] = dist2  # distance of high res error from center of image
         basic_metrics[f"{color_channel_name}_es1"] = stdev1  # standard deviation of low res error
         basic_metrics[f"{color_channel_name}_es2"] = stdev2
-        basic_metrics[f"{color_channel_name}_lmn"] = meancorr
-        basic_metrics[f"{color_channel_name}_lmd"] = mediancorr
-        basic_metrics[f"{color_channel_name}_l10"] = tenthcorr
-        basic_metrics[f"{color_channel_name}_l90"] = ninetiethcorr
 
     #monochrome metric is the standard deviation of hue weighted by saturation
     basic_metrics["HSV_monos"] = weighted_circular_std_deg(h, s)
@@ -555,7 +453,7 @@ def process_video_to_midi(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2","lmn","lmd","l10","l90"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2"]
     color_channel_names = ["R", "G", "B", "Gray","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
@@ -597,69 +495,15 @@ def process_video_to_midi(video_path,
     cap.release()
 
     #now compute derivative metrics that are computed after all frames are processed
-    basic_metrics["HSV_monochrome"] = np.array(basic_metrics["HSV_monochrome"])
-    basic_metrics["HSV_hue000-std"] = np.array(basic_metrics["HSV_hue000-std"])
-    basic_metrics["HSV_hue060-std"] = np.array(basic_metrics["HSV_hue060-std"])
-    basic_metrics["HSV_hue120-std"] = np.array(basic_metrics["HSV_hue120-std"])
-    basic_metrics["HSV_hue180-std"] = np.array(basic_metrics["HSV_hue180-std"])
-    basic_metrics["HSV_hue240-std"] = np.array(basic_metrics["HSV_hue240-std"])
-    basic_metrics["HSV_hue300-std"] = np.array(basic_metrics["HSV_hue300-std"])
-    delta_monochrome = np.max(basic_metrics["HSV_monochrome"]) - basic_metrics["HSV_monochrome"]
-    basic_metrics["HSV_hue000-int"] = (np.max(basic_metrics["HSV_hue000-std"])- basic_metrics["HSV_hue000-std"]) * delta_monochrome
-    basic_metrics["HSV_hue060-int"] = (np.max(basic_metrics["HSV_hue060-std"])- basic_metrics["HSV_hue060-std"]) * delta_monochrome
-    basic_metrics["HSV_hue120-int"] = (np.max(basic_metrics["HSV_hue120-std"])- basic_metrics["HSV_hue120-std"]) * delta_monochrome
-    basic_metrics["HSV_hue180-int"] = (np.max(basic_metrics["HSV_hue180-std"])- basic_metrics["HSV_hue180-std"]) * delta_monochrome
-    basic_metrics["HSV_hue240-int"] = (np.max(basic_metrics["HSV_hue240-std"])- basic_metrics["HSV_hue240-std"]) * delta_monochrome
-    basic_metrics["HSV_hue300-int"] = (np.max(basic_metrics["HSV_hue300-std"])- basic_metrics["HSV_hue300-std"]) * delta_monochrome
+    basic_metrics["HSV_monos"] = np.array(basic_metrics["HSV_monos"])
+    diff_monos = np.max(basic_metrics["HSV_monos"]) - basic_metrics["HSV_monos"]
 
-    # normalize all metrics to be between 0 and 1, with a percentile mapping
-    #iterate over copy to avoid modifying the dictionary while iterating
-    metrics = {}
-    for key, values in basic_metrics.items():
-        metric = np.array(values)
-        # max_val = np.max(metric)
-        # min_val = np.min(metric)
-        # normalized_metric = (metric - min_val) / (max_val - min_val)
-        # scale data by rescaling metric form 0 to 1
+    for key in ["HSV_h000s", "HSV_h060s", "HSV_h120s", "HSV_h180s", "HSV_h240s", "HSV_h300s"]:
+        basic_metrics[key] = np.array(basic_metrics[key])
+        # replace trailing s in key with i      
+        key_i = key.replace("s", "i") # i for intensity !
+        basic_metrics[key_i] = (180 - basic_metrics[key]) * diff_monos
 
-        scaled_metric = scale_data(metric)
-        metrics[f"{key}-pos"] = scaled_metric
-        metrics[f"{key}-neg"] = (1.-scaled_metric)
-        # rank the data and convert to percentiles
-        normalized_metric = percentile_data(metric)
-        metrics[f"{key}-Ppos"] = normalized_metric
-        metrics[f"{key}-Pneg"] = (1.-normalized_metric)
-
-    
-    metrics_copy = metrics.copy()
-    for key, values in metrics_copy.items():    
-        # add square and square root of metric to give different scaling choices
-        #metrics[f"{key}-05"] = np.sqrt(values)
-        #metrics[f"{key}-2"] = np.square(values)
-        #metrics[f"{key}-Nsqrt"] = (1.-np.sqrt(1.-values))  
-        #metrics[f"{key}-Nsquare"] = (1.-np.square(1.-values))
-        metrics[f"{key}-025"] = np.power(values,0.25)
-        metrics[f"{key}-4"] = np.power(values,4)
-        #metrics[f"{key}-Nqtr"] = (1.-np.power(1.-values,0.25))  
-        #metrics[f"{key}-Nfourth"] = (1.-np.power(1.-values,4))
-
-    # Smooth the data with a boxcar filter
-    if filter_width > 1:
-        for key, values in metrics.items():
-            metrics[key] = triangular_filter_odd(np.array(values), filter_width)    
-            
-    # renomalize between 0 and 1
-    for key, values in metrics.items():
-        metric = np.array(values)
-        # max_val = np.max(metric)
-        # min_val = np.min(metric)
-        # normalized_metric = (metric - min_val) / (max_val - min_val)
-        # scale data by rescaling metric form 0 to 1
-        scaled_metric = scale_data(metric)
-        metrics[key] = scaled_metric
-
-    # create inverse of each metric
-    metrics.update({f"{k}_inv": 1. - v for k, v in metrics.items()})
 
     # Export metrics to CSV
     csv_filename = f"{subdir_name}_basic.csv"
