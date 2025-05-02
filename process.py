@@ -36,7 +36,6 @@ def line_symmetry_metric(color_channel, downscale_factor):
     # Original size
     h, w = color_channel.shape[0:2]
 
-
     # Downscale and then upscale
     downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
     hd, wd = downscaled.shape[0:2]
@@ -46,14 +45,19 @@ def line_symmetry_metric(color_channel, downscale_factor):
     for ix in range(wd//4, 3*wd//4):
         vec = downscaled[:, ix]
         corrlist_column = []
-        half_width = hd // 4
-        for iy in range(half_width, 3*half_width):
-            corrlist_column.append(
-                np.corrcoef(
-                    vec[iy - half_width:iy],
-                    vec[iy + 1:iy + 1 + half_width][::-1]
+        half_height = hd // 4
+        for iy in range(half_height, 3*half_height):
+            try:
+                corr = np.corrcoef(
+                    vec[iy - half_height:iy][::-1],
+                    vec[iy + 1:iy + 1 +  half_height]
                 )[0, 1]
-            )
+                # Replace NaN with 0
+                if np.isnan(corr):
+                    corr = 0.0
+                corrlist_column.append(corr)
+            except:
+                corrlist_column.append(0.0)
         corrlistx.append(max(corrlist_column))
 
     corrlisty = []
@@ -61,14 +65,19 @@ def line_symmetry_metric(color_channel, downscale_factor):
     for iy in range(hd//4, 3*hd//4):
         vec = downscaled[iy, :]
         corrlist_column = []
-        half_width = hd // 4
-        for iy in range(half_width, 3*half_width):
-            corrlist_column.append(
-                np.corrcoef(
-                    vec[iy - half_width:iy],
-                    vec[iy + 1:iy + 1 + half_width][::-1]
+        half_width = wd // 4
+        for ix in range(half_width, 3*half_width):
+            try:
+                corr = np.corrcoef(
+                    vec[ix - half_width:ix][::-1],
+                    vec[ix + 1:ix + 1 +  half_width]
                 )[0, 1]
-            )
+                # Replace NaN with 0
+                if np.isnan(corr):
+                    corr = 0.0
+                corrlist_column.append(corr)
+            except:
+                corrlist_column.append(0.0)
         corrlisty.append(max(corrlist_column))
 
     # Compute statistics
@@ -205,10 +214,10 @@ def lines_metric(color_channel_original):
     h, w = color_channel.shape
     
     # Apply edge detection
-    edges = cv2.Canny(color_channel, 50, 150, apertureSize=3)
+    edges = cv2.Canny(color_channel, 100, 200, apertureSize=3)
     
     # Detect line segments using Probabilistic Hough Transform
-    lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=50,
+    lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=150,
                            minLineLength=100, maxLineGap=50)
     
     if lines is None:
@@ -490,8 +499,7 @@ def process_video_to_csv(video_path,
                           ticks_per_beat, 
                           beats_per_minute, 
                           downscale_large,
-                          downscale_medium,
-                          filter_width):
+                          downscale_medium):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
     
@@ -523,7 +531,7 @@ def process_video_to_csv(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2","lmn","lmd","l10","l90"]
+    metric_names = ["avg", "var", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2","lmn","lmd","l10","l90"]
     color_channel_names = ["R", "G", "B", "Gray","S","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
@@ -566,14 +574,13 @@ def process_video_to_csv(video_path,
 
     #now compute derivative metrics that are computed after all frames are processed
     basic_metrics["HSV_monos"] = np.array(basic_metrics["HSV_monos"])
-    diff_monos = np.max(basic_metrics["HSV_monos"]) - basic_metrics["HSV_monos"]
+    diff_monos =   1.0 - basic_metrics["HSV_monos"] / np.max(basic_metrics["HSV_monos"])
 
     for key in ["HSV_h000s", "HSV_h060s", "HSV_h120s", "HSV_h180s", "HSV_h240s", "HSV_h300s"]:
         basic_metrics[key] = np.array(basic_metrics[key])
         # replace trailing s in key with i      
         key_i = key.replace("s", "i") # i for intensity !
         basic_metrics[key_i] = (180 - basic_metrics[key]) * diff_monos
-
 
     # Export metrics to CSV
     csv_filename = f"{subdir_name}_basic.csv"
@@ -603,12 +610,11 @@ subdir_name = "M10zul" # output prefix
 process_video_to_csv(video_file, 
                       subdir_name, # output prefix
                       frames_per_second=30, 
-                      beats_per_frame=8,
+                      beats_per_frame=60,
                       ticks_per_beat=480, 
-                      beats_per_minute=92,  
+                      beats_per_minute=60,  
                       downscale_large=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
-                      downscale_medium=10, # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
-                      filter_width = 5 ) # smooth the data with a triangular filter of this (odd) width
+                      downscale_medium=10 ) # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
 # process_video_to_csv("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
 
 
