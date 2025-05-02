@@ -81,21 +81,21 @@ def line_symmetry_metric(color_channel, downscale_factor):
         corrlisty.append(max(corrlist_column))
 
     # Compute statistics
-    meancorrx = np.mean(corrlistx)
-    meancorry = np.mean(corrlisty)
-    meancorr = np.sqrt(meancorrx * meancorry)
+
+    
     mediancorrx = np.median(corrlistx)
     mediancorry = np.median(corrlisty)
     mediancorr = np.sqrt(mediancorrx * mediancorry)
-    # 10th and 90th percentiles
+    # 10th percentiles
     tenthcorrx = np.percentile(corrlistx, 10)
     tenthcorry = np.percentile(corrlisty, 10)
     tenthcorr = np.sqrt(tenthcorrx * tenthcorry)
+    # 90th percentile
     ninetiethcorrx = np.percentile(corrlistx, 90)
     ninetiethcorry = np.percentile(corrlisty, 90)   
     ninetiethcorr = np.sqrt(ninetiethcorrx * ninetiethcorry)
 
-    return meancorr, mediancorr, tenthcorr, ninetiethcorr
+    return mediancorr, tenthcorr, ninetiethcorr
 
 def tranpose_metric(color_channel, downscale_factor):
     """
@@ -180,90 +180,6 @@ def radial_symmetry_metric(color_channel, dowscale_factor):
     # return np.var(radial_mean[valid])
 
     return np.var(radial_mean)
-
-
-def lines_metric(color_channel_original):
-    """
-    Detect straight lines in a color channel using Probabilistic Hough Transform.
-    Returns metrics indicating the presence, length, and robustness of straight lines.
-    
-    Parameters:
-    - color_channel: color channel
-    - downscale_factor: Scale factor for downscaling before detection
-    
-    Returns:
-    - line_metrics: Dictionary containing:
-        - 'count': Number of lines detected (normalized 0-1)
-        - 'length': Average length of detected lines (normalized 0-1)
-        - 'robustness': How well the detected lines match actual edges (normalized 0-1)
-    """
-    # copy the color channel
-    color_channel = color_channel_original.copy()
-    
-    # Convert to uint8 if needed and scale to 0-255 range
-    if color_channel.dtype != np.uint8:
-        if np.max(color_channel) > 1:
-            color_channel = (color_channel / 255.0).astype(np.uint8)
-        else:
-            color_channel = color_channel.astype(np.uint8)
-
-    color_channel = cv2.equalizeHist(cv2.GaussianBlur(color_channel, (21,21), 0))
-
-    
-    # Downscale the image to reduce noise and computation time
-    h, w = color_channel.shape
-    
-    # Apply edge detection
-    edges = cv2.Canny(color_channel, 100, 200, apertureSize=3)
-    
-    # Detect line segments using Probabilistic Hough Transform
-    lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi/180, threshold=150,
-                           minLineLength=100, maxLineGap=50)
-    
-    if lines is None:
-        return 0.0 #no lines detected
-    
-    # Calculate metrics
-    line_lengths = []
-    line_robustness = []
-    
-    # Create a mask for edge points
-    edge_points = np.where(edges > 0)
-    edge_coords = np.column_stack((edge_points[1], edge_points[0]))  # (x,y) coordinates
-    
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        
-        # Calculate line length
-        length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-        line_lengths.append(length)
-        
-        # Calculate line equation: ax + by + c = 0
-        a = y2 - y1
-        b = x1 - x2
-        c = x2*y1 - x1*y2
-        
-        # Calculate distance from each edge point to the line
-        if len(edge_coords) > 0:
-            distances = np.abs(a*edge_coords[:,0] + b*edge_coords[:,1] + c) / np.sqrt(a*a + b*b)
-            
-            # Count points within 2 pixels of the line
-            nearby_points = np.sum(distances <= 2.0)
-            
-            # Normalize by line length to get points per unit length
-            points_per_length = nearby_points / (length + 1e-6)  # avoid division by zero
-            line_robustness.append(points_per_length)
-        else:
-            line_robustness.append(0.0)
-    
-    # Normalize metrics
-    non_normalized_line_metric = np.sum(np.array(line_lengths) * np.array(line_robustness))
-    
-    # Return 0.0 if the metric is NaN
-    if np.isnan(non_normalized_line_metric):
-        return 0.0
-        
-    return non_normalized_line_metric
 
 def weighted_std(values, weights):
     """
@@ -430,12 +346,11 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         # at the specified spatial scale
         radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        # Add line detection metrics
-        line_metric_value = lines_metric(color_channel)
+
         # Add error detection metrics
         mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_large)
         # Add line symmetry metrics, aimed at detecting circles in an image
-        meancorr, mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_medium)
+        mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_medium)
 
 
         # Store values
@@ -444,14 +359,12 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         basic_metrics[f"{color_channel_name}_xps"] = transpose_metric_value
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
-        basic_metrics[f"{color_channel_name}_lin"] = line_metric_value
         basic_metrics[f"{color_channel_name}_ee1"] = mnsqerror1  # mean squared error of low res
         basic_metrics[f"{color_channel_name}_ee2"] = mnsqerror2  # mean squared error of high res
         basic_metrics[f"{color_channel_name}_ed1"] = dist1  # distance of low res error from center of image
         basic_metrics[f"{color_channel_name}_ed2"] = dist2  # distance of high res error from center of image
         basic_metrics[f"{color_channel_name}_es1"] = stdev1  # standard deviation of low res error
         basic_metrics[f"{color_channel_name}_es2"] = stdev2
-        basic_metrics[f"{color_channel_name}_lmn"] = meancorr
         basic_metrics[f"{color_channel_name}_lmd"] = mediancorr
         basic_metrics[f"{color_channel_name}_l10"] = tenthcorr
         basic_metrics[f"{color_channel_name}_l90"] = ninetiethcorr
@@ -531,7 +444,7 @@ def process_video_to_csv(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "xps", "rfl", "rad", "lin","ee1","ee2","ed1","ed2","es1","es2","lmn","lmd","l10","l90"]
+    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmn","lmd","l10","l90"]
     color_channel_names = ["R", "G", "B", "Gray","S","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
@@ -598,21 +511,21 @@ def process_video_to_csv(video_path,
 #video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
 #video_file = "Mz3DllgimbrV2B.wmv"
 #subdir_name = "Mz3DllgimbrV2B" # output prefix
-video_file = "M10zul.mp4"
-subdir_name = "M10zul" # output prefix
+#video_file = "M10zul.mp4"
+#subdir_name = "M10zul" # output prefix
 #video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
 #subdir_name = "JuliaInJulia" # output prefix
-#video_file = "MzUL2-5jm3f.wmv"
-#subdir_name = "MzUL2-5jm3f" # output prefix
+video_file = "MzUL2-5jm3f.wmv"
+subdir_name = "MzUL2-5jm3f" # output prefix
 #video_file = "WhatsApp Video 2023-09-06 at 7.38.17 AM.mp4"
 #subdir_name = "WhatsApp" # output prefix
 
 process_video_to_csv(video_file, 
                       subdir_name, # output prefix
                       frames_per_second=30, 
-                      beats_per_frame=60,
+                      beats_per_frame=4,
                       ticks_per_beat=480, 
-                      beats_per_minute=60,  
+                      beats_per_minute=92,  
                       downscale_large=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
                       downscale_medium=10 ) # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
 # process_video_to_csv("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)

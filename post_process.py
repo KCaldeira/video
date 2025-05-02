@@ -71,10 +71,10 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_frame, cc_n
                     process_dict[key + "_r"] = normalized_metric
 
             # apply an additional 25 imot wode troamgular filter upon request
-            if "f33" in process_list:
+            if "f25" in process_list:
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
-                    process_dict[key+"_f33"] = triangular_filter_odd(process_dict_copy[key], 33)
+                    process_dict[key+"_f25"] = triangular_filter_odd(process_dict_copy[key], 25)
 
             # scale the data to 0-1
             for key in process_dict_copy:
@@ -141,7 +141,7 @@ if __name__ == "__main__":
 
     vars= ["R", "G", "B","Gray","HSV"]
     metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lin","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3"]
-    process_list = ["neg","rank", "power","inv","f33"]
+    process_list = ["neg","rank", "power","inv","f25"]
     ticks_per_frame = 480
     cc_number = 1
     filter_width = 5
