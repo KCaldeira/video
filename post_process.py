@@ -141,7 +141,10 @@ if __name__ == "__main__":
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
     vars= ["R", "G", "B","Gray","HSV"]
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3"]
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
+                    "h000i", "h060i", "h120i", "h180i", "h240i", "h300i", "h360i",
+                    "h000s", "h060s", "h120s", "h180s", "h240s", "h300s", "h360s",
+                    "monos"]
     process_list = ["neg","rank", "power","inv","filter"]
     ticks_per_beat = 480
     beats_per_minute=92

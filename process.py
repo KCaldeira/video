@@ -444,7 +444,7 @@ def process_video_to_csv(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmn","lmd","l10","l90"]
+    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmd","l10","l90"]
     color_channel_names = ["R", "G", "B", "Gray","S","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
