@@ -370,15 +370,15 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         basic_metrics[f"{color_channel_name}_l90"] = ninetiethcorr
 
     #monochrome metric is the standard deviation of hue weighted by saturation
-    basic_metrics["HSV_monos"] = weighted_circular_std_deg(h, s)
+    basic_metrics["Hmon_std"] = weighted_circular_std_deg(h, s)
 
     # measure the degree to which the hue is close to each of the 6 cardinal hues
-    basic_metrics["HSV_h000s"] = np.mean((((h + 180 - 0) % 360) - 180)**2)**(1/2)
-    basic_metrics["HSV_h060s"] = np.mean((((h + 180 - 60) % 360) - 180)**2)**(1/2)
-    basic_metrics["HSV_h120s"] = np.mean((((h + 180 - 120) % 360) - 180)**2)**(1/2)
-    basic_metrics["HSV_h180s"] = np.mean((((h + 180 - 180) % 360) - 180)**2)**(1/2)    
-    basic_metrics["HSV_h240s"] = np.mean((((h + 180 - 240) % 360) - 180)**2)**(1/2)  
-    basic_metrics["HSV_h300s"] = np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
+    basic_metrics["H000_std"] = np.mean((((h + 180 - 0) % 360) - 180)**2)**(1/2)
+    basic_metrics["H060_std"] = np.mean((((h + 180 - 60) % 360) - 180)**2)**(1/2)
+    basic_metrics["H120_std"] = np.mean((((h + 180 - 120) % 360) - 180)**2)**(1/2)
+    basic_metrics["H180_std"] = np.mean((((h + 180 - 180) % 360) - 180)**2)**(1/2)    
+    basic_metrics["H240_std"] = np.mean((((h + 180 - 240) % 360) - 180)**2)**(1/2)  
+    basic_metrics["H300_std"] = np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
 
     return basic_metrics
 
@@ -449,13 +449,13 @@ def process_video_to_csv(video_path,
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
     # add metrics that are outside of the normal grouping
-    basic_metrics["HSV_monos"] = []
-    basic_metrics["HSV_h000s"] = []
-    basic_metrics["HSV_h060s"] = []
-    basic_metrics["HSV_h120s"] = []
-    basic_metrics["HSV_h180s"] = []
-    basic_metrics["HSV_h240s"] = []
-    basic_metrics["HSV_h300s"] = []
+    basic_metrics["Hmon_std"] = []
+    basic_metrics["H000_std"] = []
+    basic_metrics["H060_std"] = []
+    basic_metrics["H120_std"] = []
+    basic_metrics["H180_std"] = []
+    basic_metrics["H240_std"] = []
+    basic_metrics["H300_std"] = []
 
     # open rhe video file
     cap = cv2.VideoCapture(video_path)
@@ -486,13 +486,13 @@ def process_video_to_csv(video_path,
     cap.release()
 
     #now compute derivative metrics that are computed after all frames are processed
-    basic_metrics["HSV_monos"] = np.array(basic_metrics["HSV_monos"])
-    diff_monos =   1.0 - basic_metrics["HSV_monos"] / np.max(basic_metrics["HSV_monos"])
+    basic_metrics["Hmon_std"] = np.array(basic_metrics["Hmon_std"])
+    diff_monos =   1.0 - basic_metrics["Hmon_std"] / np.max(basic_metrics["Hmon_std"])
 
-    for key in ["HSV_h000s", "HSV_h060s", "HSV_h120s", "HSV_h180s", "HSV_h240s", "HSV_h300s"]:
+    for key in ["H000_std", "H060_std", "H120_std", "H180_std", "H240_std", "H300_std"]:
         basic_metrics[key] = np.array(basic_metrics[key])
         # replace trailing s in key with i      
-        key_i = key.replace("s", "i") # i for intensity !
+        key_i = key.replace("_std", "_int")  # i for intensity !
         basic_metrics[key_i] = (180 - basic_metrics[key]) * diff_monos
 
     # Export metrics to CSV

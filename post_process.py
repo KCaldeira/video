@@ -92,42 +92,78 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
 
             master_dict.update(process_dict)
 
-            # now write out everything for this var and metric as a single midi file
-
-        ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
-        frame_count_list = csv.index.tolist()
-        for var in vars:
-            for metric in metrics:
-                for suffix in ["v", "r"]:
-                    key = var + "_" + metric  +  "_" + suffix # The base metric is the "_pos" version
-                    if key not in master_dict:
+    # now write out everything for this var and metric as a single midi file
+    print(f"Writing out midi files by var and metric")
+    ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
+    frame_count_list = csv.index.tolist()
+    for var in vars:
+        for metric in metrics:
+            for suffix in ["v", "r"]:
+                key = var + "_" + metric  +  "_" + suffix # The base metric is the "_pos" version
+                if key not in master_dict:
+                    continue
+                midi_file = mido.MidiFile()
+                for full_key in master_dict:
+                    if key not in full_key:
                         continue
-                    midi_file = mido.MidiFile()
-                    for full_key in master_dict:
-                        if key not in full_key:
-                            continue
-                        midi_track = mido.MidiTrack()
-                        midi_file.tracks.append(midi_track)
+                    midi_track = mido.MidiTrack()
+                    midi_file.tracks.append(midi_track)
 
-                        midi_track.append(mido.MetaMessage('track_name', name=full_key, time=0))
+                    midi_track.append(mido.MetaMessage('track_name', name=full_key, time=0))
 
-                        midi_val_base = [round(104 * val) for val in master_dict[full_key]]
+                    midi_val_base = (np.round(104 * master_dict[full_key])).astype(int).tolist()
 
-                        for i, midi_value in enumerate(midi_val_base):
-                            time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-                            midi_track.append(
-                                mido.Message('control_change',
-                                        control=cc_number,
-                                        value=midi_value,
-                                        channel=0,
-                                        time=time_tick))
+                    for i, midi_value in enumerate(midi_val_base):
+                        time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                        midi_track.append(
+                            mido.Message('control_change',
+                                    control=cc_number,
+                                    value=midi_value,
+                                    channel=0,
+                                    time=time_tick))
 
-                        
-                    midi_file.save("../video_midi/" + prefix + "/" + key + ".mid")
+                    
+                midi_file.save("../video_midi/" + prefix + "/" + key + ".mid")
+
+    # now write everything for this metric and postprocessing in a single midi file
+    print(f"Writing out midi files by postprocessing")
+    ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
+    frame_count_list = csv.index.tolist()
+
+    # now get a list of all of the unique key endings after the second underscore
+    suffix_list = ["_".join(key.split("_")[1:]) for key in master_dict.keys()]
+    suffix_list = list(set(suffix_list))
+    for suffix in suffix_list:
+        suffix_key_list = [key for key in master_dict.keys() if key.endswith(suffix)]
+        midi_file = mido.MidiFile()
+
+        for key in suffix_key_list:
+            midi_track = mido.MidiTrack()
+            midi_file.tracks.append(midi_track)
+            midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
+
+            midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
+
+            for i, midi_value in enumerate(midi_val_base):
+                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                midi_track.append(
+                    mido.Message('control_change',
+                            control=cc_number,
+                            value=midi_value,
+                            channel=0,
+                            time=time_tick))
+                    
+        midi_file.save("../video_midi/" + prefix + "/" + suffix + ".mid")
+
+
+
 
     # write out the master xlsx
+    print(f"Writing out master xlsx")
     master_dict['frame_count_list'] = frame_count_list
     master_df = pd.DataFrame(master_dict)
+    # sort the columns alphabetically
+    master_df = master_df.sort_index(axis=1)        
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
@@ -140,11 +176,9 @@ if __name__ == "__main__":
     prefix = "MzUL2-5jm3f"
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
-    vars= ["R", "G", "B","Gray","HSV"]
+    vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
     metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
-                    "h000i", "h060i", "h120i", "h180i", "h240i", "h300i", "h360i",
-                    "h000s", "h060s", "h120s", "h180s", "h240s", "h300s", "h360s",
-                    "monos"]
+                    "std","int"]
     process_list = ["neg","rank", "power","inv","filter"]
     ticks_per_beat = 480
     beats_per_minute=92
