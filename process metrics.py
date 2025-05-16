@@ -131,7 +131,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 midi_file.save("../video_midi/" + prefix + "/" + key + ".mid")
 
     # now write everything for this metric and postprocessing in a single midi file
-    print(f"Writing out midi files by postprocessing")
+    print(f"Writing out midi files by postprocessing methods")
     ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
     frame_count_list = csv.index.tolist()
 
@@ -244,11 +244,11 @@ if __name__ == "__main__":
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dl0","dl1","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dad","dal","dcd","dcl","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
                     "std","int"]
     process_list = ["neg","rank", "power","inv","filter"]
     ticks_per_beat = 480
-    beats_per_minute=104
+    beats_per_minute=88
     frames_per_second=30
     cc_number = 1
     filter_narrow = 5

@@ -32,10 +32,12 @@ def compute_dark_light_metric(color_channel, tolerance = 0):
     light_value = np.max(color_channel)
     # count the number of pixels that are darker or equal to dark_value plus tolerance
     dark_count = np.sum(color_channel <= dark_value + tolerance)
+    dark_amount = dark_count * (1.0 - np.mean(color_channel <= dark_value + tolerance))
     # count the number of pixels that are lighter or equal to light_value minus tolerance
     light_count = np.sum(color_channel >= light_value - tolerance)
+    light_amount = light_count * np.mean(color_channel >= light_value - tolerance)
     # return the number of pixels equal to the darkest and lightest values
-    return dark_count, light_count
+    return dark_count, light_count, dark_amount, light_amount
 
 def line_symmetry_metric(color_channel, downscale_factor):
     """
@@ -130,7 +132,7 @@ def tranpose_metric(color_channel, downscale_factor):
     mse = np.mean((downscaled - downscaled[::-1,::-1]) ** 2)
 
     # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse =  mse / np.var(downscaled) 
+    normalized_mse =  mse / (np.var(downscaled) + 1e-6)  # avoid division by zero
     # 1 means perfect symmetry at this scale 
     # 0 means no symmetry at this scale
 
@@ -158,7 +160,7 @@ def reflect_metric(color_channel, downscale_factor=4):
     mse1 = np.mean((downscaled - downscaled[:,::-1]) ** 2)
 
     # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse = (mse0 + mse1) / (2. * np.var(downscaled) )
+    normalized_mse = (mse0 + mse1) / (2. * (np.var(downscaled) + 1e-6)) # avoid division by zero
     # 1 means perfect symmetry at this scale 
     # 0 means no symmetry at this scale
 
@@ -256,8 +258,8 @@ def error_dispersion_metrics(color_channel, downscale_factor):
     # _std is the standard deviation of the variability of the channel.
     # now let's see what is the standard deviation 
     info_total = np.var(color_channel)
-    info_large = (restored1 - np.mean(color_channel))**2 / info_total # fraction of variance in large scale
-    info_small = (color_channel - restored1)**2 / info_total # fraction of variance in small scale
+    info_large = (restored1 - np.mean(color_channel))**2 / (info_total + 1e-6) # fraction of variance in large scale
+    info_small = (color_channel - restored1)**2 / (info_total + 1e-6) # fraction of variance in small scale
 
 
     # Compute mean squared error (MSE) between original and restored image
@@ -329,7 +331,7 @@ def weighted_circular_std_deg(hue, saturation):
     angles_rad = np.deg2rad(hue)
     weights = np.array(saturation)
     z = weights * np.exp(1j * angles_rad)
-    R_w = np.abs(np.sum(z) / np.sum(weights))
+    R_w = np.abs(np.sum(z) / (np.sum(weights) + 1e-6)) # avoid division by zero
     return np.rad2deg(np.sqrt(-2 * np.log(R_w)))
 
 
@@ -366,7 +368,7 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         # Add line symmetry metrics, aimed at detecting circles in an image
         mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_medium)
 
-        dark_count, light_count = compute_dark_light_metric(color_channel, 0)
+        dark_count, light_count, dark_amount, light_amount = compute_dark_light_metric(color_channel, 5) # needs to be within 5 (0 - 255) unites of max or min light or dark values
 
 
         # Store values
@@ -384,8 +386,10 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         basic_metrics[f"{color_channel_name}_lmd"] = mediancorr
         basic_metrics[f"{color_channel_name}_l10"] = tenthcorr
         basic_metrics[f"{color_channel_name}_l90"] = ninetiethcorr
-        basic_metrics[f"{color_channel_name}_dl0"] = dark_count
-        basic_metrics[f"{color_channel_name}_dl1"] = light_count
+        basic_metrics[f"{color_channel_name}_dcd"] = dark_count
+        basic_metrics[f"{color_channel_name}_dcl"] = light_count
+        basic_metrics[f"{color_channel_name}_dad"] = dark_amount
+        basic_metrics[f"{color_channel_name}_dal"] = light_amount
 
     #monochrome metric is the standard deviation of hue weighted by saturation
     basic_metrics["Hmon_std"] = weighted_circular_std_deg(h, s)
@@ -462,7 +466,7 @@ def process_video_to_csv(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmd","l10","l90","dl0","dl1"]
+    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmd","l10","l90","dcd","dcl","dad","dal"]
     color_channel_names = ["R", "G", "B", "Gray","S","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
