@@ -46,8 +46,10 @@ def line_symmetry_metric(color_channel, downscale_factor):
     
     The algorithm sweeps through all vertical lines in the central 50% of the image and then all horizontal lines in the central 50% of the image.
     For each line segment, the maximum correlation between the left and right parts of the line segment are computed.
-
     """
+    # if uniform color return zeros
+    if np.max(color_channel) == np.min(color_channel):
+        return 0.0, 0.0, 0.0
 
     # Original size
     h, w = color_channel.shape[0:2]
@@ -64,17 +66,21 @@ def line_symmetry_metric(color_channel, downscale_factor):
         half_height = hd // 4
         for iy in range(half_height, 3*half_height):
             try:
-                corr = np.corrcoef(
-                    vec[iy - half_height:iy][::-1],
-                    vec[iy + 1:iy + 1 +  half_height]
-                )[0, 1]
-                # Replace NaN with 0
-                if np.isnan(corr):
+                left_vec = vec[iy - half_height:iy][::-1]
+                right_vec = vec[iy + 1:iy + 1 + half_height]
+                # Check if vectors are too short or have zero variance
+                if len(left_vec) < 2 or len(right_vec) < 2 or \
+                   np.var(left_vec) == 0 or np.var(right_vec) == 0:
                     corr = 0.0
+                else:
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        corr = np.corrcoef(left_vec, right_vec)[0, 1]
+                    if np.isnan(corr):
+                        corr = 0.0
                 corrlist_column.append(corr)
             except:
                 corrlist_column.append(0.0)
-        corrlistx.append(max(corrlist_column))
+        corrlistx.append(max(0.0, max(corrlist_column)))
 
     corrlisty = []
     # sweep through all horizontal lines in the central 50% of the image
@@ -84,21 +90,23 @@ def line_symmetry_metric(color_channel, downscale_factor):
         half_width = wd // 4
         for ix in range(half_width, 3*half_width):
             try:
-                corr = np.corrcoef(
-                    vec[ix - half_width:ix][::-1],
-                    vec[ix + 1:ix + 1 +  half_width]
-                )[0, 1]
-                # Replace NaN with 0
-                if np.isnan(corr):
+                left_vec = vec[ix - half_width:ix][::-1]
+                right_vec = vec[ix + 1:ix + 1 + half_width]
+                # Check if vectors are too short or have zero variance
+                if len(left_vec) < 2 or len(right_vec) < 2 or \
+                   np.var(left_vec) == 0 or np.var(right_vec) == 0:
                     corr = 0.0
+                else:
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        corr = np.corrcoef(left_vec, right_vec)[0, 1]
+                    if np.isnan(corr):
+                        corr = 0.0
                 corrlist_column.append(corr)
             except:
                 corrlist_column.append(0.0)
-        corrlisty.append(max(corrlist_column))
+        corrlisty.append(max(0.0, max(corrlist_column)))
 
     # Compute statistics
-
-    
     mediancorrx = np.median(corrlistx)
     mediancorry = np.median(corrlisty)
     mediancorr = np.sqrt(mediancorrx * mediancorry)
@@ -209,6 +217,8 @@ def weighted_std(values, weights):
     - weighted standard deviation
     """
     # Calculate weighted mean
+    if np.sum(weights) == 0:
+        return 0.0
     weighted_mean = np.average(values, weights=weights)
     
     # Calculate weighted variance
@@ -235,7 +245,9 @@ def error_dispersion_metrics(color_channel, downscale_factor):
     - area_circles: Total area of detected circles
     - circle_confidences: List of confidence values for each circle
     """
-
+    # if uniform color return zeros
+    if np.max(color_channel) == np.min(color_channel):
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
@@ -257,6 +269,8 @@ def error_dispersion_metrics(color_channel, downscale_factor):
     # how dispersed is the high res error around the center of the high res error?
     # _std is the standard deviation of the variability of the channel.
     # now let's see what is the standard deviation 
+    # convert Nan's to zeros in color_channel
+    # color_channel = np.where(np.isnan(color_channel), 0, color_channel)
     info_total = np.var(color_channel)
     info_large = (restored1 - np.mean(color_channel))**2 / (info_total + 1e-6) # fraction of variance in large scale
     info_small = (color_channel - restored1)**2 / (info_total + 1e-6) # fraction of variance in small scale
@@ -509,7 +523,10 @@ def process_video_to_csv(video_path,
 
     #now compute derivative metrics that are computed after all frames are processed
     basic_metrics["Hmon_std"] = np.array(basic_metrics["Hmon_std"])
-    diff_monos =   1.0 - basic_metrics["Hmon_std"] / np.max(basic_metrics["Hmon_std"])
+    if np.max(basic_metrics["Hmon_std"]) == 0.0:
+        diff_monos = 0.0
+    else:
+        diff_monos =   1.0 - basic_metrics["Hmon_std"] / np.max(basic_metrics["Hmon_std"])
 
     for key in ["H000_std", "H060_std", "H120_std", "H180_std", "H240_std", "H300_std"]:
         basic_metrics[key] = np.array(basic_metrics[key])

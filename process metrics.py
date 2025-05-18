@@ -23,7 +23,10 @@ def scale_data(data):
     """
     min_val = np.min(data)
     max_val = np.max(data)
-    if max_val > min_val:
+    # check if either max or min is a Nan
+    if np.isnan(max_val) or np.isnan(min_val):
+        scaled_data = np.zeros_like(data)
+    elif max_val > min_val:
         scaled_data = (data - min_val) / (max_val - min_val)
     else:
         scaled_data = np.zeros_like(data)
@@ -97,6 +100,10 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
 
             master_dict.update(process_dict)
 
+    # convert any Nan's in master_dict to 0
+    for key in master_dict:
+        master_dict[key] = np.where(np.isnan(master_dict[key]), 0, master_dict[key])
+    
     # now write out everything for this var and metric as a single midi file
     print(f"Writing out midi files by var and metric")
     ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
