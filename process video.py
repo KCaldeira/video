@@ -32,12 +32,10 @@ def compute_dark_light_metric(color_channel, tolerance = 0):
     light_value = np.max(color_channel)
     # count the number of pixels that are darker or equal to dark_value plus tolerance
     dark_count = np.sum(color_channel <= dark_value + tolerance)
-    dark_amount = dark_count * (1.0 - np.mean(color_channel <= dark_value + tolerance))
     # count the number of pixels that are lighter or equal to light_value minus tolerance
     light_count = np.sum(color_channel >= light_value - tolerance)
-    light_amount = light_count * np.mean(color_channel >= light_value - tolerance)
     # return the number of pixels equal to the darkest and lightest values
-    return dark_count, light_count, dark_amount, light_amount
+    return dark_count, light_count
 
 def line_symmetry_metric(color_channel, downscale_factor):
     """
@@ -382,7 +380,7 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         # Add line symmetry metrics, aimed at detecting circles in an image
         mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_medium)
 
-        dark_count, light_count, dark_amount, light_amount = compute_dark_light_metric(color_channel, 5) # needs to be within 5 (0 - 255) unites of max or min light or dark values
+        dark_count, light_count = compute_dark_light_metric(color_channel, 5) # needs to be within 5 (0 - 255) unites of max or min light or dark values
 
 
         # Store values
@@ -402,8 +400,7 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         basic_metrics[f"{color_channel_name}_l90"] = ninetiethcorr
         basic_metrics[f"{color_channel_name}_dcd"] = dark_count
         basic_metrics[f"{color_channel_name}_dcl"] = light_count
-        basic_metrics[f"{color_channel_name}_dad"] = dark_amount
-        basic_metrics[f"{color_channel_name}_dal"] = light_amount
+
 
     #monochrome metric is the standard deviation of hue weighted by saturation
     basic_metrics["Hmon_std"] = weighted_circular_std_deg(h, s)
@@ -480,7 +477,7 @@ def process_video_to_csv(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmd","l10","l90","dcd","dcl","dad","dal"]
+    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmd","l10","l90","dcd","dcl"]
     color_channel_names = ["R", "G", "B", "Gray","S","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
