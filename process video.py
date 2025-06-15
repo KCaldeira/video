@@ -565,7 +565,7 @@ process_video_to_csv(video_file,
                       frames_per_second=30, 
                       beats_per_midi_event=2,
                       ticks_per_beat=480, 
-                      beats_per_minute=88,  
+                      beats_per_minute=82,  
                       downscale_large=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
                       downscale_medium=10 ) # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
 # process_video_to_csv("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
