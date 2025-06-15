@@ -102,8 +102,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
                     if not key.endswith("_i"):
-                        process_dict[key + "_dp"] = np.max(0, np.gradient(process_dict_copy[key]))
-                        process_dict[key + "_dn"] = np.max(0, -np.gradient(process_dict_copy[key]))
+                        process_dict[key + "_dp"] = np.maximum(0, np.gradient(process_dict_copy[key]))
+                        process_dict[key + "_dn"] = np.maximum(0, -np.gradient(process_dict_copy[key]))
 
             master_dict.update(process_dict)
 
