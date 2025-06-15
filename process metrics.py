@@ -98,7 +98,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 for key in process_dict_copy:
                     process_dict[key + "_i"] = 1.0 - process_dict_copy[key]
 
-            if "drv" in process_list:  # derivative
+            if "derivative" in process_list:  # derivative
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
                     if not key.endswith("_i"):
@@ -263,7 +263,7 @@ if __name__ == "__main__":
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
     metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dcd","dcl","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
                     "std","int"]
-    process_list = ["neg","rank", "power","inv","filter"]
+    process_list = ["neg","rank", "power","inv","filter","derivative"]
     ticks_per_beat = 480
     beats_per_minute=82
     frames_per_second=30
