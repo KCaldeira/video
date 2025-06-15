@@ -98,6 +98,13 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 for key in process_dict_copy:
                     process_dict[key + "_i"] = 1.0 - process_dict_copy[key]
 
+            if "drv" in process_list:  # derivative
+                process_dict_copy = process_dict.copy()
+                for key in process_dict_copy:
+                    if not key.endswith("_i"):
+                        process_dict[key + "_dp"] = np.max(0, np.gradient(process_dict_copy[key]))
+                        process_dict[key + "_dn"] = np.max(0, -np.gradient(process_dict_copy[key]))
+
             master_dict.update(process_dict)
 
     # convert any Nan's in master_dict to 0
@@ -196,10 +203,13 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
         is_i = 1 if "_i" in key or key.endswith("_i") else 0
         is_p4 = 1 if "_p4" in key or key.endswith("_p4") else 0
         is_n4 = 1 if "_n4" in key or key.endswith("_n4") else 0
+        is_dp = 1 if "_dp" in key or key.endswith("_dp") else 0
+        is_dn = 1 if "_dn" in key or key.endswith("_dn") else 0
         
+
         # Calculate the primary sort value
-        primary_sort = (1e0*is_r + 1e7*is_v + 0*is_h + 1e6*is_f25 + 
-                       1e5*is_f5 + 1e1*is_i + 1e3*is_p4 + 1e2*is_n4)
+        primary_sort = (1e0*is_r + 1e8*is_v + 0*is_h + 1e7*is_f25 + 
+                       1e6*is_f5 + 1e1*is_i + 1e3*is_p4 + 1e2*is_n4 + 1e4*is_dp + 1e5*is_dn)
         
         # Create a tuple with primary sort value and the key itself for alphabetical sorting
         sort_tuples.append((primary_sort, key))
@@ -255,7 +265,7 @@ if __name__ == "__main__":
                     "std","int"]
     process_list = ["neg","rank", "power","inv","filter"]
     ticks_per_beat = 480
-    beats_per_minute=88
+    beats_per_minute=82
     frames_per_second=30
     cc_number = 1
     filter_narrow = 5
