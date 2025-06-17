@@ -70,8 +70,9 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 continue
             process_dict = {}
 
+            process_dict[key + "_v"] = csv[key]
+
             if "rank" in process_list:
-                process_dict[key + "_v"] = csv[key]
                 process_dict[key + "_r"] = percentile_data(csv[key])            # first apply a narrow triangular filter
             
             
@@ -111,38 +112,54 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     for key in master_dict:
         master_dict[key] = np.where(np.isnan(master_dict[key]), 0, master_dict[key])
     
-    # now write out everything for this var and metric as a single midi file
-    print(f"Writing out midi files by var and metric")
+    # now write out everything for this var and averaging period and var or ranking as a single midi file
+    print(f"Writing out midi files by var, rank/value, and averaging period")
     ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
     frame_count_list = csv.index.tolist()
     for var in vars:
-        for metric in metrics:
+        for averaging in ["f25","f5",""]:
             for suffix in ["v", "r"]:
-                key = var + "_" + metric  +  "_" + suffix # The base metric is the "_pos" version
-                if key not in master_dict:
-                    continue
-                midi_file = mido.MidiFile()
-                for full_key in master_dict:
-                    if key not in full_key:
-                        continue
-                    midi_track = mido.MidiTrack()
-                    midi_file.tracks.append(midi_track)
+                for derivative in ["","d"]:
+                    midi_file = mido.MidiFile()
+                    for key in master_dict:
+                        if not key.startswith(var):
+                            continue
+                        if averaging != "" and "_" + averaging+"_" not in key and not key.endswith("_"+averaging):
+                            continue
+                        if averaging == "" and ("_f25_" in key or "_f5_" in key or key.endswith("_f25") or key.endswith("_f5")):
+                            continue
+                        if not "_" + suffix + "_" in key and not key.endswith("_"+suffix):
+                            continue
+                        if derivative == "d" and ("_dp_" not in key and "_dn_" not in key and not key.endswith("_dp") and not key.endswith("_dn")):
+                            continue
+                        if derivative == "" and ("_dp_" in key or "_dn_" in key or key.endswith("_dp") or key.endswith("_dn")):
+                            continue                        
 
-                    midi_track.append(mido.MetaMessage('track_name', name=full_key, time=0))
 
-                    midi_val_base = (np.round(104 * master_dict[full_key])).astype(int).tolist()
+                        midi_track = mido.MidiTrack()
+                        midi_file.tracks.append(midi_track)
 
-                    for i, midi_value in enumerate(midi_val_base):
-                        time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-                        midi_track.append(
-                            mido.Message('control_change',
-                                    control=cc_number,
-                                    value=midi_value,
-                                    channel=0,
-                                    time=time_tick))
+                        midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
 
-                    
-                midi_file.save("../video_midi/" + prefix + "/" + key + ".mid")
+                        midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
+
+                        for i, midi_value in enumerate(midi_val_base):
+                            time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                            midi_track.append(
+                                mido.Message('control_change',
+                                        control=cc_number,
+                                        value=midi_value,
+                                        channel=7,
+                                        time=time_tick))
+
+                        
+                    file_name = "../video_midi/" + prefix + "/" + var + "_" + suffix 
+                    if averaging != "":
+                        file_name += "_" + averaging
+                    if derivative != "":
+                        file_name += "_" + derivative   
+                    file_name += ".mid"
+                    midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
     print(f"Writing out midi files by postprocessing methods")
@@ -169,7 +186,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                     mido.Message('control_change',
                             control=cc_number,
                             value=midi_value,
-                            channel=0,
+                            channel=7,
                             time=time_tick))
                     
         midi_file.save("../video_midi/" + prefix + "/" + suffix + ".mid")
@@ -194,32 +211,40 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     # Create sort tuples for each key
     sort_tuples = []
     for key in keys_list:
+
+        var_name = key.split("_")[0]
+
         # Calculate the primary sort values
         is_r = 1 if "_r_" in key or key.endswith("_r") else 0
         is_v = 1 if "_v" in key or key.endswith("_v") else 0
-        is_h = 1 if key.startswith("H") else 0
         is_f25 = 1 if "_f25_" in key or key.endswith("_f25") else 0
         is_f5 = 1 if "_f5_" in key or key.endswith("_f5") else 0
+        is_f0 = 1 if is_f25 == 0 and is_f5 == 0 else 0
         is_i = 1 if "_i" in key or key.endswith("_i") else 0
         is_p4 = 1 if "_p4" in key or key.endswith("_p4") else 0
         is_n4 = 1 if "_n4" in key or key.endswith("_n4") else 0
-        is_dp = 1 if "_dp" in key or key.endswith("_dp") else 0
-        is_dn = 1 if "_dn" in key or key.endswith("_dn") else 0
+        is_dp = 1 if "_dp_" in key or key.endswith("_dp") else 0
+        is_dn = 1 if "_dn_" in key or key.endswith("_dn") else 0
         
 
         # Calculate the primary sort value
-        primary_sort = (1e0*is_r + 1e8*is_v + 0*is_h + 1e7*is_f25 + 
-                       1e6*is_f5 + 1e1*is_i + 1e3*is_p4 + 1e2*is_n4 + 1e4*is_dp + 1e5*is_dn)
+        primary_sort = (
+                         1e8*is_f0 + 1e7*is_f5 +
+                         0*is_r + 1e6*is_v +
+                         1e4*is_p4 + 1e5*is_n4 +
+                         1e2*is_dp + 1e3*is_dn +
+                         1e1*is_i +
+                         0)
         
         # Create a tuple with primary sort value and the key itself for alphabetical sorting
-        sort_tuples.append((primary_sort, key))
+        sort_tuples.append((var_name,primary_sort, key))
     
     # Sort first by primary sort value, then alphabetically by key
-    sort_tuples.sort(key=lambda x: (x[0], x[1]))
+    sort_tuples.sort(key=lambda x: (x[0], x[1],x[2]))
     
     # Create a dictionary to store sort values for each key
-    sort_values = {key: sort_val for sort_val, key in sort_tuples}
-    sorted_keys = [t[1] for t in sort_tuples]  # Extract just the keys in sorted order
+    sort_values = {key: sort_val for prefix,sort_val, key in sort_tuples}
+    sorted_keys = [t[2] for t in sort_tuples]  # Extract just the keys in sorted order
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
@@ -257,7 +282,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
 if __name__ == "__main__":
     #prefix = "MzUL2-5jm3f"
     #prefix = "N3_M5zulPentAf2-V3A"
-    prefix = "N2_M3toBSy25f-1"
+    #prefix = "N2_M3toBSy25f-1"
+    prefix = "N6_BSt-3DAf"
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
@@ -265,11 +291,12 @@ if __name__ == "__main__":
                     "std","int"]
     process_list = ["neg","rank", "power","inv","filter","derivative"]
     ticks_per_beat = 480
-    beats_per_minute=82
+    beats_per_minute=126
     frames_per_second=30
-    cc_number = 1
-    filter_narrow = 5
-    filter_wide = 25
+    cc_number = 7
+    beats_per_midi_event = 1
+    filter_narrow = 5 # about 1 bar if every midi event is a beat
+    filter_wide = 25 # about 6 bars if every midi event is a beat
 
     post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_narrow, filter_wide)
 
