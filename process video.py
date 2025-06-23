@@ -403,15 +403,17 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
 
 
     #monochrome metric is the standard deviation of hue weighted by saturation
-    basic_metrics["Hmon_std"] = weighted_circular_std_deg(h, s)
+    # take negative so high value means a high degree of monotonicity
+    basic_metrics["Hmon_std"] = -weighted_circular_std_deg(h, s)
 
     # measure the degree to which the hue is close to each of the 6 cardinal hues
-    basic_metrics["H000_std"] = np.mean((((h + 180 - 0) % 360) - 180)**2)**(1/2)
-    basic_metrics["H060_std"] = np.mean((((h + 180 - 60) % 360) - 180)**2)**(1/2)
-    basic_metrics["H120_std"] = np.mean((((h + 180 - 120) % 360) - 180)**2)**(1/2)
-    basic_metrics["H180_std"] = np.mean((((h + 180 - 180) % 360) - 180)**2)**(1/2)    
-    basic_metrics["H240_std"] = np.mean((((h + 180 - 240) % 360) - 180)**2)**(1/2)  
-    basic_metrics["H300_std"] = np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
+    # take negative so high value means high presencee of that color
+    basic_metrics["H000_std"] = -np.mean((((h + 180 - 0) % 360) - 180)**2)**(1/2)
+    basic_metrics["H060_std"] = -np.mean((((h + 180 - 60) % 360) - 180)**2)**(1/2)
+    basic_metrics["H120_std"] = -np.mean((((h + 180 - 120) % 360) - 180)**2)**(1/2)
+    basic_metrics["H180_std"] = -np.mean((((h + 180 - 180) % 360) - 180)**2)**(1/2)    
+    basic_metrics["H240_std"] = -np.mean((((h + 180 - 240) % 360) - 180)**2)**(1/2)  
+    basic_metrics["H300_std"] = -np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
 
     return basic_metrics
 
