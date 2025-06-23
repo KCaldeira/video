@@ -92,7 +92,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
                     process_dict[key + "_p4"] = process_dict_copy[key] ** 4
-                    process_dict[key + "_n4"] = 1 - (1 - process_dict_copy[key]) ** 4
+                    # process_dict[key + "_n4"] = 1 - (1 - process_dict_copy[key]) ** 4  # This is almost redundant with the _p4_i
 
             if "inv" in process_list:
                 process_dict_copy = process_dict.copy()
@@ -293,7 +293,7 @@ if __name__ == "__main__":
     ticks_per_beat = 480
     beats_per_minute=126
     frames_per_second=30
-    cc_number = 7
+    cc_number = 1
     beats_per_midi_event = 1
     filter_narrow = 5 # about 1 bar if every midi event is a beat
     filter_wide = 25 # about 6 bars if every midi event is a beat
