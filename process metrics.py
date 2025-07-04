@@ -200,10 +200,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
-    master_df.to_excel(prefix + f"_{filter_narrow}_{filter_wide}_derived
-    
-                       .xlsx", index=False)
-    print(f"Derived data saved to {prefix}_derived.xlsx")
+    master_df.to_excel(prefix + f"_{filter_narrow}_{filter_wide}_derived.xlsx", index=False)
+    print(f"Derived data saved to {prefix}_{filter_narrow}_{filter_wide}_derived.xlsx")
 
     # prepare sorted keys for the plots
     keys_list = list(master_dict.keys())  # Convert keys to list first
@@ -299,8 +297,8 @@ if __name__ == "__main__":
     frames_per_second=30
     cc_number = 1
     beats_per_midi_event = 1
-    filter_narrow = 5 # 5 is about 1 bar if every midi event is a beat
-    filter_wide = 25 # 25 is about 6 bars if every midi event is a beat
+    filter_narrow = 9 # 9 is about 2 bars if every midi event is a beat
+    filter_wide = 65 # 65 is about 16 bars if every midi event is a beat
 
     post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_narrow, filter_wide)
 
