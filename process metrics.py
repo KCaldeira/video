@@ -54,7 +54,7 @@ def triangular_filter_odd(data, N):
     return filtered
 
 
-def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_narrow, filter_wide):
+def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values):
 
     if not os.path.exists(f"../video_midi/{prefix}"):
         os.makedirs(f"../video_midi/{prefix}")
@@ -70,41 +70,51 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 continue
             process_dict = {}
 
-            process_dict[key + "_v"] = csv[key]
-
-            if "rank" in process_list:
-                process_dict[key + "_r"] = percentile_data(csv[key])            # first apply a narrow triangular filter
+            # Always add filter suffixes to all metrics
+            if "filter" in process_list:
+                process_dict[key + "_v_f001"] = csv[key]
+                if "rank" in process_list:
+                    process_dict[key + "_r_f001"] = percentile_data(csv[key])
+            else:
+                process_dict[key + "_v"] = csv[key]
+                if "rank" in process_list:
+                    process_dict[key + "_r"] = percentile_data(csv[key])
             
             
-                        # apply an additional 25 imot wode troamgular filter upon request
+                        # apply triangular filters for all specified periods (skip f001 as it's already created)
             if "filter" in process_list:
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
-                    process_dict[key + "_f" + str(filter_narrow)] = triangular_filter_odd(process_dict_copy[key], filter_narrow)
-                    process_dict[key + "_f" + str(filter_wide)] = triangular_filter_odd(process_dict_copy[key], filter_wide)
+                    for filter_period in filter_periods:
+                        if filter_period == 1:
+                            # Skip f001 as it's already created above
+                            continue
+                        else:
+                            # Replace the _f001 suffix with the new filter period
+                            new_key = key.replace("_f001", f"_f{filter_period:03d}")
+                            process_dict[new_key] = triangular_filter_odd(process_dict_copy[key], filter_period)
 
             # scale the data to 0-1
             process_dict_copy = process_dict.copy()
             for key in process_dict_copy:
                 process_dict[key] = scale_data(process_dict[key])
 
-            if "power" in process_list:
+            if "stretch" in process_list and len(stretch_values) > 0:
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
-                    process_dict[key + "_p4"] = process_dict_copy[key] ** 4
-                    # process_dict[key + "_n4"] = 1 - (1 - process_dict_copy[key]) ** 4  # This is almost redundant with the _p4_i
+                    x = process_dict_copy[key]
+                    # Remove the original key and replace with stretched versions
+                    del process_dict[key]
+                    # Add stretched versions
+                    for stretch_value in stretch_values:
+                        process_dict[key + "_s" + str(stretch_value)] = x**stretch_value / (x**stretch_value + (1 - x)**stretch_value)
 
             if "inv" in process_list:
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
                     process_dict[key + "_i"] = 1.0 - process_dict_copy[key]
 
-            if "derivative" in process_list:  # derivative
-                process_dict_copy = process_dict.copy()
-                for key in process_dict_copy:
-                    if not key.endswith("_i"):
-                        process_dict[key + "_dp"] = np.maximum(0, np.gradient(process_dict_copy[key]))
-                        process_dict[key + "_dn"] = np.maximum(0, -np.gradient(process_dict_copy[key]))
+
 
             master_dict.update(process_dict)
 
@@ -116,24 +126,23 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     print(f"Writing out midi files by var, rank/value, and averaging period")
     ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
     frame_count_list = csv.index.tolist()
+    
+    # Create filter suffixes for averaging loop
+    filter_suffixes = [f"f{period:03d}" for period in filter_periods]
+    
     for var in vars:
-        for averaging in ["f25","f5",""]:
+        for averaging in filter_suffixes:
             for suffix in ["v", "r"]:
-                for derivative in ["","d"]:
+
                     midi_file = mido.MidiFile()
                     for key in master_dict:
                         if not key.startswith(var):
                             continue
                         if averaging != "" and "_" + averaging+"_" not in key and not key.endswith("_"+averaging):
                             continue
-                        if averaging == "" and ("_f25_" in key or "_f5_" in key or key.endswith("_f25") or key.endswith("_f5")):
-                            continue
                         if not "_" + suffix + "_" in key and not key.endswith("_"+suffix):
                             continue
-                        if derivative == "d" and ("_dp_" not in key and "_dn_" not in key and not key.endswith("_dp") and not key.endswith("_dn")):
-                            continue
-                        if derivative == "" and ("_dp_" in key or "_dn_" in key or key.endswith("_dp") or key.endswith("_dn")):
-                            continue                        
+                        
 
 
                         midi_track = mido.MidiTrack()
@@ -156,9 +165,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                     file_name = "../video_midi/" + prefix + "/" + var + "_" + suffix 
                     if averaging != "":
                         file_name += "_" + averaging
-                    if derivative != "":
-                        file_name += "_" + derivative   
-                    file_name += f"_{filter_narrow}_{filter_wide}.mid"
+   
+                    file_name += f"_{'_'.join(f'{period:03d}' for period in filter_periods)}.mid"
                     midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
@@ -189,7 +197,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                             channel=7,
                             time=time_tick))
                     
-        midi_file.save("../video_midi/" + prefix + "/" + suffix + f"_{filter_narrow}_{filter_wide}.mid")
+        midi_file.save("../video_midi/" + prefix + "/" + suffix + ".mid")
 
     # write out the master xlsx
     print(f"Writing out master xlsx")
@@ -200,8 +208,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
-    master_df.to_excel(prefix + f"_{filter_narrow}_{filter_wide}_derived.xlsx", index=False)
-    print(f"Derived data saved to {prefix}_{filter_narrow}_{filter_wide}_derived.xlsx")
+    master_df.to_excel(prefix + "_derived.xlsx", index=False)
+    print(f"Derived data saved to {prefix}_derived.xlsx")
 
     # prepare sorted keys for the plots
     keys_list = list(master_dict.keys())  # Convert keys to list first
@@ -217,22 +225,16 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
         # Calculate the primary sort values
         is_r = 1 if "_r_" in key or key.endswith("_r") else 0
         is_v = 1 if "_v" in key or key.endswith("_v") else 0
-        is_f25 = 1 if "_f25_" in key or key.endswith("_f25") else 0
-        is_f5 = 1 if "_f5_" in key or key.endswith("_f5") else 0
-        is_f0 = 1 if is_f25 == 0 and is_f5 == 0 else 0
+        
+
+        
         is_i = 1 if "_i" in key or key.endswith("_i") else 0
-        is_p4 = 1 if "_p4" in key or key.endswith("_p4") else 0
-        is_n4 = 1 if "_n4" in key or key.endswith("_n4") else 0
-        is_dp = 1 if "_dp_" in key or key.endswith("_dp") else 0
-        is_dn = 1 if "_dn_" in key or key.endswith("_dn") else 0
+
         
 
         # Calculate the primary sort value
         primary_sort = (
-                         1e8*is_f0 + 1e7*is_f5 +
                          0*is_r + 1e6*is_v +
-                         1e4*is_p4 + 1e5*is_n4 +
-                         1e2*is_dp + 1e3*is_dn +
                          1e1*is_i +
                          0)
         
@@ -248,7 +250,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
-    pdf = PdfPages(prefix + f"_{filter_narrow}_{filter_wide}_plots.pdf")
+    pdf = PdfPages(prefix + "_plots.pdf")
     
     plt.rcParams['figure.max_open_warning'] = 50  # Allow more figures before warning
 
@@ -291,15 +293,15 @@ if __name__ == "__main__":
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
     metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dcd","dcl","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
                     "std","int"]
-    process_list = ["neg","rank", "power","inv","filter","derivative"]
+    process_list = ["neg","rank", "stretch","inv","filter"]
     ticks_per_beat = 480
     beats_per_minute=84
     frames_per_second=30
     cc_number = 1
     beats_per_midi_event = 1
-    filter_narrow = 9 # 9 is about 2 bars if every midi event is a beat
-    filter_wide = 65 # 65 is about 16 bars if every midi event is a beat
+    filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat (f009), 33 is about 8 bars if every midi event is a beat (f033), 65 is about 16 bars if every midi event is a beat (f065), 129 is about 32 bars if every midi event is a beat (f129)
+    stretch_values = [1,  8]  # Values for stretch processing
 
-    post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_narrow, filter_wide)
+    post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values)
 
 
