@@ -158,7 +158,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                         file_name += "_" + averaging
                     if derivative != "":
                         file_name += "_" + derivative   
-                    file_name += ".mid"
+                    file_name += f"_{filter_narrow}_{filter_wide}.mid"
                     midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
@@ -189,7 +189,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                             channel=7,
                             time=time_tick))
                     
-        midi_file.save("../video_midi/" + prefix + "/" + suffix + ".mid")
+        midi_file.save("../video_midi/" + prefix + "/" + suffix + f"_{filter_narrow}_{filter_wide}.mid")
 
     # write out the master xlsx
     print(f"Writing out master xlsx")
@@ -200,7 +200,9 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
-    master_df.to_excel(prefix + "_derived.xlsx", index=False)
+    master_df.to_excel(prefix + f"_{filter_narrow}_{filter_wide}_derived
+    
+                       .xlsx", index=False)
     print(f"Derived data saved to {prefix}_derived.xlsx")
 
     # prepare sorted keys for the plots
@@ -248,7 +250,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
-    pdf = PdfPages(prefix + "_plots.pdf")
+    pdf = PdfPages(prefix + f"_{filter_narrow}_{filter_wide}_plots.pdf")
     
     plt.rcParams['figure.max_open_warning'] = 50  # Allow more figures before warning
 
@@ -283,7 +285,9 @@ if __name__ == "__main__":
     #prefix = "MzUL2-5jm3f"
     #prefix = "N3_M5zulPentAf2-V3A"
     #prefix = "N2_M3toBSy25f-1"
-    prefix = "N6_BSt-3DAf"
+    #prefix = "N6_BSt-3DAf"
+    prefix = "N8_M3toM2µa7fC2"
+
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
@@ -291,12 +295,12 @@ if __name__ == "__main__":
                     "std","int"]
     process_list = ["neg","rank", "power","inv","filter","derivative"]
     ticks_per_beat = 480
-    beats_per_minute=126
+    beats_per_minute=84
     frames_per_second=30
     cc_number = 1
     beats_per_midi_event = 1
-    filter_narrow = 5 # about 1 bar if every midi event is a beat
-    filter_wide = 25 # about 6 bars if every midi event is a beat
+    filter_narrow = 5 # 5 is about 1 bar if every midi event is a beat
+    filter_wide = 25 # 25 is about 6 bars if every midi event is a beat
 
     post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_narrow, filter_wide)
 
