@@ -54,7 +54,7 @@ def triangular_filter_odd(data, N):
     return filtered
 
 
-def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values):
+def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers):
 
     if not os.path.exists(f"../video_midi/{prefix}"):
         os.makedirs(f"../video_midi/{prefix}")
@@ -107,7 +107,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                     del process_dict[key]
                     # Add stretched versions
                     for stretch_value in stretch_values:
-                        process_dict[key + "_s" + str(stretch_value)] = x**stretch_value / (x**stretch_value + (1 - x)**stretch_value)
+                        for stretch_center in stretch_centers:
+                            process_dict[key + "_s" + str(stretch_value) + "-" + str(stretch_center)] = (x / stretch_center)**stretch_value / ((x / stretch_center)**stretch_value + ((1 - x) / (1 - stretch_center))**stretch_value)
 
             if "inv" in process_list:
                 process_dict_copy = process_dict.copy()
@@ -163,10 +164,9 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
 
                         
                     file_name = "../video_midi/" + prefix + "/" + var + "_" + suffix 
-                    if averaging != "":
+                    if averaging != "f001":
                         file_name += "_" + averaging
-   
-                    file_name += f"_{'_'.join(f'{period:03d}' for period in filter_periods)}.mid"
+                    file_name += ".mid"
                     midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
@@ -286,7 +286,8 @@ if __name__ == "__main__":
     #prefix = "N3_M5zulPentAf2-V3A"
     #prefix = "N2_M3toBSy25f-1"
     #prefix = "N6_BSt-3DAf"
-    prefix = "N8_M3toM2µa7fC2"
+    #prefix = "N8_M3toM2µa7fC2"
+    prefix = "N11_M8zaf-Cdeg-1"
 
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
@@ -295,13 +296,15 @@ if __name__ == "__main__":
                     "std","int"]
     process_list = ["neg","rank", "stretch","inv","filter"]
     ticks_per_beat = 480
-    beats_per_minute=84
+    beats_per_minute=88
     frames_per_second=30
     cc_number = 1
     beats_per_midi_event = 1
     filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat (f009), 33 is about 8 bars if every midi event is a beat (f033), 65 is about 16 bars if every midi event is a beat (f065), 129 is about 32 bars if every midi event is a beat (f129)
     stretch_values = [1,  8]  # Values for stretch processing
+    stretch_centers = [0.5, 0.8, 0.9]  # Centers for stretch processing
 
-    post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values)
+    post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
+                 stretch_values, stretch_centers)
 
 

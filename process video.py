@@ -563,15 +563,17 @@ def process_video_to_csv(video_path,
 #subdir_name = "N2_M3toBSy25f-1" # output prefix 
 #video_file = "N6_BSt-3DAf.wmv"
 #subdir_name = "N6_BSt-3DAf" # output prefix 
-video_file = "N8_M3toM2µa7fC2.wmv"
-subdir_name = "N8_M3toM2µa7fC2" # output prefix 
+#video_file = "N8_M3toM2µa7fC2.wmv"
+#subdir_name = "N8_M3toM2µa7fC2" # output prefix 
+video_file = "N11_M8zaf-Cdeg-1.wmv"
+subdir_name = "N11_M8zaf-Cdeg-1" # output prefix 
 
 process_video_to_csv(video_file, 
-                      subdir_name, # output prefix
+                      subdir_name, # output prefix 
                       frames_per_second=30, 
                       beats_per_midi_event=1,
                       ticks_per_beat=480, 
-                      beats_per_minute=84,  
+                      beats_per_minute=88,  
                       downscale_large=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
                       downscale_medium=10 ) # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
 # process_video_to_csv("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)
