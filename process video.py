@@ -492,11 +492,15 @@ def process_video_to_csv(video_path,
     basic_metrics["H240_std"] = []
     basic_metrics["H300_std"] = []
 
-    # open rhe video file
+    # open the video file
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("Error: Could not open video file.")
         return
+    
+    # Get total number of frames in the video
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print(f"Total frames in video: {total_frames}")
     
     while True:
         ret, frame = cap.read()
@@ -506,7 +510,7 @@ def process_video_to_csv(video_path,
         k = frame_count / frames_per_analysis_frame_real
         k_rounded = round(k)
         frame_count_good = round(k_rounded * frames_per_analysis_frame_real)
-        if frame_count == frame_count_good :
+        if frame_count == frame_count_good or frame_count == total_frames - 1:
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
 
@@ -565,15 +569,23 @@ def process_video_to_csv(video_path,
 #subdir_name = "N6_BSt-3DAf" # output prefix 
 #video_file = "N8_M3toM2µa7fC2.wmv"
 #subdir_name = "N8_M3toM2µa7fC2" # output prefix 
-video_file = "N11_M8zaf-Cdeg-1.wmv"
-subdir_name = "N11_M8zaf-Cdeg-1" # output prefix 
+#video_file = "N11_M8zaf-Cdeg-1.wmv"  
+#subdir_name = "N11_M8zaf-Cdeg-1" # output prefix 
+#video_file = "N9B_M6tonM2ta5f-2.wmv"
+#subdir_name = "N9B_M6tonM2ta5f-2" # output prefix 
+#video_file = "N1_Mzlcgt4f-Cn.wmv"
+#subdir_name = "N1_Mzlcgt4f-Cn" # output prefix     
+#video_file = "N12_sinz2-3j2fv.wmv"
+#subdir_name = "N12_sinz2-3j2fv" # output prefix
+video_file = "N12_sinz2-3j2f.wmv"
+subdir_name = "N12_sinz2-3j2f" # output prefix
 
 process_video_to_csv(video_file, 
                       subdir_name, # output prefix 
                       frames_per_second=30, 
                       beats_per_midi_event=1,
                       ticks_per_beat=480, 
-                      beats_per_minute=88,  
+                      beats_per_minute=100,  
                       downscale_large=100, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)
                       downscale_medium=10 ) # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)
 # process_video_to_csv("path_to_your_video.mp4", "output_prefix", nth_frame=30, frames_per_second=30, ticks_per_beat=480, beats_per_minute=120, cc_number=7, channel=0)

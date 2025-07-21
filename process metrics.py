@@ -134,40 +134,44 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     for var in vars:
         for averaging in filter_suffixes:
             for suffix in ["v", "r"]:
+                for stretch_value in stretch_values:
 
-                    midi_file = mido.MidiFile()
-                    for key in master_dict:
-                        if not key.startswith(var):
-                            continue
-                        if averaging != "" and "_" + averaging+"_" not in key and not key.endswith("_"+averaging):
-                            continue
-                        if not "_" + suffix + "_" in key and not key.endswith("_"+suffix):
-                            continue
-                        
+                        midi_file = mido.MidiFile()
+                        for key in master_dict:
+                            if not key.startswith(var):
+                                continue
+                            if averaging != "" and "_" + averaging+"_" not in key and not key.endswith("_"+averaging):
+                                continue
+                            if not "_" + suffix + "_" in key and not key.endswith("_"+suffix):
+                                continue
+                            # Check if this key has the specific stretch value (any center)
+                            if not f"_s{stretch_value}-" in key:
+                                continue
+                            
 
 
-                        midi_track = mido.MidiTrack()
-                        midi_file.tracks.append(midi_track)
+                            midi_track = mido.MidiTrack()
+                            midi_file.tracks.append(midi_track)
 
-                        midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
+                            midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
 
-                        midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
+                            midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
 
-                        for i, midi_value in enumerate(midi_val_base):
-                            time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-                            midi_track.append(
-                                mido.Message('control_change',
-                                        control=cc_number,
-                                        value=midi_value,
-                                        channel=7,
-                                        time=time_tick))
+                            for i, midi_value in enumerate(midi_val_base):
+                                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                                midi_track.append(
+                                    mido.Message('control_change',
+                                            control=cc_number,
+                                            value=midi_value,
+                                            channel=7,
+                                            time=time_tick))
 
-                        
-                    file_name = "../video_midi/" + prefix + "/" + var + "_" + suffix 
-                    if averaging != "f001":
-                        file_name += "_" + averaging
-                    file_name += ".mid"
-                    midi_file.save(file_name)
+                            
+                        file_name = "../video_midi/" + prefix + "/" + var + "_" + suffix 
+                        if averaging != "f001":
+                            file_name += "_" + averaging
+                        file_name += f"_s{stretch_value}.mid"
+                        midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
     print(f"Writing out midi files by postprocessing methods")
@@ -176,9 +180,29 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
 
     # now get a list of all of the unique key endings after the second underscore
     suffix_list = ["_".join(key.split("_")[1:]) for key in master_dict.keys()]
-    suffix_list = list(set(suffix_list))
+    # Split on "_s" and keep only the beginning part
+    base_suffix_list = []
     for suffix in suffix_list:
-        suffix_key_list = [key for key in master_dict.keys() if key.endswith(suffix)]
+        if "_s" in suffix:
+            base_suffix = suffix.split("_s")[0]
+        else:
+            base_suffix = suffix
+        base_suffix_list.append(base_suffix)
+    
+    # Get unique base suffixes
+    unique_base_suffixes = list(set(base_suffix_list))
+    
+    for base_suffix in unique_base_suffixes:
+        # Find all keys that start with this base suffix (before any stretch processing)
+        suffix_key_list = []
+        for key in master_dict.keys():
+            key_suffix = "_".join(key.split("_")[1:])
+            if "_s" in key_suffix:
+                key_base_suffix = key_suffix.split("_s")[0]
+            else:
+                key_base_suffix = key_suffix
+            if key_base_suffix == base_suffix:
+                suffix_key_list.append(key)
         midi_file = mido.MidiFile()
 
         for key in suffix_key_list:
@@ -197,7 +221,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                             channel=7,
                             time=time_tick))
                     
-        midi_file.save("../video_midi/" + prefix + "/" + suffix + ".mid")
+        midi_file.save("../video_midi/" + prefix + "/" + base_suffix + ".mid")
 
     # write out the master xlsx
     print(f"Writing out master xlsx")
@@ -287,7 +311,10 @@ if __name__ == "__main__":
     #prefix = "N2_M3toBSy25f-1"
     #prefix = "N6_BSt-3DAf"
     #prefix = "N8_M3toM2µa7fC2"
-    prefix = "N11_M8zaf-Cdeg-1"
+    #prefix = "N11_M8zaf-Cdeg-1"
+    #prefix = "N9B_M6tonM2ta5f-2"
+    prefix = "N12_sinz2-3j2f"
+
 
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
@@ -296,13 +323,13 @@ if __name__ == "__main__":
                     "std","int"]
     process_list = ["neg","rank", "stretch","inv","filter"]
     ticks_per_beat = 480
-    beats_per_minute=88
+    beats_per_minute=100
     frames_per_second=30
     cc_number = 1
     beats_per_midi_event = 1
-    filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat (f009), 33 is about 8 bars if every midi event is a beat (f033), 65 is about 16 bars if every midi event is a beat (f065), 129 is about 32 bars if every midi event is a beat (f129)
+    filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
     stretch_values = [1,  8]  # Values for stretch processing
-    stretch_centers = [0.5, 0.8, 0.9]  # Centers for stretch processing
+    stretch_centers = [0.1,0.33,0.67,0.9]  # Centers for stretch processing
 
     post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
                  stretch_values, stretch_centers)
