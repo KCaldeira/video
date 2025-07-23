@@ -8,6 +8,7 @@ import os
 from scipy.stats import rankdata
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+import json
 
 def percentile_data(data):
     """
@@ -313,8 +314,26 @@ if __name__ == "__main__":
     #prefix = "N8_M3toM2µa7fC2"
     #prefix = "N11_M8zaf-Cdeg-1"
     #prefix = "N9B_M6tonM2ta5f-2"
-    prefix = "N12_sinz2-3j2f"
+    #prefix = "N12_sinz2-3j2f"
+    prefix = "N13_Mz10tn3f"
 
+    # Try to load config from JSON if it exists
+    config_filename = f"{prefix}_config.json"
+    if os.path.exists(config_filename):
+        with open(config_filename, 'r') as f:
+            config = json.load(f)
+        ticks_per_beat = config.get("ticks_per_beat", 480)
+        beats_per_minute = config.get("beats_per_minute", 100)
+        frames_per_second = config.get("frames_per_second", 30)
+        cc_number = config.get("cc_number", 1)
+        beats_per_midi_event = config.get("beats_per_midi_event", 1)
+        # You can add more parameters as needed
+    else:
+        ticks_per_beat = 480
+        beats_per_minute=100
+        frames_per_second=30
+        cc_number = 1
+        beats_per_midi_event = 1
 
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
 
@@ -322,11 +341,6 @@ if __name__ == "__main__":
     metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dcd","dcl","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
                     "std","int"]
     process_list = ["neg","rank", "stretch","inv","filter"]
-    ticks_per_beat = 480
-    beats_per_minute=100
-    frames_per_second=30
-    cc_number = 1
-    beats_per_midi_event = 1
     filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
     stretch_values = [1,  8]  # Values for stretch processing
     stretch_centers = [0.1,0.33,0.67,0.9]  # Centers for stretch processing

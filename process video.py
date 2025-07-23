@@ -22,6 +22,7 @@ import re
 from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from collections import defaultdict
+import json
 
 def compute_dark_light_metric(color_channel, tolerance = 0):
     """
@@ -542,6 +543,22 @@ def process_video_to_csv(video_path,
     export_metrics_to_csv(frame_count_list, basic_metrics, csv_filename)
     print(f"Metrics exported to {csv_filename}")
 
+    # Write config to JSON for downstream use
+    config = {
+        "video_file": video_path,
+        "subdir_name": subdir_name,
+        "frames_per_second": frames_per_second,
+        "beats_per_midi_event": beats_per_midi_event,
+        "ticks_per_beat": ticks_per_beat,
+        "beats_per_minute": beats_per_minute,
+        "downscale_large": downscale_large,
+        "downscale_medium": downscale_medium
+    }
+    config_filename = f"{subdir_name}_config.json"
+    with open(config_filename, 'w') as f:
+        json.dump(config, f, indent=2)
+    print(f"Config exported to {config_filename}")
+
     
 
 
@@ -577,8 +594,12 @@ def process_video_to_csv(video_path,
 #subdir_name = "N1_Mzlcgt4f-Cn" # output prefix     
 #video_file = "N12_sinz2-3j2fv.wmv"
 #subdir_name = "N12_sinz2-3j2fv" # output prefix
-video_file = "N12_sinz2-3j2f.wmv"
-subdir_name = "N12_sinz2-3j2f" # output prefix
+#video_file = "N12_sinz2-3j2f.wmv"
+#subdir_name = "N12_sinz2-3j2f" # output prefix
+#video_file = "N13_Mz10tn3f.wmv"
+#subdir_name = "N13_Mz10tn3f" # output prefix
+video_file = "N13_Mz10tn3f.wmv"
+subdir_name = "N13_Mz10tn3f" # output prefix
 
 process_video_to_csv(video_file, 
                       subdir_name, # output prefix 
