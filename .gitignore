@@ -1,0 +1,25 @@
+# Ignore everything by default
+*
+
+# But allow these file types
+!*.py
+!*.txt
+!*.md
+
+# Allow .gitignore itself
+!.gitignore
+
+# Allow directories (so we can navigate into them)
+!*/
+
+# But ignore all files in directories (except the allowed extensions)
+**/*
+!**/*.py
+!**/*.txt
+!**/*.md
+
+# Explicitly ignore virtual environments
+.venv/
+venv/
+env/
+ENV/
