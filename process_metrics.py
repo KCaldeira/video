@@ -233,8 +233,8 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
-    master_df.to_excel(prefix + "_derived.xlsx", index=False)
-    print(f"Derived data saved to {prefix}_derived.xlsx")
+    master_df.to_excel(f"../video_midi/{prefix}/{prefix}_derived.xlsx", index=False)
+    print(f"Derived data saved to ../video_midi/{prefix}/{prefix}_derived.xlsx")
 
     # prepare sorted keys for the plots
     keys_list = list(master_dict.keys())  # Convert keys to list first
@@ -275,7 +275,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
-    pdf = PdfPages(prefix + "_plots.pdf")
+    pdf = PdfPages(f"../video_midi/{prefix}/{prefix}_plots.pdf")
     
     plt.rcParams['figure.max_open_warning'] = 50  # Allow more figures before warning
 
@@ -315,7 +315,9 @@ if __name__ == "__main__":
     #prefix = "N11_M8zaf-Cdeg-1"
     #prefix = "N9B_M6tonM2ta5f-2"
     #prefix = "N12_sinz2-3j2f"
-    prefix = "N13_Mz10tn3f"
+    #prefix = "N13_Mz10tn3f"
+    #prefix = "N18_cosz2-3-An61"
+    prefix = "N17_Mz7fo6C2f"
 
     # Try to load config from JSON if it exists
     config_filename = f"{prefix}_config.json"
