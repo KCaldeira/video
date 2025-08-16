@@ -10,6 +10,57 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import json
 
+def add_derived_columns(csv, metrics):
+    """
+    Add derived columns to the CSV dataframe based on existing metrics.
+    
+    Parameters:
+    - csv: pandas DataFrame containing the metrics
+    - metrics: list of metric names to check for
+    
+    Returns:
+    - csv: pandas DataFrame with additional derived columns
+    """
+    # Check for ee0, ee1, ee2 columns and add ee1r, ee2r if they don't exist
+    ee_base_columns = ['ee0', 'ee1', 'ee2']
+    ee_derived = ['ee1r', 'ee2r']
+    
+    # Check if any color channel has all the required ee columns
+    ee_columns_exist = False
+    for color_channel in ["R", "G", "B", "Gray", "S", "V"]:
+        ee0_col = f"{color_channel}_ee0"
+        ee1_col = f"{color_channel}_ee1"
+        ee2_col = f"{color_channel}_ee2"
+        if all(col in csv.columns for col in [ee0_col, ee1_col, ee2_col]):
+            ee_columns_exist = True
+            ee1r_col = f"{color_channel}_ee1r"
+            ee2r_col = f"{color_channel}_ee2r"
+            
+            # Avoid division by zero
+            csv[ee1r_col] = np.where(csv[ee0_col] != 0, csv[ee1_col] / csv[ee0_col], 0)
+            csv[ee2r_col] = np.where(csv[ee0_col] != 0, csv[ee2_col] / csv[ee0_col], 0)
+    
+    # Check for es0, es1, es2 columns and add es1r, es2r if they don't exist
+    es_base_columns = ['es0', 'es1', 'es2']
+    es_derived = ['es1r', 'es2r']
+    
+    # Check if any color channel has all the required es columns
+    es_columns_exist = False
+    for color_channel in ["R", "G", "B", "Gray", "S", "V"]:
+        es0_col = f"{color_channel}_es0"
+        es1_col = f"{color_channel}_es1"
+        es2_col = f"{color_channel}_es2"
+        if all(col in csv.columns for col in [es0_col, es1_col, es2_col]):
+            es_columns_exist = True
+            es1r_col = f"{color_channel}_es1r"
+            es2r_col = f"{color_channel}_es2r"
+            
+            # Avoid division by zero
+            csv[es1r_col] = np.where(csv[es0_col] != 0, csv[es1_col] / csv[es0_col], 0)
+            csv[es2r_col] = np.where(csv[es0_col] != 0, csv[es2_col] / csv[es0_col], 0)
+    
+    return csv
+
 def percentile_data(data):
     """
     Transform the vector <data> into a percentile list where 0 is the lowest and 1 the highest.
@@ -338,10 +389,14 @@ if __name__ == "__main__":
         beats_per_midi_event = 1
 
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
-
+    
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dcd","dcl","ee1","ee2","ee3","ed1","ed2","ed3","es1","es2","es3",
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dcd","dcl",
+                    "ee0","ee1","ee2","ee1r","ee2r","ed0","ed1","ed2","es0","es1","es2","es1r","es2r",
                     "std","int"]
+    
+    # Add derived columns
+    csv = add_derived_columns(csv, metric_names)
     process_list = ["neg","rank", "stretch","inv","filter"]
     filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
     stretch_values = [1,  8]  # Values for stretch processing

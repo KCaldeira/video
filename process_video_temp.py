@@ -228,25 +228,27 @@ def weighted_std(values, weights):
 
 def error_dispersion_metrics(color_channel, downscale_factor):
     """
-    Detect circles in a color channel using Hough Transform.
-    Returns metrics indicating the presence, size, and robustness of circles.
+    Compute error dispersion metrics for a color channel.
+    Returns metrics indicating the spatial distribution of information at different scales.
     
     Parameters:
     - color_channel: color channel
     - downscale_factor: Scale factor for downscaling before detection
-    - downscale_medium: Scale factor for downscaling before detection
     
     Returns:
-    - non_normalized_circle_metric0: Sum of circle confidences
-    - non_normalized_circle_metric2: Sum of (radius^2 * confidence)
-    - non_normalized_circle_metric4: Sum of (radius^4 * confidence)
-    - n_circles: Number of circles detected
-    - area_circles: Total area of detected circles
-    - circle_confidences: List of confidence values for each circle
+    - mnsqerror0: Mean squared error for total information (uniform weights)
+    - mnsqerror1: Mean squared error for large scale information
+    - mnsqerror2: Mean squared error for small scale information
+    - dist0: Distance of total information center from image center
+    - dist1: Distance of large scale information center from image center
+    - dist2: Distance of small scale information center from image center
+    - stdev0: Spatial standard deviation of total information
+    - stdev1: Spatial standard deviation of large scale information
+    - stdev2: Spatial standard deviation of small scale information
     """
     # if uniform color return zeros
     if np.max(color_channel) == np.min(color_channel):
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     h, w = color_channel.shape[0:2]
 
     # Downscale and then upscale
@@ -274,31 +276,38 @@ def error_dispersion_metrics(color_channel, downscale_factor):
     info_large = (restored1 - np.mean(color_channel))**2 / (info_total + 1e-6) # fraction of variance in large scale
     info_small = (color_channel - restored1)**2 / (info_total + 1e-6) # fraction of variance in small scale
 
+    # Create info_total weights (uniform distribution across the image)
+    info_total_weights = np.ones_like(color_channel)
 
     # Compute mean squared error (MSE) between original and restored image
+    meanx0 = np.average( X, weights= info_total_weights)
     meanx1 = np.average( X, weights= info_large)
     meanx2 = np.average( X, weights= info_small)
  
+    meany0 = np.average( Y, weights= info_total_weights)
     meany1 = np.average( Y, weights= info_large)
     meany2 = np.average( Y, weights= info_small)
 
+    stddevx0 = weighted_std( X, info_total_weights)
     stddevx1 = weighted_std( X, info_large)
     stddevx2 = weighted_std( X, info_small)
+    stddevy0 = weighted_std( Y, info_total_weights)
     stddevy1 = weighted_std( Y, info_large)
     stddevy2 = weighted_std( Y, info_small)
 
+    mnsqerror0 = np.average(info_total_weights)
     mnsqerror1 = np.average(info_large)
     mnsqerror2 = np.average(info_small)
 
+    dist0 = np.sqrt((meanx0 - centerx)**2 + (meany0 - centery)**2)
     dist1 = np.sqrt((meanx1 - centerx)**2 + (meany1 - centery)**2)
     dist2 = np.sqrt((meanx2 - centerx)**2 + (meany2 - centery)**2)
 
-
+    stdev0 = np.sqrt(stddevx0**2 + stddevy0**2)
     stdev1 = np.sqrt(stddevx1**2 + stddevy1**2)
     stdev2 = np.sqrt(stddevx2**2 + stddevy2**2)
 
-
-    return mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 
+    return mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 
 
 
 def bgr_to_hsv(b, g, r):
@@ -377,7 +386,7 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         # at the specified spatial scale
 
         # Add error detection metrics
-        mnsqerror1, mnsqerror2, dist1, dist2, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_large)
+        mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_large)
         # Add line symmetry metrics, aimed at detecting circles in an image
         mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_medium)
 
@@ -390,10 +399,13 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         basic_metrics[f"{color_channel_name}_xps"] = transpose_metric_value
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
+        basic_metrics[f"{color_channel_name}_ee0"] = mnsqerror0  # how much total detail?
         basic_metrics[f"{color_channel_name}_ee1"] = mnsqerror1  # how much low res detail?
         basic_metrics[f"{color_channel_name}_ee2"] = mnsqerror2  # How much high res detail?
+        basic_metrics[f"{color_channel_name}_ed0"] = dist0  # distance of total error from center of image
         basic_metrics[f"{color_channel_name}_ed1"] = dist1  # distance of low res error from center of image
         basic_metrics[f"{color_channel_name}_ed2"] = dist2  # distance of high res error from center of image
+        basic_metrics[f"{color_channel_name}_es0"] = stdev0  # How much spatial variation in total detail
         basic_metrics[f"{color_channel_name}_es1"] = stdev1  # How much spatial variation in low res detail
         basic_metrics[f"{color_channel_name}_es2"] = stdev2  # How much spatial variation in high res detail
         basic_metrics[f"{color_channel_name}_lmd"] = mediancorr
@@ -480,7 +492,7 @@ def process_video_to_csv(video_path,
 
     # Define metric categories that get computed by <compute_metrics>
     # and the color channels that get computed
-    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee1","ee2","ed1","ed2","es1","es2","lmd","l10","l90","dcd","dcl"]
+    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee0","ee1","ee2","ed0","ed1","ed2","es0","es1","es2","lmd","l10","l90","dcd","dcl"]
     color_channel_names = ["R", "G", "B", "Gray","S","V"]
     basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
                for color_channel_name in color_channel_names for metric_name in metric_names}
