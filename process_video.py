@@ -23,7 +23,110 @@ from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from collections import defaultdict
 import json
+import time
+import functools
+from datetime import datetime
 
+# Global timing dictionary to store timing data
+timing_data = {
+    'function_times': defaultdict(list),
+    'total_start_time': None,
+    'total_end_time': None,
+    'frame_count': 0
+}
+
+def timing_decorator(func_name=None):
+    """
+    Decorator to time function execution and store results in global timing_data
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            result = func(*args, **kwargs)
+            end_time = time.time()
+            
+            # Use function name or custom name
+            name = func_name if func_name else func.__name__
+            timing_data['function_times'][name].append(end_time - start_time)
+            
+            return result
+        return wrapper
+    return decorator
+
+def print_timing_summary():
+    """
+    Print a comprehensive timing summary after processing is complete
+    """
+    if timing_data['total_start_time'] is None or timing_data['total_end_time'] is None:
+        print("No timing data available")
+        return
+    
+    total_time = timing_data['total_end_time'] - timing_data['total_start_time']
+    frame_count = timing_data['frame_count']
+    
+    print("\n" + "="*80)
+    print("TIMING SUMMARY")
+    print("="*80)
+    print(f"Total processing time: {total_time:.2f} seconds")
+    print(f"Frames processed: {frame_count}")
+    print(f"Average time per frame: {total_time/frame_count:.4f} seconds")
+    print(f"Processing rate: {frame_count/total_time:.2f} frames/second")
+    
+    print("\n" + "-"*80)
+    print("FUNCTION TIMING BREAKDOWN")
+    print("-"*80)
+    
+    # Calculate total time spent in all functions
+    total_function_time = 0
+    for func_name, times in timing_data['function_times'].items():
+        total_function_time += sum(times)
+    
+    # Sort functions by total time (descending)
+    sorted_functions = sorted(
+        timing_data['function_times'].items(),
+        key=lambda x: sum(x[1]),
+        reverse=True
+    )
+    
+    print(f"{'Function':<30} {'Total Time':<12} {'Avg Time':<12} {'% of Total':<10} {'Calls':<8}")
+    print("-" * 80)
+    
+    for func_name, times in sorted_functions:
+        total_func_time = sum(times)
+        avg_func_time = total_func_time / len(times) if times else 0
+        percent_of_total = (total_func_time / total_time) * 100 if total_time > 0 else 0
+        
+        print(f"{func_name:<30} {total_func_time:<12.4f} {avg_func_time:<12.4f} {percent_of_total:<10.2f} {len(times):<8}")
+    
+    print("-" * 80)
+    print(f"{'TOTAL FUNCTION TIME':<30} {total_function_time:<12.4f} {'':<12} {(total_function_time/total_time)*100:<10.2f}")
+    print(f"{'OVERHEAD/OTHER':<30} {total_time - total_function_time:<12.4f} {'':<12} {((total_time - total_function_time)/total_time)*100:<10.2f}")
+    
+    # Save timing data to JSON file
+    timing_summary = {
+        'total_time': total_time,
+        'frame_count': frame_count,
+        'avg_time_per_frame': total_time/frame_count,
+        'processing_rate_fps': frame_count/total_time,
+        'function_breakdown': {
+            func_name: {
+                'total_time': sum(times),
+                'avg_time': sum(times) / len(times) if times else 0,
+                'calls': len(times),
+                'percent_of_total': (sum(times) / total_time) * 100 if total_time > 0 else 0
+            }
+            for func_name, times in timing_data['function_times'].items()
+        }
+    }
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timing_filename = f"timing_summary_{timestamp}.json"
+    with open(timing_filename, 'w') as f:
+        json.dump(timing_summary, f, indent=2)
+    print(f"\nDetailed timing data saved to: {timing_filename}")
+
+@timing_decorator("compute_dark_light_metric")
 def compute_dark_light_metric(color_channel, tolerance = 0):
     """
     Compute the number of pixels equal to the darkest and lightest values in each frame
@@ -38,89 +141,9 @@ def compute_dark_light_metric(color_channel, tolerance = 0):
     # return the number of pixels equal to the darkest and lightest values
     return dark_count, light_count
 
-def line_symmetry_metric(color_channel, downscale_factor):
-    """
-    If there were a set of concentric circles in the image, then any vertical or horizontal slice should have a symmetry around some point.
-    It would be the central point if the concentric circles were at the center of the image.
-    
-    The algorithm sweeps through all vertical lines in the central 50% of the image and then all horizontal lines in the central 50% of the image.
-    For each line segment, the maximum correlation between the left and right parts of the line segment are computed.
-    """
-    # if uniform color return zeros
-    if np.max(color_channel) == np.min(color_channel):
-        return 0.0, 0.0, 0.0
 
-    # Original size
-    h, w = color_channel.shape[0:2]
-
-    # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
-    hd, wd = downscaled.shape[0:2]
-
-    corrlistx = []
-    # sweep through all vertical lines in the central 50% of the image
-    for ix in range(wd//4, 3*wd//4):
-        vec = downscaled[:, ix]
-        corrlist_column = []
-        half_height = hd // 4
-        for iy in range(half_height, 3*half_height):
-            try:
-                left_vec = vec[iy - half_height:iy][::-1]
-                right_vec = vec[iy + 1:iy + 1 + half_height]
-                # Check if vectors are too short or have zero variance
-                if len(left_vec) < 2 or len(right_vec) < 2 or \
-                   np.var(left_vec) == 0 or np.var(right_vec) == 0:
-                    corr = 0.0
-                else:
-                    with np.errstate(divide='ignore', invalid='ignore'):
-                        corr = np.corrcoef(left_vec, right_vec)[0, 1]
-                    if np.isnan(corr):
-                        corr = 0.0
-                corrlist_column.append(corr)
-            except:
-                corrlist_column.append(0.0)
-        corrlistx.append(max(0.0, max(corrlist_column)))
-
-    corrlisty = []
-    # sweep through all horizontal lines in the central 50% of the image
-    for iy in range(hd//4, 3*hd//4):
-        vec = downscaled[iy, :]
-        corrlist_column = []
-        half_width = wd // 4
-        for ix in range(half_width, 3*half_width):
-            try:
-                left_vec = vec[ix - half_width:ix][::-1]
-                right_vec = vec[ix + 1:ix + 1 + half_width]
-                # Check if vectors are too short or have zero variance
-                if len(left_vec) < 2 or len(right_vec) < 2 or \
-                   np.var(left_vec) == 0 or np.var(right_vec) == 0:
-                    corr = 0.0
-                else:
-                    with np.errstate(divide='ignore', invalid='ignore'):
-                        corr = np.corrcoef(left_vec, right_vec)[0, 1]
-                    if np.isnan(corr):
-                        corr = 0.0
-                corrlist_column.append(corr)
-            except:
-                corrlist_column.append(0.0)
-        corrlisty.append(max(0.0, max(corrlist_column)))
-
-    # Compute statistics
-    mediancorrx = np.median(corrlistx)
-    mediancorry = np.median(corrlisty)
-    mediancorr = np.sqrt(mediancorrx * mediancorry)
-    # 10th percentiles
-    tenthcorrx = np.percentile(corrlistx, 10)
-    tenthcorry = np.percentile(corrlisty, 10)
-    tenthcorr = np.sqrt(tenthcorrx * tenthcorry)
-    # 90th percentile
-    ninetiethcorrx = np.percentile(corrlistx, 90)
-    ninetiethcorry = np.percentile(corrlisty, 90)   
-    ninetiethcorr = np.sqrt(ninetiethcorrx * ninetiethcorry)
-
-    return mediancorr, tenthcorr, ninetiethcorr
-
-def tranpose_metric(color_channel, downscale_factor):
+@timing_decorator("compute_transpose_metric")
+def compute_transpose_metric(color_channel, downscale_factor):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
@@ -145,7 +168,8 @@ def tranpose_metric(color_channel, downscale_factor):
 
     return normalized_mse
 
-def reflect_metric(color_channel, downscale_factor=4):
+@timing_decorator("compute_reflect_metric")
+def compute_reflect_metric(color_channel, downscale_factor=4):
     """
     Returns a metric of information loss when a color channel from a frame 
     is downscaled and then upscaled.
@@ -173,7 +197,8 @@ def reflect_metric(color_channel, downscale_factor=4):
 
     return normalized_mse
 
-def radial_symmetry_metric(color_channel, dowscale_factor):
+@timing_decorator("compute_radial_symmetry_metric")
+def compute_radial_symmetry_metric(color_channel, dowscale_factor):
     """
     Compute radial symmetry metric for a color channel with distance bins of width `scale_factor`.
     """
@@ -226,7 +251,8 @@ def weighted_std(values, weights):
     # Return standard deviation (square root of variance)
     return np.sqrt(weighted_variance)
 
-def error_dispersion_metrics(color_channel, downscale_factor):
+@timing_decorator("compute_error_dispersion_metrics")
+def compute_error_dispersion_metrics(color_channel, downscale_factor):
     """
     Compute error dispersion metrics for a color channel.
     Returns metrics indicating the spatial distribution of information at different scales.
@@ -357,9 +383,6 @@ def weighted_circular_std_deg(hue, saturation):
     return np.rad2deg(np.sqrt(-2 * np.log(R_w)))
 
 
-
-
-
 def compute_basic_metrics(frame, downscale_large, downscale_medium):
     """
     Compute different intensity-based metrics on R, G, B, and color channels.
@@ -378,17 +401,16 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         variance = np.var(color_channel)
 
 
-        transpose_metric_value = tranpose_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
+        transpose_metric_value = compute_transpose_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        reflect_metric_value = reflect_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
+        reflect_metric_value = compute_reflect_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        radial_symmetry_metric_value = radial_symmetry_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
+        radial_symmetry_metric_value = compute_radial_symmetry_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
 
         # Add error detection metrics
-        mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 = error_dispersion_metrics(color_channel, downscale_large)
-        # Add line symmetry metrics, aimed at detecting circles in an image
-        mediancorr, tenthcorr, ninetiethcorr = line_symmetry_metric(color_channel, downscale_medium)
+        mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 = compute_error_dispersion_metrics(color_channel, downscale_large)
+
 
         dark_count, light_count = compute_dark_light_metric(color_channel, 5) # needs to be within 5 (0 - 255) unites of max or min light or dark values
 
@@ -408,9 +430,6 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         basic_metrics[f"{color_channel_name}_es0"] = stdev0  # How much spatial variation in total detail
         basic_metrics[f"{color_channel_name}_es1"] = stdev1  # How much spatial variation in low res detail
         basic_metrics[f"{color_channel_name}_es2"] = stdev2  # How much spatial variation in high res detail
-        basic_metrics[f"{color_channel_name}_lmd"] = mediancorr
-        basic_metrics[f"{color_channel_name}_l10"] = tenthcorr
-        basic_metrics[f"{color_channel_name}_l90"] = ninetiethcorr
         basic_metrics[f"{color_channel_name}_dcd"] = dark_count
         basic_metrics[f"{color_channel_name}_dcl"] = light_count
 
@@ -429,6 +448,173 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
     basic_metrics["H300_std"] = -np.mean((((h + 180 - 300) % 360) - 180)**2)**(1/2)
 
     return basic_metrics
+
+@timing_decorator("compute_lucas_kanade_metrics")
+def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_region_ratio=1.0, downscale_factor=None):
+    """
+    Compute Lucas-Kanade optical flow metrics between two color channels.
+    Extracts zoom and rotation information from the flow field using a centered region.
+    
+    Parameters:
+    - color_channel: Current frame color channel
+    - color_channel_prior: Previous frame color channel  
+    - center_region_ratio: Size of centered region as fraction of shorter dimension (0.5 = 50% of shorter side)
+    - downscale_factor: Factor to downscale the centered region (None = no downscaling)
+    
+    Returns:
+    - Dictionary of flow-based metrics
+    """
+    # Convert to float32 for optical flow
+    curr = color_channel.astype(np.float32)
+    prev = color_channel_prior.astype(np.float32)
+    
+    # Calculate optical flow using Lucas-Kanade on full resolution
+    flow = cv2.calcOpticalFlowFarneback(
+        prev, curr, 
+        None,  # No initial flow
+        pyr_scale=0.5,  # Pyramid scale
+        levels=3,       # Number of pyramid levels
+        winsize=15,     # Window size
+        iterations=3,   # Iterations
+        poly_n=5,       # Polynomial degree
+        poly_sigma=1.2, # Gaussian sigma
+        flags=0
+    )
+    
+    # Extract flow components
+    flow_x = flow[:, :, 0]  # Horizontal flow
+    flow_y = flow[:, :, 1]  # Vertical flow
+    
+    # Calculate center of image
+    center_y, center_x = flow.shape[0] // 2, flow.shape[1] // 2
+    
+    # Calculate size of centered region
+    shorter_dim = min(flow.shape[0], flow.shape[1])
+    region_size = int(shorter_dim * center_region_ratio)
+    
+    # Calculate region boundaries
+    start_y = center_y - region_size // 2
+    end_y = center_y + region_size // 2
+    start_x = center_x - region_size // 2
+    end_x = center_x + region_size // 2
+    
+    # Ensure boundaries are within image
+    start_y = max(0, start_y)
+    end_y = min(flow.shape[0], end_y)
+    start_x = max(0, start_x)
+    end_x = min(flow.shape[1], end_x)
+    
+    # Extract centered region
+    flow_x_center = flow_x[start_y:end_y, start_x:end_x]
+    flow_y_center = flow_y[start_y:end_y, start_x:end_x]
+    
+    # Downscale the centered region if requested
+    if downscale_factor is not None:
+        h_center, w_center = flow_x_center.shape
+        h_small = h_center // downscale_factor
+        w_small = w_center // downscale_factor
+        flow_x_center = cv2.resize(flow_x_center, (w_small, h_small))
+        flow_y_center = cv2.resize(flow_y_center, (w_small, h_small))
+    
+    # Create coordinate grids for the centered region (after downscaling if applied)
+    h_center, w_center = flow_x_center.shape
+    y_coords, x_coords = np.meshgrid(
+        np.arange(h_center), 
+        np.arange(w_center), 
+        indexing='ij'
+    )
+    
+    # Calculate relative positions from center
+    rel_x = x_coords - center_x
+    rel_y = y_coords - center_y
+    
+    # Calculate distance from center
+    distance_from_center = np.sqrt(rel_x**2 + rel_y**2)
+    
+    # Zoom metrics (divergence of flow) - only in centered region
+    # Positive divergence = zoom out, negative = zoom in
+    # Divergence = ∂u/∂x + ∂v/∂y (approximated using finite differences)
+    du_dx = np.gradient(flow_x_center, axis=1)
+    dv_dy = np.gradient(flow_y_center, axis=0)
+    zoom_divergence = float(np.mean(du_dx + dv_dy))
+    
+    # Rotation metrics (curl of flow) - only in centered region
+    # Positive curl = counterclockwise rotation, negative = clockwise
+    # Curl = ∂v/∂x - ∂u/∂y (approximated using finite differences)
+    dv_dx = np.gradient(flow_y_center, axis=1)
+    du_dy = np.gradient(flow_x_center, axis=0)
+    rotation_curl = float(np.mean(dv_dx - du_dy))
+    
+    # Overall motion magnitude - full image
+    motion_magnitude = float(np.mean(np.sqrt(flow_x**2 + flow_y**2)))
+    
+    # Motion direction (angle) - full image
+    motion_angle = float(np.arctan2(np.mean(flow_y), np.mean(flow_x)))
+    
+    # Radial vs tangential motion - only in centered region
+    # Radial: motion toward/away from center (projection onto radial direction)
+    # Unit radial vector = (rel_x, rel_y) / distance_from_center
+    unit_radial_x = rel_x / (distance_from_center + 1e-6)
+    unit_radial_y = rel_y / (distance_from_center + 1e-6)
+    radial_motion = float(np.mean(flow_x_center * unit_radial_x + flow_y_center * unit_radial_y))
+    
+    # Tangential: motion perpendicular to radius (projection onto tangential direction)
+    # Unit tangential vector = (-rel_y, rel_x) / distance_from_center (perpendicular to radial)
+    unit_tangential_x = -rel_y / (distance_from_center + 1e-6)
+    unit_tangential_y = rel_x / (distance_from_center + 1e-6)
+    tangential_motion = float(np.mean(flow_x_center * unit_tangential_x + flow_y_center * unit_tangential_y))
+    
+    # Motion variance (how uniform the motion is) - full image
+    motion_variance = float(np.var(flow_x) + np.var(flow_y))
+    
+    return {
+        'czd': zoom_divergence,      # Zoom divergence
+        'crc': rotation_curl,        # Rotation curl  
+        'cmm': motion_magnitude,   # Overall motion magnitude
+        'cma': motion_angle,       # Motion direction angle
+        'crm': radial_motion,      # Radial motion component
+        'ctm': tangential_motion,    # Tangential motion component
+        'cmv': motion_variance     # Motion variance
+    }
+
+def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium):
+    """
+    Compute metrics that measure rates of change between consecutive frames.
+    These metrics capture temporal dynamics and motion information.
+    
+    Parameters:
+    - frame: Current frame
+    - frame_prior: Previous frame
+    - downscale_large: Large scale analysis factor
+    - downscale_medium: Medium scale analysis factor
+    
+    Returns:
+    - Dictionary of change metrics
+    """
+    change_metrics = {}
+    
+    # Split frames into color channels
+    b, g, r = cv2.split(frame)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    h, s, v = bgr_to_hsv(b, g, r)
+    
+    b_prior, g_prior, r_prior = cv2.split(frame_prior)
+    gray_prior = cv2.cvtColor(frame_prior, cv2.COLOR_BGR2GRAY)
+    h_prior, s_prior, v_prior = bgr_to_hsv(b_prior, g_prior, r_prior)
+    
+    # Process each color channel
+    for color_channel_name, color_channel, color_channel_prior in [
+        ("R", r, r_prior), ("G", g, g_prior), ("B", b, b_prior),
+        ("Gray", gray, gray_prior), ("S", s, s_prior), ("V", v, v_prior)
+    ]:
+        # Compute Lucas-Kanade metrics for this color channel
+        lk_metrics = compute_lucas_kanade_metrics(color_channel, color_channel_prior, 1.0, 2)
+        
+        # Add color channel prefix to metric names
+        for metric_name, metric_value in lk_metrics.items():
+            change_metrics[f"{color_channel_name}_{metric_name}"] = metric_value
+    
+    return change_metrics
 
 # Export metrics to CSV
 def export_metrics_to_csv(frame_count_list, metrics, filename):
@@ -489,21 +675,12 @@ def process_video_to_csv(video_path,
 
     frame_count = 0
     frame_count_list = []
+    frame_prior = None  # Store immediately previous frame for change metrics
 
-    # Define metric categories that get computed by <compute_metrics>
-    # and the color channels that get computed
-    metric_names = ["avg", "var", "xps", "rfl", "rad", "ee0","ee1","ee2","ed0","ed1","ed2","es0","es1","es2","lmd","l10","l90","dcd","dcl"]
-    color_channel_names = ["R", "G", "B", "Gray","S","V"]
-    basic_metrics = {f"{color_channel_name}_{metric_name}": [] 
-               for color_channel_name in color_channel_names for metric_name in metric_names}
-    # add metrics that are outside of the normal grouping
-    basic_metrics["Hmon_std"] = []
-    basic_metrics["H000_std"] = []
-    basic_metrics["H060_std"] = []
-    basic_metrics["H120_std"] = []
-    basic_metrics["H180_std"] = []
-    basic_metrics["H240_std"] = []
-    basic_metrics["H300_std"] = []
+    # Initialize empty metrics dictionary - will be populated dynamically
+    basic_metrics = {}
+    
+    # Change metrics will be added directly to basic_metrics dictionary
 
     # open the video file
     cap = cv2.VideoCapture(video_path)
@@ -515,27 +692,53 @@ def process_video_to_csv(video_path,
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     print(f"Total frames in video: {total_frames}")
     
+    # Set total start time for timing
+    timing_data['total_start_time'] = time.time()
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
+        # Always store the current frame for change metrics (even if we don't process it)
+        if frame_prior is None:
+            frame_prior = frame.copy()
+        
         k = frame_count / frames_per_analysis_frame_real
         k_rounded = round(k)
         frame_count_good = round(k_rounded * frames_per_analysis_frame_real)
         if frame_count == frame_count_good or frame_count == total_frames - 1:
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
+            timing_data['frame_count'] += 1
 
             metric_results = compute_basic_metrics(frame, downscale_large, downscale_medium)
 
-            #append to the dictionary of results
-            for key, value in metric_results.items():
+            # Compute change metrics with the immediately previous frame
+            change_results = compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium)
+            
+            # Add change metrics directly to basic_metrics
+            for key, value in change_results.items():
+                if key not in basic_metrics:
+                    basic_metrics[key] = []
                 basic_metrics[key].append(value)
 
+            # Append basic metrics to the dictionary of results
+            for key, value in metric_results.items():
+                if key not in basic_metrics:
+                    basic_metrics[key] = []
+                basic_metrics[key].append(value)
+        
+        # Always update frame_prior to the current frame for next iteration
+        frame_prior = frame.copy()
         frame_count += 1
 
     cap.release()
+
+    # Set total end time for timing
+    timing_data['total_end_time'] = time.time()
+    # Print timing summary
+    print_timing_summary()
 
     #now compute derivative metrics that are computed after all frames are processed
     basic_metrics["Hmon_std"] = np.array(basic_metrics["Hmon_std"])
@@ -577,41 +780,7 @@ def process_video_to_csv(video_path,
 
 
 # Example usage
-#video_file = "Mz3DllgimbrV2.wmv"  #  small test video file
-#subdir_name = "Mz3DllgimbrV2" # output prefix
-#video_file = "He saw Julias everywhere (MzJuliaV2e).wmv"
-#video_file = "Mz3DllgimbrV2B.wmv"
-#subdir_name = "Mz3DllgimbrV2B" # output prefix
-#video_file = "M10zul.mp4"
-#subdir_name = "M10zul" # output prefix
-#video_file = "JuliaInJulia-Mzljdjb6fa2f.wmv"
-#subdir_name = "JuliaInJulia" # output prefix
-#video_file = "MzUL2-5jm3f.wmv"
-#subdir_name = "MzUL2-5jm3f" # output prefix
-#video_file = "WhatsApp Video 2023-09-06 at 7.38.17 AM.mp4"
-#subdir_name = "WhatsApp" # output prefix
-#video_file = "N3_M5zulPentAf2-V3A.wmv"
-#subdir_name = "N3_M5zulPentAf2-V3A" # output prefix 
-#video_file = "N2_M3toBSy25f-1.wmv"
-#subdir_name = "N2_M3toBSy25f-1" # output prefix 
-#video_file = "N6_BSt-3DAf.wmv"
-#subdir_name = "N6_BSt-3DAf" # output prefix 
-#video_file = "N8_M3toM2µa7fC2.wmv"
-#subdir_name = "N8_M3toM2µa7fC2" # output prefix 
-#video_file = "N11_M8zaf-Cdeg-1.wmv"  
-#subdir_name = "N11_M8zaf-Cdeg-1" # output prefix 
-#video_file = "N9B_M6tonM2ta5f-2.wmv"
-#subdir_name = "N9B_M6tonM2ta5f-2" # output prefix 
-#video_file = "N1_Mzlcgt4f-Cn.wmv"
-#subdir_name = "N1_Mzlcgt4f-Cn" # output prefix     
-#video_file = "N12_sinz2-3j2fv.wmv"
-#subdir_name = "N12_sinz2-3j2fv" # output prefix
-#video_file = "N12_sinz2-3j2f.wmv"
-#subdir_name = "N12_sinz2-3j2f" # output prefix
-#video_file = "N13_Mz10tn3f.wmv"
-#subdir_name = "N13_Mz10tn3f" # output prefix
-#video_file = "N18_cosz2-3-An61.wmv"
-#subdir_name = "N18_cosz2-3-An61" # output prefix
+
 video_file = "N17_Mz7fo6C2f.wmv"
 subdir_name = "N17_Mz7fo6C2f" # output prefix
 

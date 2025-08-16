@@ -400,7 +400,7 @@ if __name__ == "__main__":
     process_list = ["neg","rank", "stretch","inv","filter"]
     filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
     stretch_values = [1,  8]  # Values for stretch processing
-    stretch_centers = [0.1,0.33,0.67,0.9]  # Centers for stretch processing
+    stretch_centers = [0.33,0.67]  # Centers for stretch processing
 
     post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
                  stretch_values, stretch_centers)
