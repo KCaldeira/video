@@ -272,30 +272,30 @@ def error_dispersion_metrics(color_channel, downscale_factor):
     # now let's see what is the standard deviation 
     # convert Nan's to zeros in color_channel
     # color_channel = np.where(np.isnan(color_channel), 0, color_channel)
-    info_total = np.var(color_channel)
-    info_large = (restored1 - np.mean(color_channel))**2 / (info_total + 1e-6) # fraction of variance in large scale
-    info_small = (color_channel - restored1)**2 / (info_total + 1e-6) # fraction of variance in small scale
 
-    # Create info_total weights (uniform distribution across the image)
-    info_total_weights = np.ones_like(color_channel)
+   # Use the actual variance as info_total weights (represents total information content)
+    info_total = (color_channel - np.mean(color_channel))**2
+
+    info_large = (restored1 - np.mean(color_channel))**2  # variance in large scale
+    info_small = (color_channel - restored1)**2  # variance in small scale
 
     # Compute mean squared error (MSE) between original and restored image
-    meanx0 = np.average( X, weights= info_total_weights)
+    meanx0 = np.average( X, weights= info_total)
     meanx1 = np.average( X, weights= info_large)
     meanx2 = np.average( X, weights= info_small)
  
-    meany0 = np.average( Y, weights= info_total_weights)
+    meany0 = np.average( Y, weights= info_total)
     meany1 = np.average( Y, weights= info_large)
     meany2 = np.average( Y, weights= info_small)
 
-    stddevx0 = weighted_std( X, info_total_weights)
+    stddevx0 = weighted_std( X, info_total)
     stddevx1 = weighted_std( X, info_large)
     stddevx2 = weighted_std( X, info_small)
-    stddevy0 = weighted_std( Y, info_total_weights)
+    stddevy0 = weighted_std( Y, info_total)
     stddevy1 = weighted_std( Y, info_large)
     stddevy2 = weighted_std( Y, info_small)
 
-    mnsqerror0 = np.average(info_total_weights)
+    mnsqerror0 = np.average(info_total)
     mnsqerror1 = np.average(info_large)
     mnsqerror2 = np.average(info_small)
 
