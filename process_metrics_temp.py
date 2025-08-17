@@ -368,7 +368,7 @@ if __name__ == "__main__":
     #prefix = "N12_sinz2-3j2f"
     #prefix = "N13_Mz10tn3f"
     #prefix = "N18_cosz2-3-An61"
-    prefix = "N17_Mz7fo6C2f"
+    prefix = "N21_M3toNanoM2-4fB"
 
     # Try to load config from JSON if it exists
     config_filename = f"{prefix}_config.json"
@@ -391,7 +391,7 @@ if __name__ == "__main__":
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
     
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "dcd","dcl",
+    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "lmd","l10","l90","dcd","dcl",
                     "ee0","ee1","ee2","ee1r","ee2r","ed0","ed1","ed2","es0","es1","es2","es1r","es2r",
                     "std","int","czd","crd","cmg","cam","crm","ctm","cmv"]
     
