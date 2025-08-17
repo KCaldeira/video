@@ -161,6 +161,11 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                     for stretch_value in stretch_values:
                         for stretch_center in stretch_centers:
                             process_dict[key + "_s" + str(stretch_value) + "-" + str(stretch_center)] = (x / stretch_center)**stretch_value / ((x / stretch_center)**stretch_value + ((1 - x) / (1 - stretch_center))**stretch_value)
+                    
+                    # Always ensure the special case stretch_value=1, stretch_center=0.5 is included
+                    special_key = key + "_s1-0.5"
+                    if special_key not in process_dict:
+                        process_dict[special_key] = (x / 0.5)**1 / ((x / 0.5)**1 + ((1 - x) / (1 - 0.5))**1)
 
             if "inv" in process_list:
                 process_dict_copy = process_dict.copy()
@@ -186,7 +191,12 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     for var in vars:
         for averaging in filter_suffixes:
             for suffix in ["v", "r"]:
-                for stretch_value in stretch_values:
+                # Create a list of stretch values to process, including the special case
+                stretch_values_to_process = list(stretch_values)
+                if 1 not in stretch_values_to_process:
+                    stretch_values_to_process.append(1)
+                
+                for stretch_value in stretch_values_to_process:
 
                         midi_file = mido.MidiFile()
                         for key in master_dict:
@@ -399,8 +409,10 @@ if __name__ == "__main__":
     csv = add_derived_columns(csv, metric_names)
     process_list = ["neg","rank", "stretch","inv","filter"]
     filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
-    stretch_values = [1,  8]  # Values for stretch processing
-    stretch_centers = [0.33, 0.5,0.67]  # Centers for stretch processing
+    stretch_values = [ 8]  # Values for stretch processing
+    stretch_centers = [0.33, 0.67]  # Centers for stretch processing
+    # note that the special case stretch_value=1, stretch_center=0.5 is included in the stretch_values and stretch_centers lists.
+    # this is because the special case is the identity function, which is useful for comparing to the original data.
 
     post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
                  stretch_values, stretch_centers)
