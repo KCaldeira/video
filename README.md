@@ -47,6 +47,10 @@ python run_video_processing.py --help
 | `--ticks-per-beat` | int | 480 | MIDI ticks per beat |
 | `--downscale-large` | int | 100 | Large scale analysis factor |
 | `--downscale-medium` | int | 10 | Medium scale analysis factor |
+| `--filter-periods` | int list | [17, 65, 257] | Filter periods for smoothing |
+| `--stretch-values` | int list | [8] | Stretch values for transformation |
+| `--stretch-centers` | float list | [0.33, 0.67] | Stretch centers for transformation |
+| `--cc-number` | int | 1 | MIDI CC number |
 
 #### Configuration File Format
 ```json
@@ -57,7 +61,11 @@ python run_video_processing.py --help
   "beats_per_midi_event": 1,
   "ticks_per_beat": 480,
   "downscale_large": 100,
-  "downscale_medium": 10
+  "downscale_medium": 10,
+  "filter_periods": [17, 65, 257],
+  "stretch_values": [8],
+  "stretch_centers": [0.33, 0.67],
+  "cc_number": 1
 }
 ```
 
@@ -283,6 +291,8 @@ The script can read configuration from:
 - **JSON config file**: `{prefix}_config.json`
 - **Hardcoded defaults**: If no config file exists
 
+**Automatic Detection**: The script automatically detects all available variables and metrics from the CSV file, so no explicit configuration of `vars` or `metric_names` is needed.
+
 ### Special Features
 
 #### Automatic Special Case Inclusion
@@ -326,7 +336,11 @@ python run_video_processing.py my_video 120 \
   --beats-per-midi-event 2 \
   --ticks-per-beat 960 \
   --downscale-large 50 \
-  --downscale-medium 5
+  --downscale-medium 5 \
+  --filter-periods 17 65 \
+  --stretch-values 4 8 \
+  --stretch-centers 0.25 0.5 0.75 \
+  --cc-number 7
 ```
 
 ## File Structure

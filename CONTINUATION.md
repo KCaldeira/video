@@ -174,6 +174,34 @@ for filter_period in filter_periods:
 - `scale_data(data)` - Scales data to 0-1 range
 - `percentile_data(data)` - Converts values to percentiles (0-1 range)
 
+### **Flexible Sorting System**
+The sorting system uses a configurable field-based approach:
+
+**Key Structure:**
+```
+R_avg_v_f017_s1-0.5
+│ │   │ │    │
+│ │   │ │    └─ stretching (field 5)
+│ │   │ └────── smoothing period (field 4) 
+│ │   └──────── r/v (field 3)
+│ └──────────── metric (field 2)
+└────────────── color-channel (field 1)
+```
+
+**Configurable Sort Order:**
+```python
+SORT_ORDER = [
+    'smoothing_period',  # f001, f017, f065, f257
+    'rank_value',        # r or v
+    'color_channel',     # R, G, B, Gray, H000, etc.
+    'metric',           # avg, std, xps, etc.
+    'stretching'        # s1-0.5, s8-0.33, etc.
+]
+```
+
+**To Change Sort Order:**
+Simply modify the `SORT_ORDER` list at the top of the sorting section. The system automatically applies the new order to both PDF plots and MIDI file organization.
+
 ### **Data Flow Architecture**
 The processing pipeline uses separate dictionaries for each stage:
 - **`raw_entries`** - Initial base entries (`_v`, `_r`)
@@ -187,6 +215,19 @@ The processing pipeline uses separate dictionaries for each stage:
 1. Raw data → Scale → Filter → Stretch → Invert → Output
 2. Filtering comes BEFORE stretching to ensure smooth curves are stretched
 3. Inversion comes last to create complementary patterns
+
+**Simplified Logic:**
+- All transformations (ranking, filtering, stretching, inversion) are applied by default
+- No conditional logic needed - the pipeline is always complete
+- Cleaner, more predictable code flow
+
+**Configurable Parameters:**
+- All processing parameters are now configurable via JSON file or command line
+- No hardcoded values in `process_metrics.py`
+- Parameters include: `filter_periods`, `stretch_values`, `stretch_centers`, `cc_number`
+- Default values are defined in `run_video_processing.py` and can be overridden
+- **Automatic Detection**: Variables and metrics are automatically detected from CSV columns
+- No need to configure `vars` or `metric_names` - the script processes everything available
 
 **Benefits:**
 - Clear data flow through each processing stage

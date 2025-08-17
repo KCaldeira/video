@@ -49,15 +49,27 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
         print(f"Error running process_video_to_csv: {e}")
         return False
 
-def run_process_metrics(subdir_name):
+def run_process_metrics(subdir_name, **kwargs):
     """
-    Run process_metrics_to_midi function directly with the specified subdir_name.
+    Run process_metrics_to_midi function directly with the specified subdir_name and parameters.
     """
     print(f"Running process_metrics_to_midi with subdir_name={subdir_name}")
     
     try:
-        # Call the function directly
-        process_metrics_to_midi(subdir_name)
+        # Create config dictionary with all parameters
+        config = {
+            'filter_periods': kwargs.get('filter_periods', [17, 65, 257]),
+            'stretch_values': kwargs.get('stretch_values', [8]),
+            'stretch_centers': kwargs.get('stretch_centers', [0.33, 0.67]),
+            'cc_number': kwargs.get('cc_number', 1),
+            'ticks_per_beat': kwargs.get('ticks_per_beat', 480),
+            'beats_per_minute': kwargs.get('beats_per_minute', 100),
+            'frames_per_second': kwargs.get('frames_per_second', 30),
+            'beats_per_midi_event': kwargs.get('beats_per_midi_event', 1)
+        }
+        
+        # Call the function directly with config
+        process_metrics_to_midi(subdir_name, config)
         print("process_metrics_to_midi completed successfully")
         return True
     except Exception as e:
@@ -100,6 +112,14 @@ def main():
                        help='Large downscale factor (default: 100)')
     parser.add_argument('--downscale-medium', type=int, default=10,
                        help='Medium downscale factor (default: 10)')
+    parser.add_argument('--filter-periods', nargs='+', type=int, default=[17, 65, 257],
+                       help='Filter periods for smoothing (default: 17 65 257)')
+    parser.add_argument('--stretch-values', nargs='+', type=int, default=[8],
+                       help='Stretch values (default: 8)')
+    parser.add_argument('--stretch-centers', nargs='+', type=float, default=[0.33, 0.67],
+                       help='Stretch centers (default: 0.33 0.67)')
+    parser.add_argument('--cc-number', type=int, default=1,
+                       help='MIDI CC number (default: 1)')
     
     args = parser.parse_args()
     
@@ -116,6 +136,10 @@ def main():
         ticks_per_beat = config.get('ticks_per_beat', 480)
         downscale_large = config.get('downscale_large', 100)
         downscale_medium = config.get('downscale_medium', 10)
+        filter_periods = config.get('filter_periods', [17, 65, 257])
+        stretch_values = config.get('stretch_values', [8])
+        stretch_centers = config.get('stretch_centers', [0.33, 0.67])
+        cc_number = config.get('cc_number', 1)
     else:
         # Use command line arguments
         if not args.subdir_name:
@@ -136,6 +160,10 @@ def main():
         ticks_per_beat = args.ticks_per_beat
         downscale_large = args.downscale_large
         downscale_medium = args.downscale_medium
+        filter_periods = args.filter_periods
+        stretch_values = args.stretch_values
+        stretch_centers = args.stretch_centers
+        cc_number = args.cc_number
     
     print(f"Starting video processing pipeline:")
     print(f"  Subdir name: {subdir_name}")
@@ -145,6 +173,10 @@ def main():
     print(f"  Ticks per beat: {ticks_per_beat}")
     print(f"  Downscale large: {downscale_large}")
     print(f"  Downscale medium: {downscale_medium}")
+    print(f"  Filter periods: {filter_periods}")
+    print(f"  Stretch values: {stretch_values}")
+    print(f"  Stretch centers: {stretch_centers}")
+    print(f"  CC number: {cc_number}")
     print(f"  Video file: {subdir_name}.wmv")
     print()
     
@@ -180,7 +212,17 @@ def main():
         print("=" * 50)
         print("STEP 2: Running process_metrics.py")
         print("=" * 50)
-        if not run_process_metrics(subdir_name):
+        metrics_params = {
+            'filter_periods': filter_periods,
+            'stretch_values': stretch_values,
+            'stretch_centers': stretch_centers,
+            'cc_number': cc_number,
+            'ticks_per_beat': ticks_per_beat,
+            'beats_per_minute': beats_per_minute,
+            'frames_per_second': frames_per_second,
+            'beats_per_midi_event': beats_per_midi_event
+        }
+        if not run_process_metrics(subdir_name, **metrics_params):
             success = False
             print("Failed to run process_metrics.py")
         else:

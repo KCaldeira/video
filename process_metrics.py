@@ -10,13 +10,12 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import json
 
-def add_derived_columns(csv, metrics):
+def add_derived_columns(csv):
     """
     Add derived columns to the CSV dataframe based on existing metrics.
     
     Parameters:
     - csv: pandas DataFrame containing the metrics
-    - metrics: list of metric names to check for
     
     Returns:
     - csv: pandas DataFrame with additional derived columns
@@ -125,7 +124,7 @@ def triangular_filter_odd(data, N):
     return filtered
 
 
-def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers):
+def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers):
 
     if not os.path.exists(f"../video_midi/{prefix}"):
         os.makedirs(f"../video_midi/{prefix}")
@@ -134,9 +133,24 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     csv = csv.fillna(0)
 
     master_dict = {}
-    for var in vars:
-        for metric in metrics:
-            key = var + "_" + metric # The base metric is the "_pos" version
+    
+    # Automatically detect variables and metrics from CSV columns
+    # Extract all unique variables and metrics from column names
+    variables = set()
+    metrics = set()
+    
+    for col in csv.columns:
+        if '_' in col:
+            parts = col.split('_', 1)  # Split on first underscore only
+            if len(parts) == 2:
+                var, metric = parts
+                variables.add(var)
+                metrics.add(metric)
+    
+    # Process all combinations
+    for var in sorted(variables):
+        for metric in sorted(metrics):
+            key = var + "_" + metric
             if key not in csv.columns:
                 continue
             process_dict = {}
@@ -144,8 +158,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
             # Create base entries for processing
             raw_entries = {}
             raw_entries[key + "_v"] = csv[key]
-            if "rank" in process_list:
-                raw_entries[key + "_r"] = percentile_data(csv[key])
+            raw_entries[key + "_r"] = percentile_data(csv[key])
 
             # Scale the data to 0-1
             scaled_entries = {}
@@ -165,29 +178,25 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                         # For other periods, apply triangular filtering
                         filtered_entries[new_key] = triangular_filter_odd(entry_data, filter_period)
 
-            # Apply stretching to filtered data if requested
-            stretched_entries = filtered_entries.copy()
-            if "stretch" in process_list and len(stretch_values) > 0:
-                stretched_entries = {}
-                for entry_key, entry_data in filtered_entries.items():
-                    x = entry_data
-                    # Add stretched versions
-                    for stretch_value in stretch_values:
-                        for stretch_center in stretch_centers:
-                            new_key = entry_key + "_s" + str(stretch_value) + "-" + str(stretch_center)
-                            stretched_entries[new_key] = (x / stretch_center)**stretch_value / ((x / stretch_center)**stretch_value + ((1 - x) / (1 - stretch_center))**stretch_value)
-                    
-                    # Always ensure the special case stretch_value=1, stretch_center=0.5 is included
-                    special_key = entry_key + "_s1-0.5"
-                    if special_key not in stretched_entries:
-                        stretched_entries[special_key] = (x / 0.5)**1 / ((x / 0.5)**1 + ((1 - x) / (1 - 0.5))**1)
+            # Apply stretching to filtered data
+            stretched_entries = {}
+            for entry_key, entry_data in filtered_entries.items():
+                x = entry_data
+                # Add stretched versions
+                for stretch_value in stretch_values:
+                    for stretch_center in stretch_centers:
+                        new_key = entry_key + "_s" + str(stretch_value) + "-" + str(stretch_center)
+                        stretched_entries[new_key] = (x / stretch_center)**stretch_value / ((x / stretch_center)**stretch_value + ((1 - x) / (1 - stretch_center))**stretch_value)
+                
+                # Always ensure the special case stretch_value=1, stretch_center=0.5 is included
+                special_key = entry_key + "_s1-0.5"
+                if special_key not in stretched_entries:
+                    stretched_entries[special_key] = (x / 0.5)**1 / ((x / 0.5)**1 + ((1 - x) / (1 - 0.5))**1)
 
-            # Apply inversion if requested
-            final_entries = stretched_entries.copy()
-            if "inv" in process_list:
-                final_entries = {}
-                for entry_key, entry_data in stretched_entries.items():
-                    final_entries[entry_key + "_i"] = 1.0 - entry_data
+            # Apply inversion
+            final_entries = {}
+            for entry_key, entry_data in stretched_entries.items():
+                final_entries[entry_key + "_i"] = 1.0 - entry_data
 
             # Add final entries to the master dictionary
             process_dict.update(final_entries)
@@ -208,7 +217,7 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     # Create filter suffixes for averaging loop
     filter_suffixes = [f"f{period:03d}" for period in filter_periods]
     
-    for var in vars:
+    for var in sorted(variables):
         for averaging in filter_suffixes:
             for suffix in ["v", "r"]:
                 # Create a list of stretch values to process, including the special case
@@ -317,42 +326,78 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
     master_df.to_excel(f"../video_midi/{prefix}/{prefix}_derived.xlsx", index=False)
     print(f"Derived data saved to ../video_midi/{prefix}/{prefix}_derived.xlsx")
 
-    # prepare sorted keys for the plots
-    keys_list = list(master_dict.keys())  # Convert keys to list first
-    # remove "frame_count_list" from the list
+    # Flexible sorting configuration
+    # Define the order of fields for sorting (can be easily modified)
+    SORT_ORDER = [
+        'smoothing_period',  # field 4: f001, f017, f065, f257
+        'rank_value',        # field 3: r or v
+        'color_channel',     # field 1: R, G, B, Gray, H000, etc.
+        'metric',           # field 2: avg, std, xps, etc.
+        'stretching'        # field 5: s1-0.5, s8-0.33, etc.
+    ]
+
+    def parse_key_fields(key):
+        """Parse key into structured fields for sorting"""
+        parts = key.split('_')
+        
+        # Handle keys with different numbers of parts
+        if len(parts) < 3:
+            return None  # Skip keys that don't match expected format
+            
+        fields = {
+            'color_channel': parts[0],
+            'metric': parts[1],
+            'rank_value': parts[2]
+        }
+        
+        # Extract smoothing period (field 4)
+        smoothing_period = None
+        for part in parts[3:]:
+            if part.startswith('f'):
+                smoothing_period = part
+                break
+        fields['smoothing_period'] = smoothing_period
+        
+        # Extract stretching (field 5)
+        stretching = None
+        for part in parts[3:]:
+            if part.startswith('s'):
+                stretching = part
+                break
+        fields['stretching'] = stretching
+        
+        return fields
+
+    def get_sort_key(key, sort_order):
+        """Generate sort key based on specified order"""
+        fields = parse_key_fields(key)
+        if fields is None:
+            return (None,) * len(sort_order)  # Put unparseable keys at the end
+        
+        # Create sort tuple with values in specified order
+        sort_values = []
+        for field_name in sort_order:
+            value = fields.get(field_name, '')
+            # Handle None values for consistent sorting
+            if value is None:
+                value = ''
+            sort_values.append(value)
+        
+        return tuple(sort_values)
+
+    # Prepare sorted keys for the plots
+    keys_list = list(master_dict.keys())
+    # Remove "frame_count_list" from the list
     keys_list = [key for key in keys_list if key != "frame_count_list"]
     
-    # Create sort tuples for each key
-    sort_tuples = []
-    for key in keys_list:
-
-        var_name = key.split("_")[0]
-
-        # Calculate the primary sort values
-        is_r = 1 if "_r_" in key or key.endswith("_r") else 0
-        is_v = 1 if "_v" in key or key.endswith("_v") else 0
-        
-
-        
-        is_i = 1 if "_i" in key or key.endswith("_i") else 0
-
-        
-
-        # Calculate the primary sort value
-        primary_sort = (
-                         0*is_r + 1e6*is_v +
-                         1e1*is_i +
-                         0)
-        
-        # Create a tuple with primary sort value and the key itself for alphabetical sorting
-        sort_tuples.append((var_name,primary_sort, key))
+    # Sort keys using the new flexible sorting system
+    sorted_keys = sorted(keys_list, key=lambda k: get_sort_key(k, SORT_ORDER))
     
-    # Sort first by primary sort value, then alphabetically by key
-    sort_tuples.sort(key=lambda x: (x[0], x[1],x[2]))
-    
-    # Create a dictionary to store sort values for each key
-    sort_values = {key: sort_val for prefix,sort_val, key in sort_tuples}
-    sorted_keys = [t[2] for t in sort_tuples]  # Extract just the keys in sorted order
+    # Create a dictionary to store sort values for display (optional)
+    sort_values = {}
+    for key in sorted_keys:
+        sort_key = get_sort_key(key, SORT_ORDER)
+        sort_values[key] = f"{sort_key[0]}-{sort_key[1]}-{sort_key[2]}-{sort_key[3]}"  # Show first 4 fields
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
@@ -410,24 +455,19 @@ def process_metrics_to_midi(prefix, config=None):
     frames_per_second = config.get("frames_per_second", 30)
     cc_number = config.get("cc_number", 1)
     beats_per_midi_event = config.get("beats_per_midi_event", 1)
+    
+    # Extract processing parameters from config with defaults
+    filter_periods = config.get("filter_periods", [17, 65, 257])
+    stretch_values = config.get("stretch_values", [8])
+    stretch_centers = config.get("stretch_centers", [0.33, 0.67])
 
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
     
-    vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
-    metric_names = ["avg", "lrg", "xps", "rfl", "rad", "dcd","dcl",
-                    "ee0","ee1","ee2","ee1r","ee2r","ed0","ed1","ed2","es0","es1","es2","es1r","es2r",
-                    "std","int","czd","crd","crl","crr","cmg","cam","crm","ctm","cmv"]
-    
     # Add derived columns
-    csv = add_derived_columns(csv, metric_names)
-    process_list = ["neg","rank", "stretch","inv","filter"]
-    filter_periods = [ 17, 65, 257]  # Filter periods for triangular smoothing: 17 = ~4 bars, 65 = ~16 bars, 257 = ~64 bars at 4/4 time
-    stretch_values = [ 8]  # Values for stretch processing
-    stretch_centers = [0.33, 0.67]  # Centers for stretch processing
-    # note that the special case stretch_value=1, stretch_center=0.5 is included in the stretch_values and stretch_centers lists.
-    # this is because the special case is the identity function, which is useful for comparing to the original data.
+    csv = add_derived_columns(csv)
+    # All transformations are now applied by default (no conditional logic needed)
 
-    post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
+    post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
                  stretch_values, stretch_centers)
 
 # This script is designed to be called by run_video_processing.py
