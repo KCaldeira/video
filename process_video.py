@@ -398,8 +398,6 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
     for color_channel_name, color_channel in [("R", r), ("G", g), ("B", b),
                                 ("Gray", gray),("S", s),("V", v)]:
         avg_intensity = np.mean(color_channel)
-        variance = np.var(color_channel)
-
 
         transpose_metric_value = compute_transpose_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
@@ -417,7 +415,6 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
-        basic_metrics[f"{color_channel_name}_var"] = variance # note that variance is total info (i.e., diff^2 relative to mean)
         basic_metrics[f"{color_channel_name}_xps"] = transpose_metric_value
         basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
         basic_metrics[f"{color_channel_name}_rad"] = radial_symmetry_metric_value
