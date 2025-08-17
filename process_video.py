@@ -607,12 +607,16 @@ def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium
         ("R", r, r_prior), ("G", g, g_prior), ("B", b, b_prior),
         ("Gray", gray, gray_prior), ("S", s, s_prior), ("V", v, v_prior)
     ]:
+
+        # rotational and zoom metrics should be the same for all color channels, 
+        # so we only need to do it for the Gray channel
+        if color_channel_name == "Gray":
         # Compute Lucas-Kanade metrics for this color channel
-        lk_metrics = compute_lucas_kanade_metrics(color_channel, color_channel_prior, 1.0, 2)
-        
-        # Add color channel prefix to metric names
-        for metric_name, metric_value in lk_metrics.items():
-            change_metrics[f"{color_channel_name}_{metric_name}"] = metric_value
+            lk_metrics = compute_lucas_kanade_metrics(color_channel, color_channel_prior, 1.0, 2)
+            
+            # Add color channel prefix to metric names
+            for metric_name, metric_value in lk_metrics.items():
+                change_metrics[f"{color_channel_name}_{metric_name}"] = metric_value
     
     return change_metrics
 
