@@ -59,6 +59,25 @@ def add_derived_columns(csv, metrics):
             csv[es1r_col] = np.where(csv[es0_col] != 0, csv[es1_col] / csv[es0_col], 0)
             csv[es2r_col] = np.where(csv[es0_col] != 0, csv[es2_col] / csv[es0_col], 0)
     
+    # Add rotation metrics (crl and crr) based on crc metrics
+    # Find all columns that contain "_crc" in their name
+    crc_columns = [col for col in csv.columns if "_crc" in col]
+    
+    for crc_col in crc_columns:
+        # Extract the base name (everything before "_crc")
+        base_name = crc_col.replace("_crc", "")
+        
+        # Create crl and crr column names
+        crl_col = f"{base_name}_crl"
+        crr_col = f"{base_name}_crr"
+        
+        # Create the new metrics
+        # crl = max(crc, 0) - captures positive rotation (counterclockwise)
+        csv[crl_col] = np.maximum(csv[crc_col], 0)
+        
+        # crr = max(-crc, 0) - captures negative rotation (clockwise)
+        csv[crr_col] = np.maximum(-csv[crc_col], 0)
+    
     return csv
 
 def percentile_data(data):
@@ -122,29 +141,10 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 continue
             process_dict = {}
 
-            # Always add filter suffixes to all metrics
-            if "filter" in process_list:
-                process_dict[key + "_v_f001"] = csv[key]
-                if "rank" in process_list:
-                    process_dict[key + "_r_f001"] = percentile_data(csv[key])
-            else:
-                process_dict[key + "_v"] = csv[key]
-                if "rank" in process_list:
-                    process_dict[key + "_r"] = percentile_data(csv[key])
-            
-            
-                        # apply triangular filters for all specified periods (skip f001 as it's already created)
-            if "filter" in process_list:
-                process_dict_copy = process_dict.copy()
-                for key in process_dict_copy:
-                    for filter_period in filter_periods:
-                        if filter_period == 1:
-                            # Skip f001 as it's already created above
-                            continue
-                        else:
-                            # Replace the _f001 suffix with the new filter period
-                            new_key = key.replace("_f001", f"_f{filter_period:03d}")
-                            process_dict[new_key] = triangular_filter_odd(process_dict_copy[key], filter_period)
+            # Create base entries (unfiltered)
+            process_dict[key + "_v"] = csv[key]
+            if "rank" in process_list:
+                process_dict[key + "_r"] = percentile_data(csv[key])
 
             # scale the data to 0-1
             process_dict_copy = process_dict.copy()
@@ -171,6 +171,19 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 process_dict_copy = process_dict.copy()
                 for key in process_dict_copy:
                     process_dict[key + "_i"] = 1.0 - process_dict_copy[key]
+
+            # Apply filtering as the final step
+            process_dict_copy = process_dict.copy()
+            for key in process_dict_copy:
+                for filter_period in filter_periods:
+                    # Create filtered version for all periods (including 1)
+                    new_key = key + f"_f{filter_period:03d}"
+                    if filter_period == 1:
+                        # For period 1, just copy the data (no filtering)
+                        process_dict[new_key] = process_dict_copy[key]
+                    else:
+                        # For other periods, apply triangular filtering
+                        process_dict[new_key] = triangular_filter_odd(process_dict_copy[key], filter_period)
 
 
 
@@ -367,48 +380,41 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
 
 
 
-if __name__ == "__main__":
-    #prefix = "MzUL2-5jm3f"
-    #prefix = "N3_M5zulPentAf2-V3A"
-    #prefix = "N2_M3toBSy25f-1"
-    #prefix = "N6_BSt-3DAf"
-    #prefix = "N8_M3toM2µa7fC2"
-    #prefix = "N11_M8zaf-Cdeg-1"
-    #prefix = "N9B_M6tonM2ta5f-2"
-    #prefix = "N12_sinz2-3j2f"
-    #prefix = "N13_Mz10tn3f"
-    #prefix = "N18_cosz2-3-An61"
-    prefix = "N17_Mz7fo6C2f"
-
-    # Try to load config from JSON if it exists
-    config_filename = f"{prefix}_config.json"
-    if os.path.exists(config_filename):
-        with open(config_filename, 'r') as f:
-            config = json.load(f)
-        ticks_per_beat = config.get("ticks_per_beat", 480)
-        beats_per_minute = config.get("beats_per_minute", 100)
-        frames_per_second = config.get("frames_per_second", 30)
-        cc_number = config.get("cc_number", 1)
-        beats_per_midi_event = config.get("beats_per_midi_event", 1)
-        # You can add more parameters as needed
-    else:
-        ticks_per_beat = 480
-        beats_per_minute=100
-        frames_per_second=30
-        cc_number = 1
-        beats_per_midi_event = 1
+def process_metrics_to_midi(prefix, config=None):
+    """
+    Process metrics from CSV file and generate MIDI files.
+    
+    Args:
+        prefix (str): The prefix for input/output files
+        config (dict, optional): Configuration dictionary. If None, will try to load from {prefix}_config.json
+    """
+    # Try to load config from JSON if it exists and config not provided
+    if config is None:
+        config_filename = f"{prefix}_config.json"
+        if os.path.exists(config_filename):
+            with open(config_filename, 'r') as f:
+                config = json.load(f)
+        else:
+            config = {}
+    
+    # Extract parameters from config with defaults
+    ticks_per_beat = config.get("ticks_per_beat", 480)
+    beats_per_minute = config.get("beats_per_minute", 100)
+    frames_per_second = config.get("frames_per_second", 30)
+    cc_number = config.get("cc_number", 1)
+    beats_per_midi_event = config.get("beats_per_midi_event", 1)
 
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
     
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
     metric_names = ["avg", "lrg", "xps", "rfl", "rad", "dcd","dcl",
                     "ee0","ee1","ee2","ee1r","ee2r","ed0","ed1","ed2","es0","es1","es2","es1r","es2r",
-                    "std","int","czd","crd","cmg","cam","crm","ctm","cmv"]
+                    "std","int","czd","crd","crl","crr","cmg","cam","crm","ctm","cmv"]
     
     # Add derived columns
     csv = add_derived_columns(csv, metric_names)
     process_list = ["neg","rank", "stretch","inv","filter"]
-    filter_periods = [ 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
+    filter_periods = [ 17, 65, 257]  # Filter periods for triangular smoothing: 17 = ~4 bars, 65 = ~16 bars, 257 = ~64 bars at 4/4 time
     stretch_values = [ 8]  # Values for stretch processing
     stretch_centers = [0.33, 0.67]  # Centers for stretch processing
     # note that the special case stretch_value=1, stretch_center=0.5 is included in the stretch_values and stretch_centers lists.
@@ -416,5 +422,8 @@ if __name__ == "__main__":
 
     post_process(csv, prefix, vars, metric_names, process_list, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
                  stretch_values, stretch_centers)
+
+# This script is designed to be called by run_video_processing.py
+# For standalone usage, use: python run_video_processing.py <video_name>
 
 

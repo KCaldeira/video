@@ -8,9 +8,9 @@ The pipeline processes video files to extract various visual metrics (color, mot
 
 ## Script Architecture
 
-1. **`run_video_processing.py`** - Main wrapper script that orchestrates the entire pipeline
-2. **`process_video.py`** - Extracts basic visual metrics from video frames
-3. **`process_metrics.py`** - Computes derived metrics and generates MIDI files
+1. **`run_video_processing.py`** - Main entry point that orchestrates the entire pipeline
+2. **`process_video.py`** - Module containing video analysis functions (called by run_video_processing.py)
+3. **`process_metrics.py`** - Module containing metrics processing functions (called by run_video_processing.py)
 
 ---
 
@@ -97,7 +97,7 @@ python run_video_processing.py N17_Mz7fo6C2f --skip-video
 ## 2. process_video.py
 
 ### Overview
-Extracts comprehensive visual metrics from video frames using computer vision techniques. Processes every Nth frame based on musical timing parameters and computes metrics across multiple color spaces and spatial scales.
+Module containing functions to extract comprehensive visual metrics from video frames using computer vision techniques. This module is called by `run_video_processing.py` and is not designed for standalone execution.
 
 ### Key Features
 - **Multi-scale analysis**: Analyzes video at different spatial resolutions
@@ -140,6 +140,50 @@ Extracts comprehensive visual metrics from video frames using computer vision te
 - **`ctm`** - Tangential motion (motion perpendicular to radius)
 - **`cmv`** - Motion variance (uniformity of motion)
 
+##### Motion Metrics Overview
+These metrics are computed by analyzing the optical flow between consecutive video frames using Lucas-Kanade optical flow analysis. Optical flow tracks how pixels move from one frame to the next, revealing motion patterns like zooming, rotation, and directional movement.
+
+**`czd` - Zoom Divergence**
+- **What it measures**: How much the image is zooming in or out
+- **Mathematical basis**: Divergence of the flow field (∂u/∂x + ∂v/∂y)
+- **Interpretation**: Positive values indicate zooming out (objects getting smaller), negative values indicate zooming in (objects getting larger), zero indicates no zoom effect
+
+**`crc` - Rotation Curl**
+- **What it measures**: How much the image is rotating around its center
+- **Mathematical basis**: Curl of the flow field (∂v/∂x - ∂u/∂y)
+- **Interpretation**: Positive values indicate counterclockwise rotation, negative values indicate clockwise rotation, zero indicates no rotation
+
+**`cmg` - Motion Magnitude**
+- **What it measures**: Overall strength of motion in the frame
+- **Mathematical basis**: Average magnitude of flow vectors √(u² + v²)
+- **Interpretation**: High values indicate lots of motion and dynamic scenes, low values indicate static scenes with little movement
+
+**`cma` - Motion Angle**
+- **What it measures**: Primary direction of motion
+- **Mathematical basis**: Average direction of flow vectors arctan(mean(v)/mean(u))
+- **Interpretation**: 0° = motion to the right, 90° = motion upward, 180° = motion to the left, 270° = motion downward
+
+**`crm` - Radial Motion**
+- **What it measures**: Motion toward or away from the image center
+- **Mathematical basis**: Projection of flow onto radial direction from center
+- **Interpretation**: Positive values indicate motion away from center (expanding), negative values indicate motion toward center (contracting), zero indicates no radial motion
+
+**`ctm` - Tangential Motion**
+- **What it measures**: Motion perpendicular to the radius (circular motion around center)
+- **Mathematical basis**: Projection of flow onto tangential direction
+- **Interpretation**: Positive values indicate counterclockwise circular motion, negative values indicate clockwise circular motion, zero indicates no tangential motion
+
+**`cmv` - Motion Variance**
+- **What it measures**: How uniform or chaotic the motion is
+- **Mathematical basis**: Variance of flow components (var(u) + var(v))
+- **Interpretation**: High values indicate chaotic, irregular motion with many different directions, low values indicate uniform, organized motion with consistent direction
+
+##### Technical Implementation Details
+- **Analysis Region**: Computed on a centered region of the image (configurable via `center_region_ratio`)
+- **Downscaling**: Region is downscaled for computational efficiency (factor of 2 by default)
+- **Algorithm**: Uses Farneback optical flow (Lucas-Kanade variant) with 3 pyramid levels, 15-pixel window size, and 3 iterations
+- **Mathematical Framework**: Based on vector calculus concepts (divergence, curl, projections)
+
 #### Color-Specific Metrics
 - **`H000`** - Proximity to red hue (0°)
 - **`H060`** - Proximity to yellow hue (60°)
@@ -168,7 +212,7 @@ Extracts comprehensive visual metrics from video frames using computer vision te
 ## 3. process_metrics.py
 
 ### Overview
-Takes the basic metrics from `process_video.py` and computes derived metrics, applies various transformations, and generates MIDI files. This script creates the final musical output from the visual analysis.
+Module containing functions to process basic metrics from `process_video.py`, compute derived metrics, apply various transformations, and generate MIDI files. This module is called by `run_video_processing.py` and is not designed for standalone execution.
 
 ### Derived Metrics Computation
 
@@ -183,10 +227,12 @@ The script automatically computes ratio metrics for error dispersion data:
 The script applies multiple transformation stages to each metric:
 
 1. **Filtering** (`filter`) - Triangular smoothing filters
-   - `f001` - No filtering (original data)
-   - `f017` - ~2 bars at 4/4 time
-   - `f065` - ~16 bars at 4/4 time
-   - `f257` - ~64 bars at 4/4 time
+   - `f001` - No filtering (original data, period 1)
+   - `f017` - ~2 bars at 4/4 time (period 17)
+   - `f065` - ~16 bars at 4/4 time (period 65)
+   - `f257` - ~64 bars at 4/4 time (period 257)
+   
+   **Note**: All filter periods use consistent `_f{period:03d}` naming convention, including period 1 for unfiltered data.
 
 2. **Ranking** (`rank`) - Percentile transformation
    - Converts values to percentiles (0-1 range)

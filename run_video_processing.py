@@ -20,99 +20,49 @@ import subprocess
 import json
 import argparse
 
+# Import the processing functions directly
+from process_video import process_video_to_csv
+from process_metrics import process_metrics_to_midi
+
 def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
     """
-    Run process_video.py with the specified parameters by temporarily modifying the script.
+    Run process_video_to_csv function directly with the specified parameters.
     """
-    print(f"Running process_video.py with subdir_name={subdir_name}, beats_per_minute={beats_per_minute}")
-    
-    # Read the original process_video.py file
-    with open('process_video.py', 'r') as f:
-        content = f.read()
-    
-    # Create a temporary version with our parameters
-    # Replace the hardcoded values at the bottom
-    lines = content.split('\n')
-    
-    # Find and replace the video_file and subdir_name lines
-    for i, line in enumerate(lines):
-        if line.strip().startswith('video_file = '):
-            lines[i] = f'video_file = "{subdir_name}.wmv"'
-        elif line.strip().startswith('subdir_name = '):
-            lines[i] = f'subdir_name = "{subdir_name}" # output prefix'
-        elif line.strip().startswith('beats_per_minute='):
-            lines[i] = f'                      beats_per_minute={beats_per_minute},  '
-        elif line.strip().startswith('frames_per_second='):
-            lines[i] = f'                      frames_per_second={kwargs.get("frames_per_second", 30)}, '
-        elif line.strip().startswith('beats_per_midi_event='):
-            lines[i] = f'                      beats_per_midi_event={kwargs.get("beats_per_midi_event", 1)},'
-        elif line.strip().startswith('ticks_per_beat='):
-            lines[i] = f'                      ticks_per_beat={kwargs.get("ticks_per_beat", 480)}, '
-        elif line.strip().startswith('downscale_large='):
-            lines[i] = f'                      downscale_large={kwargs.get("downscale_large", 100)}, # scale boundary means divide so 100x100 pixels in a cell (approximately square root of width and height of video)'
-        elif line.strip().startswith('downscale_medium='):
-            lines[i] = f'                      downscale_medium={kwargs.get("downscale_medium", 10)} ) # resolution reduction means divide so 10x10 pixels in a cell (approximately square root of the larger scale)'
-    
-    # Write the temporary file
-    temp_content = '\n'.join(lines)
-    with open('process_video_temp.py', 'w') as f:
-        f.write(temp_content)
+    print(f"Running process_video_to_csv with subdir_name={subdir_name}, beats_per_minute={beats_per_minute}")
     
     try:
-        # Run the temporary script with real-time output
-        print("Starting process_video.py...")
-        result = subprocess.run([sys.executable, 'process_video_temp.py'], 
-                              check=True)
-        print("process_video.py completed successfully")
-    except subprocess.CalledProcessError as e:
-        print(f"Error running process_video.py: {e}")
+        # Call the function directly
+        video_file = f"{subdir_name}.wmv"
+        process_video_to_csv(
+            video_file=video_file,
+            subdir_name=subdir_name,
+            frames_per_second=kwargs.get("frames_per_second", 30),
+            beats_per_midi_event=kwargs.get("beats_per_midi_event", 1),
+            ticks_per_beat=kwargs.get("ticks_per_beat", 480),
+            beats_per_minute=beats_per_minute,
+            downscale_large=kwargs.get("downscale_large", 100),
+            downscale_medium=kwargs.get("downscale_medium", 10)
+        )
+        print("process_video_to_csv completed successfully")
+        return True
+    except Exception as e:
+        print(f"Error running process_video_to_csv: {e}")
         return False
-    finally:
-        # Clean up temporary file
-        if os.path.exists('process_video_temp.py'):
-            os.remove('process_video_temp.py')
-    
-    return True
 
 def run_process_metrics(subdir_name):
     """
-    Run process_metrics.py with the specified subdir_name.
+    Run process_metrics_to_midi function directly with the specified subdir_name.
     """
-    print(f"Running process_metrics.py with subdir_name={subdir_name}")
-    
-    # Read the original process_metrics.py file
-    with open('process_metrics.py', 'r') as f:
-        content = f.read()
-    
-    # Create a temporary version with our subdir_name
-    lines = content.split('\n')
-    
-    # Find and replace the prefix line
-    for i, line in enumerate(lines):
-        if line.strip().startswith('prefix = '):
-            lines[i] = f'    prefix = "{subdir_name}"'
-            break
-    
-    # Write the temporary file
-    temp_content = '\n'.join(lines)
-    with open('process_metrics_temp.py', 'w') as f:
-        f.write(temp_content)
+    print(f"Running process_metrics_to_midi with subdir_name={subdir_name}")
     
     try:
-        # Run the temporary script with real-time output
-        print("Starting process_metrics.py...")
-        result = subprocess.run([sys.executable, 'process_metrics_temp.py'], 
-                              check=True)
-        print("process_metrics.py completed successfully")
-    except subprocess.CalledProcessError as e:
-        print(f"Error running process_metrics.py: {e}")
+        # Call the function directly
+        process_metrics_to_midi(subdir_name)
+        print("process_metrics_to_midi completed successfully")
+        return True
+    except Exception as e:
+        print(f"Error running process_metrics_to_midi: {e}")
         return False
-    finally:
-        # Clean up temporary file
-        if os.path.exists('process_metrics_temp.py'):
-            os.remove('process_metrics_temp.py')
-    
-    return True
 
 def load_config(config_file):
     """
