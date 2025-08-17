@@ -174,6 +174,26 @@ for filter_period in filter_periods:
 - `scale_data(data)` - Scales data to 0-1 range
 - `percentile_data(data)` - Converts values to percentiles (0-1 range)
 
+### **Data Flow Architecture**
+The processing pipeline uses separate dictionaries for each stage:
+- **`raw_entries`** - Initial base entries (`_v`, `_r`)
+- **`scaled_entries`** - After scaling to 0-1 range
+- **`filtered_entries`** - After filtering with `_f{period:03d}` suffixes
+- **`stretched_entries`** - After stretching transformations (applied to filtered data)
+- **`final_entries`** - After inversion (applied to stretched data)
+- **`process_dict`** - Final output added to `master_dict`
+
+**Processing Order:**
+1. Raw data → Scale → Filter → Stretch → Invert → Output
+2. Filtering comes BEFORE stretching to ensure smooth curves are stretched
+3. Inversion comes last to create complementary patterns
+
+**Benefits:**
+- Clear data flow through each processing stage
+- No risk of accidentally keeping unwanted data
+- Self-documenting variable names
+- Easy debugging and inspection of intermediate stages
+
 ## Remember
 - **Filtering comes LAST** in the processing pipeline
 - **Fix root causes**, not symptoms

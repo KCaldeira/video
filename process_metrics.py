@@ -141,49 +141,56 @@ def post_process(csv, prefix, vars, metrics, process_list, ticks_per_beat, beats
                 continue
             process_dict = {}
 
-            # Create base entries (unfiltered)
-            process_dict[key + "_v"] = csv[key]
+            # Create base entries for processing
+            raw_entries = {}
+            raw_entries[key + "_v"] = csv[key]
             if "rank" in process_list:
-                process_dict[key + "_r"] = percentile_data(csv[key])
+                raw_entries[key + "_r"] = percentile_data(csv[key])
 
-            # scale the data to 0-1
-            process_dict_copy = process_dict.copy()
-            for key in process_dict_copy:
-                process_dict[key] = scale_data(process_dict[key])
+            # Scale the data to 0-1
+            scaled_entries = {}
+            for entry_key, entry_data in raw_entries.items():
+                scaled_entries[entry_key] = scale_data(entry_data)
 
+            # Apply filtering first - create filtered entries
+            filtered_entries = {}
+            for entry_key, entry_data in scaled_entries.items():
+                for filter_period in filter_periods:
+                    # Create filtered version for all periods (including 1)
+                    new_key = entry_key + f"_f{filter_period:03d}"
+                    if filter_period == 1:
+                        # For period 1, just copy the data (no filtering)
+                        filtered_entries[new_key] = entry_data
+                    else:
+                        # For other periods, apply triangular filtering
+                        filtered_entries[new_key] = triangular_filter_odd(entry_data, filter_period)
+
+            # Apply stretching to filtered data if requested
+            stretched_entries = filtered_entries.copy()
             if "stretch" in process_list and len(stretch_values) > 0:
-                process_dict_copy = process_dict.copy()
-                for key in process_dict_copy:
-                    x = process_dict_copy[key]
-                    # Remove the original key and replace with stretched versions
-                    del process_dict[key]
+                stretched_entries = {}
+                for entry_key, entry_data in filtered_entries.items():
+                    x = entry_data
                     # Add stretched versions
                     for stretch_value in stretch_values:
                         for stretch_center in stretch_centers:
-                            process_dict[key + "_s" + str(stretch_value) + "-" + str(stretch_center)] = (x / stretch_center)**stretch_value / ((x / stretch_center)**stretch_value + ((1 - x) / (1 - stretch_center))**stretch_value)
+                            new_key = entry_key + "_s" + str(stretch_value) + "-" + str(stretch_center)
+                            stretched_entries[new_key] = (x / stretch_center)**stretch_value / ((x / stretch_center)**stretch_value + ((1 - x) / (1 - stretch_center))**stretch_value)
                     
                     # Always ensure the special case stretch_value=1, stretch_center=0.5 is included
-                    special_key = key + "_s1-0.5"
-                    if special_key not in process_dict:
-                        process_dict[special_key] = (x / 0.5)**1 / ((x / 0.5)**1 + ((1 - x) / (1 - 0.5))**1)
+                    special_key = entry_key + "_s1-0.5"
+                    if special_key not in stretched_entries:
+                        stretched_entries[special_key] = (x / 0.5)**1 / ((x / 0.5)**1 + ((1 - x) / (1 - 0.5))**1)
 
+            # Apply inversion if requested
+            final_entries = stretched_entries.copy()
             if "inv" in process_list:
-                process_dict_copy = process_dict.copy()
-                for key in process_dict_copy:
-                    process_dict[key + "_i"] = 1.0 - process_dict_copy[key]
+                final_entries = {}
+                for entry_key, entry_data in stretched_entries.items():
+                    final_entries[entry_key + "_i"] = 1.0 - entry_data
 
-            # Apply filtering as the final step
-            process_dict_copy = process_dict.copy()
-            for key in process_dict_copy:
-                for filter_period in filter_periods:
-                    # Create filtered version for all periods (including 1)
-                    new_key = key + f"_f{filter_period:03d}"
-                    if filter_period == 1:
-                        # For period 1, just copy the data (no filtering)
-                        process_dict[new_key] = process_dict_copy[key]
-                    else:
-                        # For other periods, apply triangular filtering
-                        process_dict[new_key] = triangular_filter_odd(process_dict_copy[key], filter_period)
+            # Add final entries to the master dictionary
+            process_dict.update(final_entries)
 
 
 
