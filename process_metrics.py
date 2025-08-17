@@ -391,7 +391,7 @@ if __name__ == "__main__":
     csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
     
     vars= ["R", "G", "B","Gray","H000","H060","H120","H180","H240","H300","H360","Hmon"]
-    metric_names = ["avg", "var", "lrg", "xps", "rfl", "rad", "dcd","dcl",
+    metric_names = ["avg", "lrg", "xps", "rfl", "rad", "dcd","dcl",
                     "ee0","ee1","ee2","ee1r","ee2r","ed0","ed1","ed2","es0","es1","es2","es1r","es2r",
                     "std","int","czd","crd","cmg","cam","crm","ctm","cmv"]
     
