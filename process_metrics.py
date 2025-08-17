@@ -408,7 +408,7 @@ if __name__ == "__main__":
     # Add derived columns
     csv = add_derived_columns(csv, metric_names)
     process_list = ["neg","rank", "stretch","inv","filter"]
-    filter_periods = [1, 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
+    filter_periods = [ 17, 65, 257]  # 1 = no filtering (f001), 9 is about 2 bars if every midi event is a beat at 4/4 (f009), 33 is about 8 bars if every midi event is a beat at 4/4 (f033), 65 is about 16 bars if every midi event is a beat at 4/4 (f065), 129 is about 32 bars if every midi event is a beat at 4/4 (f129)
     stretch_values = [ 8]  # Values for stretch processing
     stretch_centers = [0.33, 0.67]  # Centers for stretch processing
     # note that the special case stretch_value=1, stretch_center=0.5 is included in the stretch_values and stretch_centers lists.
