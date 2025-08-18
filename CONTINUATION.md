@@ -10,31 +10,34 @@ The triangular filtering must be applied **as the final step** in the processing
 **Correct Order:**
 1. Create base entries (`_v`, `_r`)
 2. Scale data to 0-1 range
-3. Apply stretching (if enabled)
-4. Apply inversion (if enabled)
-5. **Apply filtering as the final step** (to processed data)
+3. **Apply filtering** (to scaled data)
+4. Apply stretching (to filtered data)
+5. Apply inversion (to stretched data)
 
 **Why this matters:**
 - Filtering applied to raw data produces jagged, inconsistent curves
-- Filtering applied to processed data (after scaling/stretching) produces smooth curves
+- Filtering applied to scaled data (before stretching) produces smooth curves that can then be stretched
 - The 65 and 257 point smoothing should produce progressively smoother curves
 - This was a recurring bug that took multiple attempts to fix correctly
 
 ### **Processing Sequence Details**
 ```python
 # 1. Base entries (unfiltered)
-process_dict[key + "_v"] = csv[key]
-process_dict[key + "_r"] = percentile_data(csv[key])
+raw_entries[key + "_v"] = csv[key]
+raw_entries[key + "_r"] = percentile_data(csv[key])
 
 # 2. Scale to 0-1
-process_dict[key] = scale_data(process_dict[key])
+scaled_entries[key] = scale_data(raw_entries[key])
 
-# 3. Stretch (if enabled)
-# 4. Invert (if enabled)
+# 3. Filter (to scaled data)
+filtered_entries[key + "_f{period:03d}"] = triangular_filter_odd(scaled_entries[key], filter_period)
 
-# 5. Filter as FINAL step
-new_key = key + f"_f{filter_period:03d}"
-process_dict[new_key] = triangular_filter_odd(process_dict_copy[key], filter_period)
+# 4. Stretch (to filtered data)
+stretched_entries[key + "_s{value}-{center}"] = stretch_function(filtered_entries[key])
+
+# 5. Invert (to stretched data)
+final_entries[key + "_o"] = stretched_entries[key]
+final_entries[key + "_i"] = 1.0 - stretched_entries[key]
 ```
 
 ## Filter Periods Behavior
@@ -99,8 +102,8 @@ All filter periods (including 1) use the `_f{period:03d}` naming convention:
 # ❌ WRONG - applies filter to raw data
 filtered_data = triangular_filter_odd(csv[key], filter_period)
 
-# ✅ CORRECT - applies filter to processed data
-filtered_data = triangular_filter_odd(process_dict_copy[key], filter_period)
+# ✅ CORRECT - applies filter to scaled data
+filtered_data = triangular_filter_odd(scaled_entries[key], filter_period)
 ```
 
 ### **2. Complex Conditional Logic**
@@ -354,3 +357,38 @@ The processing pipeline uses separate dictionaries for each stage:
 5. **Low Priority**: Architectural improvements (classes, pipeline pattern)
 
 **Note**: The code works, but it's definitely in the "technical debt" category - it would benefit significantly from a refactoring to make it more maintainable, testable, and extensible.
+
+### **Future Architectural Improvement: Structured Keys**
+
+#### **Current Problem:**
+- Keys are complex strings that require parsing: `"B_dcl_r_f017_s8-0.33_o"`
+- String parsing is error-prone and hard to maintain
+- Complex logic for extracting fields from keys
+
+#### **Proposed Solution: Tuple Keys**
+```python
+# Instead of string keys
+master_dict = {
+    "B_dcl_r_f017_s8-0.33_o": data
+}
+
+# Use tuple keys
+master_dict = {
+    ('B', 'dcl', 'r', 'f017', 's8-0.33', 'o'): data
+}
+```
+
+#### **Benefits:**
+- **Type Safety**: No parsing errors, clear field access
+- **Easier Processing**: Direct indexing instead of string parsing
+- **Better Sorting**: Simple tuple-based sorting
+- **Flexible Output**: Easy conversion to strings for files/display
+
+#### **Implementation Plan:**
+1. Create tuple key generation functions
+2. Update processing pipeline to use tuple keys
+3. Add string conversion functions for output
+4. Update MIDI generation to use structured keys
+5. Remove string parsing logic
+
+#### **Priority**: Medium - significant improvement but requires careful refactoring

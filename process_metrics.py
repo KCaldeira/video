@@ -222,24 +222,26 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     
     for var in sorted(variables):
         for averaging in filter_suffixes:
-            for suffix in ["v_o", "r_o", "v_i", "r_i"]:
-                # Create a list of stretch values to process, including the special case
-                stretch_values_to_process = list(stretch_values)
-                if 1 not in stretch_values_to_process:
-                    stretch_values_to_process.append(1)
-                
-                for stretch_value in stretch_values_to_process:
-
+            for rank_type in ["v", "r"]:
+                for inversion_type in ["o", "i"]:
+                    # Create a list of stretch values to process, including the special case
+                    stretch_values_to_process = list(stretch_values)
+                    if 1 not in stretch_values_to_process:
+                        stretch_values_to_process.append(1)
+                    
+                    for stretch_value in stretch_values_to_process:
                         midi_file = mido.MidiFile()
                         for key in master_dict:
                             if not key.startswith(var):
                                 continue
                             if averaging != "" and "_" + averaging+"_" not in key and not key.endswith("_"+averaging):
                                 continue
-                            if not "_" + suffix in key and not key.endswith("_"+suffix):
+                            # Check if this key matches the pattern: var_metric_rank_averaging_stretch_inversion
+                            if not key.startswith(f"{var}_"):
                                 continue
-                            # Check if this key has the specific stretch value (any center)
-                            if not f"_s{stretch_value}-" in key:
+                            if not f"_{rank_type}_{averaging}_s{stretch_value}-" in key:
+                                continue
+                            if not key.endswith(f"_{inversion_type}"):
                                 continue
                             
 
@@ -261,10 +263,8 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                                             time=time_tick))
 
                             
-                        file_name = "../video_midi/" + prefix + "/" + var + "_" + suffix 
-                        if averaging != "f001":
-                            file_name += "_" + averaging
-                        file_name += f"_s{stretch_value}.mid"
+                        # Create file name: var_rank_averaging_stretch.mid (exclude metric and inversion)
+                        file_name = f"../video_midi/{prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}.mid"
                         midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
@@ -428,7 +428,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
             plt.plot(master_dict[key])
             # Get the sort value for this key and format it
             sort_val = sort_values[key]
-            plt.title(f"{key} {sort_val}", fontsize=8)  # Smaller font size for titles
+            plt.title(f"{key}", fontsize=8)  # Smaller font size for titles
             plt.grid(True)
             plt.xticks([])  # Remove x-axis ticks for cleaner look
             plt.yticks([])  # Remove y-axis ticks for cleaner look
