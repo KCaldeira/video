@@ -391,6 +391,9 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
             # Handle None values for consistent sorting
             if value is None:
                 value = ''
+            # Special handling for inversion: put 'o' before 'i'
+            if field_name == 'inversion':
+                value = '0' if value == 'o' else '1' if value == 'i' else value
             sort_values.append(value)
         
         return tuple(sort_values)

@@ -569,8 +569,8 @@ def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_regi
         'crc': rotation_curl,        # Rotation curl  
         'cmm': motion_magnitude,   # Overall motion magnitude
         'cma': motion_angle,       # Motion direction angle
-        'crm': radial_motion,      # Radial motion component
-        'ctm': tangential_motion,    # Tangential motion component
+        'cmr': radial_motion,      # Radial motion component
+        'cmt': tangential_motion,    # Tangential motion component
         'cmv': motion_variance     # Motion variance
     }
 
