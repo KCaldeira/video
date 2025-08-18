@@ -175,8 +175,9 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                         # For period 1, just copy the data (no filtering)
                         filtered_entries[new_key] = entry_data
                     else:
-                        # For other periods, apply triangular filtering
-                        filtered_entries[new_key] = triangular_filter_odd(entry_data, filter_period)
+                        # For other periods, apply triangular filtering and rescale to 0-1
+                        filtered_data = triangular_filter_odd(entry_data, filter_period)
+                        filtered_entries[new_key] = scale_data(filtered_data)
 
             # Apply stretching to filtered data
             stretched_entries = {}
@@ -223,18 +224,18 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     for var in sorted(variables):
         for averaging in filter_suffixes:
             for rank_type in ["v", "r"]:
-                for inversion_type in ["o", "i"]:
-                    # Create a list of stretch values to process, including the special case
-                    stretch_values_to_process = list(stretch_values)
-                    if 1 not in stretch_values_to_process:
-                        stretch_values_to_process.append(1)
+                # Create a list of stretch values to process, including the special case
+                stretch_values_to_process = list(stretch_values)
+                if 1 not in stretch_values_to_process:
+                    stretch_values_to_process.append(1)
+                
+                for stretch_value in stretch_values_to_process:
+                    midi_file = mido.MidiFile()
                     
-                    for stretch_value in stretch_values_to_process:
-                        midi_file = mido.MidiFile()
+                    # Process both inversion types ("o" and "i") in the same MIDI file
+                    for inversion_type in ["o", "i"]:
                         for key in master_dict:
-                            if not key.startswith(var):
-                                continue
-                            if averaging != "" and "_" + averaging+"_" not in key and not key.endswith("_"+averaging):
+                            if  "_" + averaging+"_" not in key:
                                 continue
                             # Check if this key matches the pattern: var_metric_rank_averaging_stretch_inversion
                             if not key.startswith(f"{var}_"):
@@ -262,10 +263,10 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                                             channel=7,
                                             time=time_tick))
 
-                            
-                        # Create file name: var_rank_averaging_stretch.mid (exclude metric and inversion)
-                        file_name = f"../video_midi/{prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}.mid"
-                        midi_file.save(file_name)
+                    
+                    # Create file name: var_rank_averaging_stretch.mid (exclude metric and inversion)
+                    file_name = f"../video_midi/{prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}.mid"
+                    midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
     print(f"Writing out midi files by postprocessing methods")
@@ -332,12 +333,13 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     # Flexible sorting configuration
     # Define the order of fields for sorting (can be easily modified)
     SORT_ORDER = [
-        'smoothing_period',  # field 4: f001, f017, f065, f257
-        'rank_value',        # field 3: r or v
         'color_channel',     # field 1: R, G, B, Gray, H000, etc.
         'metric',           # field 2: avg, std, xps, etc.
-        'stretching',       # field 5: s1-0.5, s8-0.33, etc.
-        'inversion'         # field 6: o or i
+        'smoothing_period',  # field 3: f001, f017, f065, f257
+        'rank_value',        # field 4: r or v
+        'inversion',         # field 5: o or i
+        'stretching'       # field 6: s1-0.5, s8-0.33, etc.
+
     ]
 
     def parse_key_fields(key):
