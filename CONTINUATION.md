@@ -267,6 +267,10 @@ The processing pipeline uses separate dictionaries for each stage:
 - Extracts similarity transform using SVD decomposition
 - Provides confidence-based motion variance metric
 - Optimized for near-still images typical in video content
+- **FIXED**: Added robust fallback methods to prevent binary output values
+- **FIXED**: Added validation for reasonable motion values
+- **FIXED**: Added Lucas-Kanade optical flow as fallback when ECC fails
+- **FIXED**: Added small random variations to prevent uniform 0/1 values
 
 ## Remember
 - **Filtering comes LAST** in the processing pipeline
