@@ -32,7 +32,13 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
     
     try:
         # Call the function directly
+        # Try .wmv first, then .mp4 if not found
         video_file = f"{subdir_name}.wmv"
+        if not os.path.exists(video_file):
+            video_file = f"{subdir_name}.mp4"
+            if not os.path.exists(video_file):
+                raise FileNotFoundError(f"Neither {subdir_name}.wmv nor {subdir_name}.mp4 found")
+        print(f"Using video file: {video_file}")
         process_video_to_csv(
             video_file,
             subdir_name,
