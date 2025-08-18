@@ -196,6 +196,9 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
             # Apply inversion
             final_entries = {}
             for entry_key, entry_data in stretched_entries.items():
+                # Add original version with _o suffix
+                final_entries[entry_key + "_o"] = entry_data
+                # Add inverted version with _i suffix
                 final_entries[entry_key + "_i"] = 1.0 - entry_data
 
             # Add final entries to the master dictionary
@@ -219,7 +222,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     
     for var in sorted(variables):
         for averaging in filter_suffixes:
-            for suffix in ["v", "r"]:
+            for suffix in ["v_o", "r_o", "v_i", "r_i"]:
                 # Create a list of stretch values to process, including the special case
                 stretch_values_to_process = list(stretch_values)
                 if 1 not in stretch_values_to_process:
@@ -233,7 +236,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                                 continue
                             if averaging != "" and "_" + averaging+"_" not in key and not key.endswith("_"+averaging):
                                 continue
-                            if not "_" + suffix + "_" in key and not key.endswith("_"+suffix):
+                            if not "_" + suffix in key and not key.endswith("_"+suffix):
                                 continue
                             # Check if this key has the specific stretch value (any center)
                             if not f"_s{stretch_value}-" in key:
@@ -333,7 +336,8 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
         'rank_value',        # field 3: r or v
         'color_channel',     # field 1: R, G, B, Gray, H000, etc.
         'metric',           # field 2: avg, std, xps, etc.
-        'stretching'        # field 5: s1-0.5, s8-0.33, etc.
+        'stretching',       # field 5: s1-0.5, s8-0.33, etc.
+        'inversion'         # field 6: o or i
     ]
 
     def parse_key_fields(key):
@@ -349,6 +353,12 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
             'metric': parts[1],
             'rank_value': parts[2]
         }
+        
+        # Extract inversion (field 6) - o or i
+        inversion = None
+        if parts[-1] in ['o', 'i']:
+            inversion = parts[-1]
+        fields['inversion'] = inversion
         
         # Extract smoothing period (field 4)
         smoothing_period = None
@@ -397,7 +407,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     sort_values = {}
     for key in sorted_keys:
         sort_key = get_sort_key(key, SORT_ORDER)
-        sort_values[key] = f"{sort_key[0]}-{sort_key[1]}-{sort_key[2]}-{sort_key[3]}"  # Show first 4 fields
+        sort_values[key] = f"{sort_key[0]}-{sort_key[1]}-{sort_key[2]}-{sort_key[3]}-{sort_key[4]}"  # Show first 5 fields
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")

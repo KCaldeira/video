@@ -232,9 +232,16 @@ The script automatically computes ratio metrics for error dispersion data:
 - **`es2r`** - `es2/es0` (small-scale to total spatial variation ratio)
 
 #### Processing Pipeline
-The script applies multiple transformation stages to each metric:
+The script applies multiple transformation stages to each metric in sequence:
 
-1. **Filtering** (`filter`) - Triangular smoothing filters
+1. **Rank/Value Processing** - Creates base entries
+   - `_v` - Original values from CSV
+   - `_r` - Percentile transformation (0-1 range)
+
+2. **Scaling** - Normalizes data to 0-1 range
+   - Applied to all data but doesn't change key names
+
+3. **Filtering** - Triangular smoothing filters
    - `f001` - No filtering (original data, period 1)
    - `f017` - ~2 bars at 4/4 time (period 17)
    - `f065` - ~16 bars at 4/4 time (period 65)
@@ -242,18 +249,27 @@ The script applies multiple transformation stages to each metric:
    
    **Note**: All filter periods use consistent `_f{period:03d}` naming convention, including period 1 for unfiltered data.
 
-2. **Ranking** (`rank`) - Percentile transformation
-   - Converts values to percentiles (0-1 range)
-   - Useful for relative rather than absolute values
-
-3. **Stretching** (`stretch`) - Non-linear transformation
+4. **Stretching** - Non-linear transformation
    - Applies sigmoid-like stretching function
    - Parameters: `stretch_value` (1, 8) and `stretch_center` (0.33, 0.5, 0.67)
    - **Special case**: Always includes `stretch_value=1, stretch_center=0.5`
 
-4. **Inversion** (`inv`) - Value inversion
-   - Creates inverted versions (1 - original_value)
+5. **Inversion** - Value inversion
+   - `_o` - Original values (no inversion)
+   - `_i` - Inverted versions (1 - original_value)
    - Useful for complementary musical patterns
+
+**Key Structure**: The final key names reflect the processing order:
+```
+R_avg_v_f017_s1-0.5_o
+│ │   │ │    │ │
+│ │   │ │    │ └─ o/i (inversion)
+│ │   │ │    └─── s1-0.5 (stretching)
+│ │   │ └──────── f017 (filtering)
+│ │   └────────── v (rank/value)
+│ └────────────── avg (metric)
+└──────────────── R (color channel)
+```
 
 ### MIDI File Generation
 
@@ -261,8 +277,8 @@ The script applies multiple transformation stages to each metric:
 MIDI files are organized by several criteria:
 
 1. **By Variable and Processing Type**:
-   - `{variable}_{suffix}_{filter}_{stretch}.mid`
-   - Example: `R_v_f017_s1-0.5.mid`
+   - `{variable}_{metric}_{rank/value}_{filter}_{stretch}_{inversion}.mid`
+   - Example: `R_avg_v_f017_s1-0.5_o.mid`
 
 2. **By Processing Method**:
    - `{base_suffix}.mid` (contains all variations of a base metric)
@@ -281,9 +297,10 @@ MIDI files are organized by several criteria:
 
 #### MIDI Files
 Multiple MIDI files are generated for different combinations:
-- **Value vs Rank**: Direct values vs percentile rankings
-- **Filter periods**: Different smoothing levels
-- **Stretch parameters**: Various non-linear transformations
+- **Value vs Rank**: Direct values (`_v`) vs percentile rankings (`_r`)
+- **Filter periods**: Different smoothing levels (`_f001`, `_f017`, `_f065`, `_f257`)
+- **Stretch parameters**: Various non-linear transformations (`_s1-0.5`, `_s8-0.33`, etc.)
+- **Inversion**: Original (`_o`) vs inverted (`_i`) values
 - **Variables**: Each color channel and metric type
 
 ### Configuration

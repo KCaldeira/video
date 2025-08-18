@@ -179,14 +179,23 @@ The sorting system uses a configurable field-based approach:
 
 **Key Structure:**
 ```
-R_avg_v_f017_s1-0.5
-│ │   │ │    │
-│ │   │ │    └─ stretching (field 5)
-│ │   │ └────── smoothing period (field 4) 
-│ │   └──────── r/v (field 3)
-│ └──────────── metric (field 2)
-└────────────── color-channel (field 1)
+R_avg_v_f017_s1-0.5_o
+│ │   │ │    │ │
+│ │   │ │    │ └─ o/i (field 6) - inversion
+│ │   │ │    └─── s1-0.5 (field 5) - stretching
+│ │   │ └──────── f017 (field 4) - filtering
+│ │   └────────── v (field 3) - rank/value
+│ └────────────── avg (field 2) - metric
+└──────────────── R (field 1) - color channel
 ```
+
+**Processing Order**: The key reflects the actual processing sequence:
+1. Base data: `R_avg`
+2. Rank/Value: `R_avg_v` or `R_avg_r`
+3. Scaling: (applied, no key change)
+4. Filtering: `R_avg_v_f017`
+5. Stretching: `R_avg_v_f017_s1-0.5`
+6. Inversion: `R_avg_v_f017_s1-0.5_o` or `R_avg_v_f017_s1-0.5_i`
 
 **Configurable Sort Order:**
 ```python
@@ -195,7 +204,8 @@ SORT_ORDER = [
     'rank_value',        # r or v
     'color_channel',     # R, G, B, Gray, H000, etc.
     'metric',           # avg, std, xps, etc.
-    'stretching'        # s1-0.5, s8-0.33, etc.
+    'stretching',       # s1-0.5, s8-0.33, etc.
+    'inversion'         # o or i
 ]
 ```
 
@@ -208,13 +218,14 @@ The processing pipeline uses separate dictionaries for each stage:
 - **`scaled_entries`** - After scaling to 0-1 range
 - **`filtered_entries`** - After filtering with `_f{period:03d}` suffixes
 - **`stretched_entries`** - After stretching transformations (applied to filtered data)
-- **`final_entries`** - After inversion (applied to stretched data)
+- **`final_entries`** - After inversion with `_o` and `_i` suffixes (applied to stretched data)
 - **`process_dict`** - Final output added to `master_dict`
 
 **Processing Order:**
-1. Raw data → Scale → Filter → Stretch → Invert → Output
-2. Filtering comes BEFORE stretching to ensure smooth curves are stretched
-3. Inversion comes last to create complementary patterns
+1. Raw data → Rank/Value → Scale → Filter → Stretch → Invert → Output
+2. Rank/Value processing creates `_v` and `_r` versions
+3. Filtering comes BEFORE stretching to ensure smooth curves are stretched
+4. Inversion comes last to create `_o` and `_i` versions
 
 **Simplified Logic:**
 - All transformations (ranking, filtering, stretching, inversion) are applied by default
@@ -240,3 +251,106 @@ The processing pipeline uses separate dictionaries for each stage:
 - **Fix root causes**, not symptoms
 - **Keep logic simple** and predictable
 - **Test thoroughly** before considering changes complete
+
+---
+
+## **Future Code Cleanup Opportunities**
+
+### **process_video.py - Major Cleanup Areas:**
+
+#### **1. Massive Function Size**
+- `process_video_to_csv()` is over 700 lines long - this is a huge red flag
+- Should be broken down into smaller, focused functions like:
+  - `extract_frames()`
+  - `compute_basic_metrics()`
+  - `compute_motion_metrics()`
+  - `compute_symmetry_metrics()`
+  - `compute_error_dispersion()`
+  - `save_results()`
+
+#### **2. Repetitive Code Patterns**
+- Multiple nearly identical loops for different color channels (R, G, B, Gray, S, V)
+- Could be abstracted into a single function that takes color channel as parameter
+- Similar repetitive patterns for hue-specific metrics (H000, H060, etc.)
+
+#### **3. Hardcoded Magic Numbers**
+- `center_region_ratio = 0.5` - should be configurable
+- `downscale_factor = 2` for optical flow - should be configurable
+- Various array indices and thresholds scattered throughout
+
+#### **4. Poor Error Handling**
+- Limited try/catch blocks
+- No validation of input parameters
+- Silent failures in some areas
+
+#### **5. Mixed Responsibilities**
+- The main function does everything: file I/O, video processing, metrics computation, data saving
+- Violates single responsibility principle
+
+### **process_metrics.py - Major Cleanup Areas:**
+
+#### **1. Complex Nested Logic**
+- The `post_process()` function has deeply nested loops and conditionals
+- The MIDI generation section is particularly convoluted with multiple nested loops
+- Could be broken into: `create_processed_entries()`, `generate_midi_files()`, `create_plots()`
+
+#### **2. Repetitive Data Structure Creation**
+- Multiple similar dictionary creation patterns (`raw_entries`, `scaled_entries`, etc.)
+- Could use a more functional approach with data transformation pipelines
+
+#### **3. Hardcoded Processing Logic**
+- The processing pipeline (scale → filter → stretch → invert) is hardcoded
+- Could be made configurable with a processing pipeline definition
+
+#### **4. Complex Sorting Logic**
+- The flexible sorting system is clever but could be simplified
+- The `parse_key_fields()` function has complex string parsing logic
+
+#### **5. Mixed Data Processing and I/O**
+- The same function handles data transformation, MIDI generation, and PDF creation
+- Should be separated into distinct modules
+
+### **Cross-File Issues:**
+
+#### **1. Inconsistent Naming**
+- Some functions use snake_case, others don't
+- Variable names could be more descriptive (`csv` vs `dataframe`, `vars` vs `color_channels`)
+
+#### **2. Configuration Management**
+- Both files have their own config handling logic
+- Could be centralized into a shared configuration module
+
+#### **3. Error Handling**
+- Limited error handling and logging throughout
+- No graceful degradation for missing data or processing failures
+
+#### **4. Performance Issues**
+- Multiple passes over the same data
+- Could benefit from vectorized operations in some areas
+
+### **Architectural Improvements:**
+
+#### **1. Class-Based Design**
+- Could benefit from classes like `VideoProcessor`, `MetricsProcessor`, `MIDIGenerator`
+- Would make the code more testable and maintainable
+
+#### **2. Pipeline Pattern**
+- The processing pipeline could be implemented as a chain of transformation objects
+- Would make it easier to add/remove/reorder processing steps
+
+#### **3. Configuration Objects**
+- Replace dictionary-based config with proper configuration objects
+- Would provide type safety and better IDE support
+
+#### **4. Separation of Concerns**
+- Data processing, file I/O, and visualization should be in separate modules
+- Would make the code more testable and reusable
+
+### **Priority Order for Cleanup:**
+1. **High Priority**: Break down massive functions into smaller, focused functions
+2. **High Priority**: Extract repetitive code patterns into reusable functions
+3. **Medium Priority**: Improve error handling and validation
+4. **Medium Priority**: Make hardcoded values configurable
+5. **Low Priority**: Architectural improvements (classes, pipeline pattern)
+
+**Note**: The code works, but it's definitely in the "technical debt" category - it would benefit significantly from a refactoring to make it more maintainable, testable, and extensible.
