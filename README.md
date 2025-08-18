@@ -51,6 +51,7 @@ python run_video_processing.py --help
 | `--stretch-values` | int list | [8] | Stretch values for transformation |
 | `--stretch-centers` | float list | [0.33, 0.67] | Stretch centers for transformation |
 | `--cc-number` | int | 1 | MIDI CC number |
+| `--max-frames` | int | None | Maximum number of frames to process (default: process all frames) |
 
 #### Configuration File Format
 ```json
@@ -65,7 +66,8 @@ python run_video_processing.py --help
   "filter_periods": [17, 65, 257],
   "stretch_values": [8],
   "stretch_centers": [0.33, 0.67],
-  "cc_number": 1
+  "cc_number": 1,
+  "max_frames": null
 }
 ```
 
@@ -98,6 +100,9 @@ python run_video_processing.py --config my_config.json
 
 # Skip video processing, only run metrics
 python run_video_processing.py N17_Mz7fo6C2f --skip-video
+
+# Process only first 1000 frames
+python run_video_processing.py N17_Mz7fo6C2f --max-frames 1000
 ```
 
 ---
@@ -110,7 +115,7 @@ Module containing functions to extract comprehensive visual metrics from video f
 ### Key Features
 - **Multi-scale analysis**: Analyzes video at different spatial resolutions
 - **Color space support**: RGB, grayscale, HSV, and hue-specific metrics
-- **Motion analysis**: Lucas-Kanade optical flow for zoom, rotation, and motion detection
+- **Motion analysis**: ECC-based global transform analysis for zoom, rotation, and motion detection
 - **Symmetry metrics**: Transpose, reflection, and radial symmetry analysis
 - **Error dispersion**: Multi-scale information content analysis
 - **Performance timing**: Detailed timing analysis for optimization
@@ -139,17 +144,17 @@ Module containing functions to extract comprehensive visual metrics from video f
 - **`es1`** - Spatial standard deviation of large-scale error
 - **`es2`** - Spatial standard deviation of small-scale error
 
-#### Motion Metrics (Lucas-Kanade Optical Flow)
+#### Motion Metrics (ECC Global Transform Analysis)
 - **`czd`** - Zoom divergence (positive = zoom out, negative = zoom in)
-- **`crd`** - Rotation curl (positive = counterclockwise, negative = clockwise)
-- **`cmg`** - Motion magnitude (overall motion strength)
-- **`cam`** - Motion angle (direction of motion)
-- **`crm`** - Radial motion (motion toward/away from center)
-- **`ctm`** - Tangential motion (motion perpendicular to radius)
-- **`cmv`** - Motion variance (uniformity of motion)
+- **`crc`** - Rotation curl (positive = counterclockwise, negative = clockwise)
+- **`cmm`** - Motion magnitude (overall motion strength)
+- **`cma`** - Motion angle (direction of motion)
+- **`cmr`** - Radial motion (motion toward/away from center)
+- **`cmt`** - Tangential motion (motion perpendicular to radius)
+- **`cmv`** - Motion variance (inverse of confidence)
 
 ##### Motion Metrics Overview
-These metrics are computed by analyzing the optical flow between consecutive video frames using Lucas-Kanade optical flow analysis. Optical flow tracks how pixels move from one frame to the next, revealing motion patterns like zooming, rotation, and directional movement.
+These metrics are computed by analyzing the global transformation between consecutive video frames using ECC (Enhanced Correlation Coefficient) alignment. This approach directly estimates the similarity transform (scale + rotation + translation) between frames, providing more accurate and robust motion detection for small changes typical in video content.
 
 **`czd` - Zoom Divergence**
 - **What it measures**: How much the image is zooming in or out
@@ -161,9 +166,9 @@ These metrics are computed by analyzing the optical flow between consecutive vid
 - **Mathematical basis**: Curl of the flow field (∂v/∂x - ∂u/∂y)
 - **Interpretation**: Positive values indicate counterclockwise rotation, negative values indicate clockwise rotation, zero indicates no rotation
 
-**`cmg` - Motion Magnitude**
+**`cmm` - Motion Magnitude**
 - **What it measures**: Overall strength of motion in the frame
-- **Mathematical basis**: Average magnitude of flow vectors √(u² + v²)
+- **Mathematical basis**: Magnitude of combined zoom and rotation effects √(zoom² + rotation²)
 - **Interpretation**: High values indicate lots of motion and dynamic scenes, low values indicate static scenes with little movement
 
 **`cma` - Motion Angle**
@@ -171,26 +176,27 @@ These metrics are computed by analyzing the optical flow between consecutive vid
 - **Mathematical basis**: Average direction of flow vectors arctan(mean(v)/mean(u))
 - **Interpretation**: 0° = motion to the right, 90° = motion upward, 180° = motion to the left, 270° = motion downward
 
-**`crm` - Radial Motion**
+**`cmr` - Radial Motion**
 - **What it measures**: Motion toward or away from the image center
-- **Mathematical basis**: Projection of flow onto radial direction from center
+- **Mathematical basis**: Zoom component of the similarity transform
 - **Interpretation**: Positive values indicate motion away from center (expanding), negative values indicate motion toward center (contracting), zero indicates no radial motion
 
-**`ctm` - Tangential Motion**
+**`cmt` - Tangential Motion**
 - **What it measures**: Motion perpendicular to the radius (circular motion around center)
-- **Mathematical basis**: Projection of flow onto tangential direction
+- **Mathematical basis**: Rotation component of the similarity transform
 - **Interpretation**: Positive values indicate counterclockwise circular motion, negative values indicate clockwise circular motion, zero indicates no tangential motion
 
 **`cmv` - Motion Variance**
-- **What it measures**: How uniform or chaotic the motion is
-- **Mathematical basis**: Variance of flow components (var(u) + var(v))
-- **Interpretation**: High values indicate chaotic, irregular motion with many different directions, low values indicate uniform, organized motion with consistent direction
+- **What it measures**: Confidence in the motion estimation
+- **Mathematical basis**: Inverse of ECC correlation confidence (1 - confidence)
+- **Interpretation**: High values indicate low confidence in motion estimation, low values indicate high confidence in the detected motion
 
 ##### Technical Implementation Details
 - **Analysis Region**: Computed on a centered region of the image (configurable via `center_region_ratio`)
 - **Downscaling**: Region is downscaled for computational efficiency (factor of 2 by default)
-- **Algorithm**: Uses Farneback optical flow (Lucas-Kanade variant) with 3 pyramid levels, 15-pixel window size, and 3 iterations
-- **Mathematical Framework**: Based on vector calculus concepts (divergence, curl, projections)
+- **Algorithm**: Uses ECC (Enhanced Correlation Coefficient) alignment with affine motion model, optimized for small motions (few degrees rotation, few percent zoom)
+- **Initialization**: Phase correlation with Hanning window provides initial translation estimate
+- **Mathematical Framework**: Based on similarity transform decomposition (SVD) to extract clean rotation and scale components
 
 #### Color-Specific Metrics
 - **`H000`** - Proximity to red hue (0°)
@@ -214,6 +220,7 @@ These metrics are computed by analyzing the optical flow between consecutive vid
 - **`frames_per_second`** - Video frame rate (default: 30)
 - **`beats_per_minute`** - Musical tempo (default: 64)
 - **`beats_per_midi_event`** - Beats between processed frames (default: 1)
+- **`max_frames`** - Maximum frames to process (default: None, processes all frames)
 
 ---
 

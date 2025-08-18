@@ -47,7 +47,8 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
             kwargs.get("ticks_per_beat", 480),
             beats_per_minute,
             kwargs.get("downscale_large", 100),
-            kwargs.get("downscale_medium", 10)
+            kwargs.get("downscale_medium", 10),
+            kwargs.get("max_frames", None)
         )
         print("process_video_to_csv completed successfully")
         return True
@@ -126,6 +127,8 @@ def main():
                        help='Stretch centers (default: 0.33 0.67)')
     parser.add_argument('--cc-number', type=int, default=1,
                        help='MIDI CC number (default: 1)')
+    parser.add_argument('--max-frames', type=int, default=None,
+                       help='Maximum number of frames to process (default: process all frames)')
     
     args = parser.parse_args()
     
@@ -146,6 +149,7 @@ def main():
         stretch_values = config.get('stretch_values', [8])
         stretch_centers = config.get('stretch_centers', [0.33, 0.67])
         cc_number = config.get('cc_number', 1)
+        max_frames = config.get('max_frames', None)
     else:
         # Use command line arguments
         if not args.subdir_name:
@@ -170,6 +174,7 @@ def main():
         stretch_values = args.stretch_values
         stretch_centers = args.stretch_centers
         cc_number = args.cc_number
+        max_frames = args.max_frames
     
     print(f"Starting video processing pipeline:")
     print(f"  Subdir name: {subdir_name}")
@@ -183,6 +188,7 @@ def main():
     print(f"  Stretch values: {stretch_values}")
     print(f"  Stretch centers: {stretch_centers}")
     print(f"  CC number: {cc_number}")
+    print(f"  Max frames: {max_frames if max_frames else 'All frames'}")
     print(f"  Video file: {subdir_name}.wmv")
     print()
     
@@ -204,7 +210,8 @@ def main():
             'beats_per_midi_event': beats_per_midi_event,
             'ticks_per_beat': ticks_per_beat,
             'downscale_large': downscale_large,
-            'downscale_medium': downscale_medium
+            'downscale_medium': downscale_medium,
+            'max_frames': max_frames
         }
         if not run_process_video(subdir_name, beats_per_minute, **video_params):
             success = False

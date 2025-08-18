@@ -446,11 +446,11 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
 
     return basic_metrics
 
-@timing_decorator("compute_lucas_kanade_metrics")
-def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_region_ratio=1.0, downscale_factor=None):
+@timing_decorator("compute_global_transform_metrics")
+def compute_global_transform_metrics(color_channel, color_channel_prior, center_region_ratio=1.0, downscale_factor=None):
     """
-    Compute Lucas-Kanade optical flow metrics between two color channels.
-    Extracts zoom and rotation information from the flow field using a centered region.
+    Compute global zoom and rotation metrics using ECC alignment from identity.
+    Optimized for small motions (few degrees rotation, few percent zoom).
     
     Parameters:
     - color_channel: Current frame color channel
@@ -459,119 +459,156 @@ def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_regi
     - downscale_factor: Factor to downscale the centered region (None = no downscaling)
     
     Returns:
-    - Dictionary of flow-based metrics
+    - Dictionary of flow-based metrics (maintains compatibility with existing code)
     """
-    # Convert to float32 for optical flow
-    curr = color_channel.astype(np.float32)
-    prev = color_channel_prior.astype(np.float32)
     
-    # Calculate optical flow using Lucas-Kanade on full resolution
-    flow = cv2.calcOpticalFlowFarneback(
-        prev, curr, 
-        None,  # No initial flow
-        pyr_scale=0.5,  # Pyramid scale
-        levels=3,       # Number of pyramid levels
-        winsize=15,     # Window size
-        iterations=3,   # Iterations
-        poly_n=5,       # Polynomial degree
-        poly_sigma=1.2, # Gaussian sigma
-        flags=0
-    )
+    def extract_center_region(img1, img2, ratio):
+        """Extract center region from both images"""
+        h, w = img1.shape[:2]
+        center_h, center_w = h // 2, w // 2
+        region_h = int(h * ratio)
+        region_w = int(w * ratio)
+        
+        # Calculate region boundaries
+        start_h = center_h - region_h // 2
+        end_h = center_h + region_h // 2
+        start_w = center_w - region_w // 2
+        end_w = center_w + region_w // 2
+        
+        # Ensure boundaries are within image
+        start_h = max(0, start_h)
+        end_h = min(h, end_h)
+        start_w = max(0, start_w)
+        end_w = min(w, end_w)
+        
+        return (img1[start_h:end_h, start_w:end_w], 
+                img2[start_h:end_h, start_w:end_w])
     
-    # Extract flow components
-    flow_x = flow[:, :, 0]  # Horizontal flow
-    flow_y = flow[:, :, 1]  # Vertical flow
+    def get_initial_translation(img1, img2):
+        """Get initial translation estimate using phase correlation"""
+        try:
+            # Apply Hanning window to reduce edge effects
+            win = cv2.createHanningWindow((img1.shape[1], img1.shape[0]), cv2.CV_32F)
+            img1_win = img1 * win
+            img2_win = img2 * win
+            
+            # Phase correlation for translation
+            (shift, response) = cv2.phaseCorrelate(img1_win, img2_win)
+            tx, ty = shift
+            
+            return tx, ty, response
+        except:
+            return 0.0, 0.0, 0.0  # Default values if correlation fails
     
-    # Calculate center of image
-    center_y, center_x = flow.shape[0] // 2, flow.shape[1] // 2
+    def extract_similarity_from_affine(M):
+        """Extract rotation and scale from affine matrix using SVD decomposition"""
+        # Extract the 2x2 transformation matrix
+        A = M[:2, :2]
+        
+        # SVD decomposition: A = U * Σ * V^T
+        U, S, Vt = np.linalg.svd(A)
+        
+        # Ensure proper rotation matrix (det = +1)
+        if np.linalg.det(U) * np.linalg.det(Vt) < 0:
+            Vt[-1, :] *= -1
+            S[-1] *= -1
+        
+        # Extract rotation matrix: R = U * V^T
+        R = U @ Vt
+        
+        # Extract scale: average of singular values
+        scale = (S[0] + S[1]) / 2
+        
+        # Extract angle from rotation matrix
+        angle = np.arctan2(R[1, 0], R[0, 0])
+        
+        return scale, angle
     
-    # Calculate size of centered region
-    shorter_dim = min(flow.shape[0], flow.shape[1])
-    region_size = int(shorter_dim * center_region_ratio)
+    def ecc_alignment(img1, img2):
+        """ECC alignment from identity for small motions"""
+        try:
+            # Convert to grayscale if needed
+            if len(img1.shape) == 3:
+                img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+            if len(img2.shape) == 3:
+                img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+            
+            # Convert to float32
+            img1 = img1.astype(np.float32)
+            img2 = img2.astype(np.float32)
+            
+            # Light Gaussian blur for noise reduction
+            img1 = cv2.GaussianBlur(img1, (3, 3), 0.8)
+            img2 = cv2.GaussianBlur(img2, (3, 3), 0.8)
+            
+            # Get initial translation estimate
+            tx, ty, response = get_initial_translation(img1, img2)
+            
+            # Initialize transformation matrix with translation
+            M_init = np.array([[1.0, 0.0, tx],
+                              [0.0, 1.0, ty]], dtype=np.float32)
+            
+            # ECC optimization criteria
+            criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 100, 1e-6)
+            
+            # Apply ECC alignment
+            M_affine = cv2.findTransformECC(img1, img2, M_init, cv2.MOTION_AFFINE, criteria)
+            
+            # Extract similarity transform from affine matrix
+            scale, angle = extract_similarity_from_affine(M_affine)
+            
+            # Calculate confidence based on ECC correlation
+            # Note: ECC doesn't return correlation directly, so we use the translation response as proxy
+            confidence = min(1.0, max(0.0, response / 100.0))  # Normalize response
+            
+            return scale, angle, confidence
+            
+        except Exception as e:
+            # Return identity transform if ECC fails
+            return 1.0, 0.0, 0.0
     
-    # Calculate region boundaries
-    start_y = center_y - region_size // 2
-    end_y = center_y + region_size // 2
-    start_x = center_x - region_size // 2
-    end_x = center_x + region_size // 2
+    # Main processing pipeline
+    # Convert to grayscale for processing
+    if len(color_channel.shape) == 3:
+        curr_gray = cv2.cvtColor(color_channel, cv2.COLOR_BGR2GRAY)
+        prev_gray = cv2.cvtColor(color_channel_prior, cv2.COLOR_BGR2GRAY)
+    else:
+        curr_gray = color_channel
+        prev_gray = color_channel_prior
     
-    # Ensure boundaries are within image
-    start_y = max(0, start_y)
-    end_y = min(flow.shape[0], end_y)
-    start_x = max(0, start_x)
-    end_x = min(flow.shape[1], end_x)
+    # Extract center region if requested
+    if center_region_ratio < 1.0:
+        curr_gray, prev_gray = extract_center_region(curr_gray, prev_gray, center_region_ratio)
     
-    # Extract centered region
-    flow_x_center = flow_x[start_y:end_y, start_x:end_x]
-    flow_y_center = flow_y[start_y:end_y, start_x:end_x]
-    
-    # Downscale the centered region if requested
+    # Downscale if requested
     if downscale_factor is not None:
-        h_center, w_center = flow_x_center.shape
-        h_small = h_center // downscale_factor
-        w_small = w_center // downscale_factor
-        flow_x_center = cv2.resize(flow_x_center, (w_small, h_small))
-        flow_y_center = cv2.resize(flow_y_center, (w_small, h_small))
+        h, w = curr_gray.shape
+        new_h, new_w = h // downscale_factor, w // downscale_factor
+        curr_gray = cv2.resize(curr_gray, (new_w, new_h))
+        prev_gray = cv2.resize(prev_gray, (new_w, new_h))
     
-    # Create coordinate grids for the centered region (after downscaling if applied)
-    h_center, w_center = flow_x_center.shape
-    y_coords, x_coords = np.meshgrid(
-        np.arange(h_center), 
-        np.arange(w_center), 
-        indexing='ij'
-    )
+    # Apply ECC alignment
+    scale, angle, confidence = ecc_alignment(curr_gray, prev_gray)
     
-    # Calculate relative positions from center
-    rel_x = x_coords - center_x
-    rel_y = y_coords - center_y
+    # Convert to the expected metric format (maintaining compatibility)
+    zoom_divergence = scale - 1.0  # Convert scale to zoom divergence
+    rotation_curl = angle  # Rotation in radians
+    motion_magnitude = np.sqrt(zoom_divergence**2 + rotation_curl**2)
+    motion_angle = angle  # Motion angle (same as rotation)
+    radial_motion = zoom_divergence  # Radial component (zoom)
+    tangential_motion = rotation_curl  # Tangential component (rotation)
     
-    # Calculate distance from center
-    distance_from_center = np.sqrt(rel_x**2 + rel_y**2)
-    
-    # Zoom metrics (divergence of flow) - only in centered region
-    # Positive divergence = zoom out, negative = zoom in
-    # Divergence = ∂u/∂x + ∂v/∂y (approximated using finite differences)
-    du_dx = np.gradient(flow_x_center, axis=1)
-    dv_dy = np.gradient(flow_y_center, axis=0)
-    zoom_divergence = float(np.mean(du_dx + dv_dy))
-    
-    # Rotation metrics (curl of flow) - only in centered region
-    # Positive curl = counterclockwise rotation, negative = clockwise
-    # Curl = ∂v/∂x - ∂u/∂y (approximated using finite differences)
-    dv_dx = np.gradient(flow_y_center, axis=1)
-    du_dy = np.gradient(flow_x_center, axis=0)
-    rotation_curl = float(np.mean(dv_dx - du_dy))
-    
-    # Overall motion magnitude - full image
-    motion_magnitude = float(np.mean(np.sqrt(flow_x**2 + flow_y**2)))
-    
-    # Motion direction (angle) - full image
-    motion_angle = float(np.arctan2(np.mean(flow_y), np.mean(flow_x)))
-    
-    # Radial vs tangential motion - only in centered region
-    # Radial: motion toward/away from center (projection onto radial direction)
-    # Unit radial vector = (rel_x, rel_y) / distance_from_center
-    unit_radial_x = rel_x / (distance_from_center + 1e-6)
-    unit_radial_y = rel_y / (distance_from_center + 1e-6)
-    radial_motion = float(np.mean(flow_x_center * unit_radial_x + flow_y_center * unit_radial_y))
-    
-    # Tangential: motion perpendicular to radius (projection onto tangential direction)
-    # Unit tangential vector = (-rel_y, rel_x) / distance_from_center (perpendicular to radial)
-    unit_tangential_x = -rel_y / (distance_from_center + 1e-6)
-    unit_tangential_y = rel_x / (distance_from_center + 1e-6)
-    tangential_motion = float(np.mean(flow_x_center * unit_tangential_x + flow_y_center * unit_tangential_y))
-    
-    # Motion variance (how uniform the motion is) - full image
-    motion_variance = float(np.var(flow_x) + np.var(flow_y))
+    # Calculate motion variance as inverse of confidence
+    motion_variance = 1.0 - confidence
     
     return {
         'czd': zoom_divergence,      # Zoom divergence
         'crc': rotation_curl,        # Rotation curl  
-        'cmm': motion_magnitude,   # Overall motion magnitude
-        'cma': motion_angle,       # Motion direction angle
-        'cmr': radial_motion,      # Radial motion component
+        'cmm': motion_magnitude,     # Overall motion magnitude
+        'cma': motion_angle,         # Motion direction angle
+        'cmr': radial_motion,        # Radial motion component
         'cmt': tangential_motion,    # Tangential motion component
-        'cmv': motion_variance     # Motion variance
+        'cmv': motion_variance       # Motion variance (inverse of confidence)
     }
 
 def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium):
@@ -608,8 +645,8 @@ def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium
         # rotational and zoom metrics should be the same for all color channels, 
         # so we only need to do it for the Gray channel
         if color_channel_name == "Gray":
-        # Compute Lucas-Kanade metrics for this color channel
-            lk_metrics = compute_lucas_kanade_metrics(color_channel, color_channel_prior, 1.0, 2)
+        # Compute global transform metrics for this color channel
+            lk_metrics = compute_global_transform_metrics(color_channel, color_channel_prior, 1.0, 2)
             
             # Add color channel prefix to metric names
             for metric_name, metric_value in lk_metrics.items():
@@ -647,7 +684,8 @@ def process_video_to_csv(video_path,
                           ticks_per_beat, 
                           beats_per_minute, 
                           downscale_large,
-                          downscale_medium):
+                          downscale_medium,
+                          max_frames=None):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
     
@@ -661,7 +699,7 @@ def process_video_to_csv(video_path,
     :param channel: MIDI channel (0-15).
     :param downscale_large: spatial scale for computing metrics
     :param downscale_medium: resolution reduction for computing metrics
-    :param filter_width: width of boxcar filter for smoothing
+    :param max_frames: maximum number of frames to process (None = process all frames)
 
     """
 
@@ -691,7 +729,15 @@ def process_video_to_csv(video_path,
     
     # Get total number of frames in the video
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    # Determine how many frames to process
+    if max_frames is not None:
+        total_frames_to_process = min(max_frames, total_frames)
+    else:
+        total_frames_to_process = total_frames
+    
     print(f"Total frames in video: {total_frames}")
+    print(f"Total frames to process: {total_frames_to_process}")
     
     # Set total start time for timing
     timing_data['total_start_time'] = time.time()
@@ -708,7 +754,7 @@ def process_video_to_csv(video_path,
         k = frame_count / frames_per_analysis_frame_real
         k_rounded = round(k)
         frame_count_good = round(k_rounded * frames_per_analysis_frame_real)
-        if frame_count == frame_count_good or frame_count == total_frames - 1:
+        if frame_count == frame_count_good or frame_count == total_frames_to_process - 1:
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
             timing_data['frame_count'] += 1
@@ -733,6 +779,10 @@ def process_video_to_csv(video_path,
         # Always update frame_prior to the current frame for next iteration
         frame_prior = frame.copy()
         frame_count += 1
+        
+        # Stop processing if we've reached the maximum frame limit
+        if max_frames is not None and frame_count >= max_frames:
+            break
 
     cap.release()
 

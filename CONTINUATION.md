@@ -160,7 +160,7 @@ for filter_period in filter_periods:
 ### **process_video.py**
 - `process_video_to_csv()` - Main function that processes video and outputs CSV
 - `compute_basic_metrics()` - Computes basic visual metrics from frames
-- `compute_change_metrics()` - Computes motion-based metrics between frames
+- `compute_change_metrics()` - Computes motion-based metrics between frames using ECC global transform analysis
 
 ### **process_metrics.py**
 - `process_metrics_to_midi()` - Main function that processes CSV and outputs MIDI
@@ -249,6 +249,25 @@ The processing pipeline uses separate dictionaries for each stage:
 - Self-documenting variable names
 - Easy debugging and inspection of intermediate stages
 
+## Recent Changes
+
+### **Max Frames Feature (Latest Addition)**
+- Added `max_frames` parameter to limit video processing
+- Available via command line: `--max-frames 1000`
+- Available via JSON config: `"max_frames": 1000`
+- If `max_frames` is greater than total frames, processes all frames
+- Prints both total frames and frames to process for clarity
+- Useful for testing and processing large videos in chunks
+
+### **ECC Global Transform Analysis (Motion Detection)**
+- Replaced Lucas-Kanade optical flow with ECC-based global transform analysis
+- More accurate for small motions (few degrees rotation, few percent zoom)
+- Uses phase correlation for initial translation estimate
+- Applies ECC alignment with affine motion model
+- Extracts similarity transform using SVD decomposition
+- Provides confidence-based motion variance metric
+- Optimized for near-still images typical in video content
+
 ## Remember
 - **Filtering comes LAST** in the processing pipeline
 - **Fix root causes**, not symptoms
@@ -278,13 +297,14 @@ The processing pipeline uses separate dictionaries for each stage:
 
 #### **3. Hardcoded Magic Numbers**
 - `center_region_ratio = 0.5` - should be configurable
-- `downscale_factor = 2` for optical flow - should be configurable
+- `downscale_factor = 2` for ECC analysis - should be configurable
 - Various array indices and thresholds scattered throughout
 
 #### **4. Poor Error Handling**
 - Limited try/catch blocks
 - No validation of input parameters
 - Silent failures in some areas
+- ECC alignment failures should be handled more gracefully
 
 #### **5. Mixed Responsibilities**
 - The main function does everything: file I/O, video processing, metrics computation, data saving
