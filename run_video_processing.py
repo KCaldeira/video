@@ -34,14 +34,14 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
         # Call the function directly
         video_file = f"{subdir_name}.wmv"
         process_video_to_csv(
-            video_file=video_file,
-            subdir_name=subdir_name,
-            frames_per_second=kwargs.get("frames_per_second", 30),
-            beats_per_midi_event=kwargs.get("beats_per_midi_event", 1),
-            ticks_per_beat=kwargs.get("ticks_per_beat", 480),
-            beats_per_minute=beats_per_minute,
-            downscale_large=kwargs.get("downscale_large", 100),
-            downscale_medium=kwargs.get("downscale_medium", 10)
+            video_file,
+            subdir_name,
+            kwargs.get("frames_per_second", 30),
+            kwargs.get("beats_per_midi_event", 1),
+            kwargs.get("ticks_per_beat", 480),
+            beats_per_minute,
+            kwargs.get("downscale_large", 100),
+            kwargs.get("downscale_medium", 10)
         )
         print("process_video_to_csv completed successfully")
         return True
