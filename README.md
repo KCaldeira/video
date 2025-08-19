@@ -52,6 +52,13 @@ python run_video_processing.py --help
 | `--stretch-centers` | float list | [0.33, 0.67] | Stretch centers for transformation |
 | `--cc-number` | int | 1 | MIDI CC number |
 | `--max-frames` | int | None | Maximum number of frames to process (default: process all frames) |
+| `--farneback-preset` | string | default | Farneback optical flow preset (see Motion Analysis section) |
+| `--farneback-pyr-scale` | float | 0.5 | Farneback pyramid scale |
+| `--farneback-levels` | int | 3 | Farneback pyramid levels |
+| `--farneback-winsize` | int | 15 | Farneback window size |
+| `--farneback-iterations` | int | 3 | Farneback iterations |
+| `--farneback-poly-n` | int | 5 | Farneback polynomial degree |
+| `--farneback-poly-sigma` | float | 1.2 | Farneback Gaussian sigma |
 
 #### Configuration File Format
 ```json
@@ -67,7 +74,14 @@ python run_video_processing.py --help
   "stretch_values": [8],
   "stretch_centers": [0.33, 0.67],
   "cc_number": 1,
-  "max_frames": null
+  "max_frames": null,
+  "farneback_preset": "default",
+  "farneback_pyr_scale": 0.5,
+  "farneback_levels": 3,
+  "farneback_winsize": 15,
+  "farneback_iterations": 3,
+  "farneback_poly_n": 5,
+  "farneback_poly_sigma": 1.2
 }
 ```
 
@@ -103,6 +117,12 @@ python run_video_processing.py N17_Mz7fo6C2f --skip-video
 
 # Process only first 1000 frames
 python run_video_processing.py N17_Mz7fo6C2f --max-frames 1000
+
+# Use center-only motion preset (for rotation/zoom only)
+python run_video_processing.py N17_Mz7fo6C2f --farneback-preset center_only
+
+# Use small motion preset with custom window size
+python run_video_processing.py N17_Mz7fo6C2f --farneback-preset small_motion --farneback-winsize 25
 ```
 
 ---
@@ -179,6 +199,26 @@ The system automatically computes additional derived metrics:
 - **Flow Calculation**: Full-resolution optical flow using Farneback algorithm with pyramid levels
 - **Mathematical Framework**: Uses finite differences to compute divergence and curl of the flow field
 - **Coordinate System**: Analyzes motion relative to image center for zoom and rotation detection
+
+##### Farneback Parameter Presets
+The system provides several preset configurations for different motion scenarios:
+
+| Preset | Description | Best For | Parameters |
+|--------|-------------|----------|------------|
+| `default` | Standard parameters for general use | General video content | `pyr_scale=0.5, levels=3, winsize=15, iterations=3, poly_n=5, poly_sigma=1.2` |
+| `small_motion` | Optimized for detecting very small motions | Near-still images, subtle movements | `pyr_scale=0.5, levels=4, winsize=21, iterations=5, poly_n=7, poly_sigma=1.5` |
+| `large_motion` | Optimized for detecting large motions | Fast-moving content, action scenes | `pyr_scale=0.5, levels=2, winsize=11, iterations=2, poly_n=5, poly_sigma=1.1` |
+| `noisy_scene` | Optimized for noisy video content | Low-quality video, compression artifacts | `pyr_scale=0.5, levels=3, winsize=25, iterations=4, poly_n=5, poly_sigma=1.4` |
+| `smooth_scene` | Optimized for smooth, clean video content | High-quality video, minimal noise | `pyr_scale=0.5, levels=2, winsize=9, iterations=2, poly_n=5, poly_sigma=1.0` |
+| `center_only` | Optimized for center-only rotation/zoom | Camera on tripod, no panning | `pyr_scale=0.5, levels=4, winsize=11, iterations=5, poly_n=7, poly_sigma=1.3` |
+
+**Parameter Descriptions:**
+- **`pyr_scale`**: Pyramid scale factor (0.5 = standard, 0.3 = better for small motions, 0.7 = better for large motions)
+- **`levels`**: Number of pyramid levels (2-4, higher for smaller motions)
+- **`winsize`**: Window size for flow calculation (9-25, larger for smaller motions)
+- **`iterations`**: Number of iterations at each level (2-5, more for smaller motions)
+- **`poly_n`**: Polynomial degree for expansion (5-7, higher for precision)
+- **`poly_sigma`**: Gaussian sigma for polynomial expansion (1.0-1.5, higher for noise reduction)
 
 #### Color-Specific Metrics
 - **`H000`** - Proximity to red hue (0°)

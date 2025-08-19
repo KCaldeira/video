@@ -447,7 +447,8 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
     return basic_metrics
 
 @timing_decorator("compute_lucas_kanade_metrics")
-def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_region_ratio=1.0, downscale_factor=None):
+def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_region_ratio=1.0, downscale_factor=None, 
+                                pyr_scale=0.5, levels=3, winsize=15, iterations=3, poly_n=5, poly_sigma=1.2):
     """
     Compute Lucas-Kanade optical flow metrics between two color channels.
     Extracts zoom and rotation information from the flow field using a centered region.
@@ -457,6 +458,12 @@ def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_regi
     - color_channel_prior: Previous frame color channel  
     - center_region_ratio: Size of centered region as fraction of shorter dimension (0.5 = 50% of shorter side)
     - downscale_factor: Factor to downscale the centered region (None = no downscaling)
+    - pyr_scale: Pyramid scale factor (0.5 = standard, 0.3 = better for small motions, 0.7 = better for large motions)
+    - levels: Number of pyramid levels (2-4, higher for smaller motions)
+    - winsize: Window size for flow calculation (9-25, larger for smaller motions)
+    - iterations: Number of iterations at each level (2-5, more for smaller motions)
+    - poly_n: Polynomial degree for expansion (5-7, higher for precision)
+    - poly_sigma: Gaussian sigma for polynomial expansion (1.0-1.5, higher for noise reduction)
     
     Returns:
     - Dictionary of flow-based metrics
@@ -469,12 +476,12 @@ def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_regi
     flow = cv2.calcOpticalFlowFarneback(
         prev, curr, 
         None,  # No initial flow
-        pyr_scale=0.5,  # Pyramid scale
-        levels=3,       # Number of pyramid levels
-        winsize=15,     # Window size
-        iterations=3,   # Iterations
-        poly_n=5,       # Polynomial degree
-        poly_sigma=1.2, # Gaussian sigma
+        pyr_scale=pyr_scale,  # Pyramid scale
+        levels=levels,        # Number of pyramid levels
+        winsize=winsize,      # Window size
+        iterations=iterations, # Iterations
+        poly_n=poly_n,        # Polynomial degree
+        poly_sigma=poly_sigma, # Gaussian sigma
         flags=0
     )
     
@@ -551,7 +558,74 @@ def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_regi
         'cmv': motion_variance     # Motion variance
     }
 
-def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium):
+# Preset configurations for different motion scenarios
+FARNEBACK_PRESETS = {
+    'default': {
+        'pyr_scale': 0.5,
+        'levels': 3,
+        'winsize': 15,
+        'iterations': 3,
+        'poly_n': 5,
+        'poly_sigma': 1.2
+    },
+    'small_motion': {
+        'pyr_scale': 0.5,
+        'levels': 4,
+        'winsize': 21,
+        'iterations': 5,
+        'poly_n': 7,
+        'poly_sigma': 1.5
+    },
+    'large_motion': {
+        'pyr_scale': 0.5,
+        'levels': 2,
+        'winsize': 11,
+        'iterations': 2,
+        'poly_n': 5,
+        'poly_sigma': 1.1
+    },
+    'noisy_scene': {
+        'pyr_scale': 0.5,
+        'levels': 3,
+        'winsize': 25,
+        'iterations': 4,
+        'poly_n': 5,
+        'poly_sigma': 1.4
+    },
+    'smooth_scene': {
+        'pyr_scale': 0.5,
+        'levels': 2,
+        'winsize': 9,
+        'iterations': 2,
+        'poly_n': 5,
+        'poly_sigma': 1.0
+    },
+    'center_only': {
+        'pyr_scale': 0.5,
+        'levels': 4,
+        'winsize': 11,
+        'iterations': 5,
+        'poly_n': 7,
+        'poly_sigma': 1.3
+    }
+}
+
+def get_farneback_params(preset='default', **kwargs):
+    """
+    Get Farneback parameters for a given preset, with optional overrides.
+    
+    Parameters:
+    - preset: One of 'default', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene'
+    - **kwargs: Optional parameter overrides
+    
+    Returns:
+    - Dictionary of Farneback parameters
+    """
+    params = FARNEBACK_PRESETS[preset].copy()
+    params.update(kwargs)  # Override with any provided kwargs
+    return params
+
+def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium, farneback_preset='default', **farneback_kwargs):
     """
     Compute metrics that measure rates of change between consecutive frames.
     These metrics capture temporal dynamics and motion information.
@@ -561,6 +635,8 @@ def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium
     - frame_prior: Previous frame
     - downscale_large: Large scale analysis factor
     - downscale_medium: Medium scale analysis factor
+    - farneback_preset: Preset for Farneback parameters ('default', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene')
+    - **farneback_kwargs: Optional overrides for Farneback parameters
     
     Returns:
     - Dictionary of change metrics
@@ -585,8 +661,11 @@ def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium
         # rotational and zoom metrics should be the same for all color channels, 
         # so we only need to do it for the Gray channel
         if color_channel_name == "Gray":
-        # Compute Lucas-Kanade metrics for this color channel
-            lk_metrics = compute_lucas_kanade_metrics(color_channel, color_channel_prior, 1.0, 2)
+            # Get Farneback parameters based on preset
+            farneback_params = get_farneback_params(farneback_preset, **farneback_kwargs)
+            
+            # Compute Lucas-Kanade metrics for this color channel
+            lk_metrics = compute_lucas_kanade_metrics(color_channel, color_channel_prior, 1.0, 2, **farneback_params)
             
             # Add color channel prefix to metric names
             for metric_name, metric_value in lk_metrics.items():
@@ -618,14 +697,16 @@ def export_metrics_to_csv(frame_count_list, metrics, filename):
     df.to_csv(filename, index=False)
 
 def process_video_to_csv(video_path, 
-                          subdir_name, # output prefix 
-                          frames_per_second, 
-                          beats_per_midi_event,
-                          ticks_per_beat, 
-                          beats_per_minute, 
-                          downscale_large,
-                          downscale_medium,
-                          max_frames=None):
+                           subdir_name, # output prefix 
+                           frames_per_second, 
+                           beats_per_midi_event,
+                           ticks_per_beat, 
+                           beats_per_minute, 
+                           downscale_large,
+                           downscale_medium,
+                           max_frames=None,
+                           farneback_preset='default',
+                           **farneback_kwargs):
     """
     Process every Nth frame, calculate metrics, and generate multiple MIDI files.
     
@@ -702,7 +783,7 @@ def process_video_to_csv(video_path,
             metric_results = compute_basic_metrics(frame, downscale_large, downscale_medium)
 
             # Compute change metrics with the immediately previous frame
-            change_results = compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium)
+            change_results = compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium, farneback_preset, **farneback_kwargs)
             
             # Add change metrics directly to basic_metrics
             for key, value in change_results.items():
@@ -758,7 +839,9 @@ def process_video_to_csv(video_path,
         "ticks_per_beat": ticks_per_beat,
         "beats_per_minute": beats_per_minute,
         "downscale_large": downscale_large,
-        "downscale_medium": downscale_medium
+        "downscale_medium": downscale_medium,
+        "farneback_preset": farneback_preset,
+        "farneback_params": get_farneback_params(farneback_preset, **farneback_kwargs)
     }
     config_filename = f"{subdir_name}_config.json"
     with open(config_filename, 'w') as f:

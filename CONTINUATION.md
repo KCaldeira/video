@@ -274,6 +274,9 @@ The processing pipeline uses separate dictionaries for each stage:
 - **Keep logic simple** and predictable
 - **Test thoroughly** before considering changes complete
 
+## Code Modification Policy
+**IMPORTANT**: Only modify code when explicitly requested to do so. If the user asks for information, analysis, or explanations, provide that information without making code changes. Code modifications should only occur when the user specifically asks for code to be changed, added, or removed.
+
 ---
 
 ## **Future Code Cleanup Opportunities**

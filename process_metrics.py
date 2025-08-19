@@ -335,11 +335,10 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     SORT_ORDER = [
         'color_channel',     # field 1: R, G, B, Gray, H000, etc.
         'metric',           # field 2: avg, std, xps, etc.
-        'smoothing_period',  # field 3: f001, f017, f065, f257
         'rank_value',        # field 4: r or v
+        'smoothing_period',  # field 3: f001, f017, f065, f257
         'inversion',         # field 5: o or i
         'stretching'       # field 6: s1-0.5, s8-0.33, etc.
-
     ]
 
     def parse_key_fields(key):

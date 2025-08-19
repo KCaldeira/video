@@ -48,7 +48,9 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
             beats_per_minute,
             kwargs.get("downscale_large", 100),
             kwargs.get("downscale_medium", 10),
-            kwargs.get("max_frames", None)
+            kwargs.get("max_frames", None),
+            kwargs.get("farneback_preset", "default"),
+            **{k: v for k, v in kwargs.items() if k.startswith("farneback_") and k != "farneback_preset"}
         )
         print("process_video_to_csv completed successfully")
         return True
@@ -129,6 +131,20 @@ def main():
                        help='MIDI CC number (default: 1)')
     parser.add_argument('--max-frames', type=int, default=None,
                        help='Maximum number of frames to process (default: process all frames)')
+    parser.add_argument('--farneback-preset', choices=['default', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene', 'center_only'],
+                       default='default', help='Farneback optical flow preset (default: default)')
+    parser.add_argument('--farneback-pyr-scale', type=float, default=0.5,
+                       help='Farneback pyramid scale (default: 0.5)')
+    parser.add_argument('--farneback-levels', type=int, default=3,
+                       help='Farneback pyramid levels (default: 3)')
+    parser.add_argument('--farneback-winsize', type=int, default=15,
+                       help='Farneback window size (default: 15)')
+    parser.add_argument('--farneback-iterations', type=int, default=3,
+                       help='Farneback iterations (default: 3)')
+    parser.add_argument('--farneback-poly-n', type=int, default=5,
+                       help='Farneback polynomial degree (default: 5)')
+    parser.add_argument('--farneback-poly-sigma', type=float, default=1.2,
+                       help='Farneback polynomial sigma (default: 1.2)')
     
     args = parser.parse_args()
     
