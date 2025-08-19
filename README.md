@@ -144,59 +144,41 @@ Module containing functions to extract comprehensive visual metrics from video f
 - **`es1`** - Spatial standard deviation of large-scale error
 - **`es2`** - Spatial standard deviation of small-scale error
 
-#### Motion Metrics (ECC Global Transform Analysis)
+#### Motion Metrics (Lucas-Kanade Optical Flow Analysis)
 - **`czd`** - Zoom divergence (positive = zoom out, negative = zoom in)
 - **`crc`** - Rotation curl (positive = counterclockwise, negative = clockwise)
-- **`cmm`** - Motion magnitude (overall motion strength)
-- **`cma`** - Motion angle (direction of motion)
-- **`cmr`** - Radial motion (motion toward/away from center)
-- **`cmt`** - Tangential motion (motion perpendicular to radius)
-- **`cmv`** - Motion variance (inverse of confidence)
+- **`cmv`** - Motion variance (how uniform the motion is)
 
 ##### Motion Metrics Overview
-These metrics are computed by analyzing the global transformation between consecutive video frames using ECC (Enhanced Correlation Coefficient) alignment. This approach directly estimates the similarity transform (scale + rotation + translation) between frames, providing more accurate and robust motion detection for small changes typical in video content.
+These metrics are computed by analyzing the optical flow between consecutive video frames using Lucas-Kanade Farneback algorithm. This approach extracts zoom and rotation information from the flow field using a centered region analysis, focusing on center-anchored motion (zoom and rotation around center, no panning).
 
 **`czd` - Zoom Divergence**
 - **What it measures**: How much the image is zooming in or out
-- **Mathematical basis**: Divergence of the flow field (∂u/∂x + ∂v/∂y)
+- **Mathematical basis**: Divergence of the flow field (∂u/∂x + ∂v/∂y) in centered region
 - **Interpretation**: Positive values indicate zooming out (objects getting smaller), negative values indicate zooming in (objects getting larger), zero indicates no zoom effect
 
 **`crc` - Rotation Curl**
 - **What it measures**: How much the image is rotating around its center
-- **Mathematical basis**: Curl of the flow field (∂v/∂x - ∂u/∂y)
+- **Mathematical basis**: Curl of the flow field (∂v/∂x - ∂u/∂y) in centered region
 - **Interpretation**: Positive values indicate counterclockwise rotation, negative values indicate clockwise rotation, zero indicates no rotation
 
-**`cmm` - Motion Magnitude**
-- **What it measures**: Overall strength of motion in the frame
-- **Mathematical basis**: Magnitude of combined zoom and rotation effects √(zoom² + rotation²)
-- **Interpretation**: High values indicate lots of motion and dynamic scenes, low values indicate static scenes with little movement
-
-**`cma` - Motion Angle**
-- **What it measures**: Primary direction of motion
-- **Mathematical basis**: Average direction of flow vectors arctan(mean(v)/mean(u))
-- **Interpretation**: 0° = motion to the right, 90° = motion upward, 180° = motion to the left, 270° = motion downward
-
-**`cmr` - Radial Motion**
-- **What it measures**: Motion toward or away from the image center
-- **Mathematical basis**: Zoom component of the similarity transform
-- **Interpretation**: Positive values indicate motion away from center (expanding), negative values indicate motion toward center (contracting), zero indicates no radial motion
-
-**`cmt` - Tangential Motion**
-- **What it measures**: Motion perpendicular to the radius (circular motion around center)
-- **Mathematical basis**: Rotation component of the similarity transform
-- **Interpretation**: Positive values indicate counterclockwise circular motion, negative values indicate clockwise circular motion, zero indicates no tangential motion
-
 **`cmv` - Motion Variance**
-- **What it measures**: Confidence in the motion estimation
-- **Mathematical basis**: Inverse of ECC correlation confidence (1 - confidence)
-- **Interpretation**: High values indicate low confidence in motion estimation, low values indicate high confidence in the detected motion
+- **What it measures**: How uniform the motion is across the image
+- **Mathematical basis**: Variance of flow components (var(flow_x) + var(flow_y))
+- **Interpretation**: High values indicate non-uniform motion (complex scenes), low values indicate uniform motion (simple scenes)
+
+##### Derived Motion Metrics
+The system automatically computes additional derived metrics:
+- **`crl`** - Positive rotation component (`max(crc, 0)`) - captures counterclockwise rotation
+- **`crr`** - Negative rotation component (`max(-crc, 0)`) - captures clockwise rotation
 
 ##### Technical Implementation Details
+- **Algorithm**: Uses Lucas-Kanade Farneback optical flow with optimized parameters
 - **Analysis Region**: Computed on a centered region of the image (configurable via `center_region_ratio`)
-- **Downscaling**: Region is downscaled for computational efficiency (factor of 2 by default)
-- **Algorithm**: Uses ECC (Enhanced Correlation Coefficient) alignment with affine motion model, optimized for small motions (few degrees rotation, few percent zoom)
-- **Initialization**: Phase correlation with Hanning window provides initial translation estimate
-- **Mathematical Framework**: Based on similarity transform decomposition (SVD) to extract clean rotation and scale components
+- **Downscaling**: Centered region is downscaled for computational efficiency (factor of 2 by default)
+- **Flow Calculation**: Full-resolution optical flow using Farneback algorithm with pyramid levels
+- **Mathematical Framework**: Uses finite differences to compute divergence and curl of the flow field
+- **Coordinate System**: Analyzes motion relative to image center for zoom and rotation detection
 
 #### Color-Specific Metrics
 - **`H000`** - Proximity to red hue (0°)

@@ -58,24 +58,24 @@ def add_derived_columns(csv):
             csv[es1r_col] = np.where(csv[es0_col] != 0, csv[es1_col] / csv[es0_col], 0)
             csv[es2r_col] = np.where(csv[es0_col] != 0, csv[es2_col] / csv[es0_col], 0)
     
-    # Add rotation metrics (cal and car) based on can metrics
-    # Find all columns that contain "_can" in their name
-    can_columns = [col for col in csv.columns if "_can" in col]
+    # Add rotation metrics (crl and crr) based on crc metrics
+    # Find all columns that contain "_crc" in their name
+    crc_columns = [col for col in csv.columns if "_crc" in col]
     
-    for can_col in can_columns:
-        # Extract the base name (everything before "_can")
-        base_name = can_col.replace("_can", "")
+    for crc_col in crc_columns:
+        # Extract the base name (everything before "_crc")
+        base_name = crc_col.replace("_crc", "")
         
-        # Create cal and car column names
-        cal_col = f"{base_name}_cal"
-        car_col = f"{base_name}_car"
+        # Create crl and crr column names
+        crl_col = f"{base_name}_crl"
+        crr_col = f"{base_name}_crr"
         
         # Create the new metrics
-        # cal = max(can, 0) - captures positive rotation (counterclockwise)
-        csv[cal_col] = np.maximum(csv[can_col], 0)
+        # crl = max(crc, 0) - captures positive rotation (counterclockwise)
+        csv[crl_col] = np.maximum(csv[crc_col], 0)
         
-        # car = max(-can, 0) - captures negative rotation (clockwise)
-        csv[car_col] = np.maximum(-csv[can_col], 0)
+        # crr = max(-crc, 0) - captures negative rotation (clockwise)
+        csv[crr_col] = np.maximum(-csv[crc_col], 0)
     
     return csv
 

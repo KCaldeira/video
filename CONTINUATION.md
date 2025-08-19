@@ -160,7 +160,7 @@ for filter_period in filter_periods:
 ### **process_video.py**
 - `process_video_to_csv()` - Main function that processes video and outputs CSV
 - `compute_basic_metrics()` - Computes basic visual metrics from frames
-- `compute_change_metrics()` - Computes motion-based metrics between frames using ECC global transform analysis
+- `compute_change_metrics()` - Computes motion-based metrics between frames using Lucas-Kanade optical flow analysis
 
 ### **process_metrics.py**
 - `process_metrics_to_midi()` - Main function that processes CSV and outputs MIDI
@@ -259,18 +259,14 @@ The processing pipeline uses separate dictionaries for each stage:
 - Prints both total frames and frames to process for clarity
 - Useful for testing and processing large videos in chunks
 
-### **ECC Global Transform Analysis (Motion Detection)**
-- Replaced Lucas-Kanade optical flow with ECC-based global transform analysis
-- More accurate for small motions (few degrees rotation, few percent zoom)
-- Uses phase correlation for initial translation estimate
-- Applies ECC alignment with affine motion model
-- Extracts similarity transform using SVD decomposition
-- Provides confidence-based motion variance metric
-- Optimized for near-still images typical in video content
-- **FIXED**: Added robust fallback methods to prevent binary output values
-- **FIXED**: Added validation for reasonable motion values
-- **FIXED**: Added Lucas-Kanade optical flow as fallback when ECC fails
-- **FIXED**: Added small random variations to prevent uniform 0/1 values
+### **Lucas-Kanade Optical Flow Analysis (Motion Detection)**
+- Uses Farneback optical flow algorithm (`cv2.calcOpticalFlowFarneback`) for motion detection
+- Extracts zoom and rotation information from optical flow field using divergence and curl
+- Focuses on center-anchored motion (zoom and rotation around center, no panning)
+- **SIMPLIFIED**: Reduced to 3 core metrics: zoom divergence (`czd`), rotation curl (`crc`), and motion variance (`cmv`)
+- **OPTIMIZED**: Assumes only zoom and rotation around center, eliminating panning-related metrics
+- **EFFICIENT**: Uses full-resolution optical flow with centered region analysis
+- **RELIABLE**: Motion variance provides confidence metric for detection quality
 
 ## Remember
 - **Filtering comes LAST** in the processing pipeline
@@ -301,14 +297,14 @@ The processing pipeline uses separate dictionaries for each stage:
 
 #### **3. Hardcoded Magic Numbers**
 - `center_region_ratio = 0.5` - should be configurable
-- `downscale_factor = 2` for ECC analysis - should be configurable
+- `downscale_factor = 2` for Lucas-Kanade optical flow analysis - should be configurable
 - Various array indices and thresholds scattered throughout
 
 #### **4. Poor Error Handling**
 - Limited try/catch blocks
 - No validation of input parameters
 - Silent failures in some areas
-- ECC alignment failures should be handled more gracefully
+- Lucas-Kanade optical flow failures should be handled more gracefully
 
 #### **5. Mixed Responsibilities**
 - The main function does everything: file I/O, video processing, metrics computation, data saving

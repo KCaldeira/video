@@ -446,11 +446,11 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
 
     return basic_metrics
 
-@timing_decorator("compute_global_transform_metrics")
-def compute_global_transform_metrics(color_channel, color_channel_prior, center_region_ratio=1.0, downscale_factor=None):
+@timing_decorator("compute_lucas_kanade_metrics")
+def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_region_ratio=1.0, downscale_factor=None):
     """
-    Compute global zoom and rotation metrics using Lucas-Kanade optical flow with center-anchored similarity fitting.
-    Optimized for small motions (few degrees rotation, few percent zoom) around the image center.
+    Compute Lucas-Kanade optical flow metrics between two color channels.
+    Extracts zoom and rotation information from the flow field using a centered region.
     
     Parameters:
     - color_channel: Current frame color channel
@@ -459,211 +459,96 @@ def compute_global_transform_metrics(color_channel, color_channel_prior, center_
     - downscale_factor: Factor to downscale the centered region (None = no downscaling)
     
     Returns:
-    - Dictionary of flow-based metrics (maintains compatibility with existing code)
+    - Dictionary of flow-based metrics
     """
+    # Convert to float32 for optical flow
+    curr = color_channel.astype(np.float32)
+    prev = color_channel_prior.astype(np.float32)
     
-    def extract_center_region(img1, img2, ratio):
-        """Extract center region from both images"""
-        h, w = img1.shape[:2]
-        center_h, center_w = h // 2, w // 2
-        region_h = int(h * ratio)
-        region_w = int(w * ratio)
-        
-        # Calculate region boundaries
-        start_h = center_h - region_h // 2
-        end_h = center_h + region_h // 2
-        start_w = center_w - region_w // 2
-        end_w = center_w + region_w // 2
-        
-        # Ensure boundaries are within image
-        start_h = max(0, start_h)
-        end_h = min(h, end_h)
-        start_w = max(0, start_w)
-        end_w = min(w, end_w)
-        
-        return (img1[start_h:end_h, start_w:end_w], 
-                img2[start_h:end_h, start_w:end_w])
+    # Calculate optical flow using Lucas-Kanade on full resolution
+    flow = cv2.calcOpticalFlowFarneback(
+        prev, curr, 
+        None,  # No initial flow
+        pyr_scale=0.5,  # Pyramid scale
+        levels=3,       # Number of pyramid levels
+        winsize=15,     # Window size
+        iterations=3,   # Iterations
+        poly_n=5,       # Polynomial degree
+        poly_sigma=1.2, # Gaussian sigma
+        flags=0
+    )
     
-    def create_tracking_grid(img_shape, grid_spacing=16):
-        """Create a uniform grid of points for tracking"""
-        h, w = img_shape[:2]
-        
-        # Create grid with spacing, avoiding edges
-        margin = grid_spacing
-        x_coords = np.arange(margin, w - margin, grid_spacing, dtype=np.float32)
-        y_coords = np.arange(margin, h - margin, grid_spacing, dtype=np.float32)
-        
-        # Create all combinations
-        points = []
-        for y in y_coords:
-            for x in x_coords:
-                points.append([x, y])
-        
-        return np.array(points, dtype=np.float32).reshape(-1, 1, 2)
+    # Extract flow components
+    flow_x = flow[:, :, 0]  # Horizontal flow
+    flow_y = flow[:, :, 1]  # Vertical flow
     
-    def fit_center_anchored_similarity(points_old, points_new, center):
-        """
-        Fit center-anchored similarity transform using least squares.
-        
-        For each point (X,Y) with flow (u_x, u_y), the center-anchored similarity gives:
-        u_x ≈ α(X - c_x) - θ(Y - c_y)
-        u_y ≈ α(Y - c_y) + θ(X - c_x)
-        
-        where α = s - 1 (scale factor) and θ is rotation angle.
-        """
-        if len(points_old) < 4:
-            return 1.0, 0.0, 0.1  # Default values if insufficient points
-        
-        # Calculate flow vectors
-        flow = points_new - points_old
-        u_x = flow[:, 0, 0]  # x-component of flow
-        u_y = flow[:, 0, 1]  # y-component of flow
-        
-        # Center coordinates
-        X = points_old[:, 0, 0] - center[0]
-        Y = points_old[:, 0, 1] - center[1]
-        
-        # Build the linear system: [u_x, u_y] = [α, θ] * [X, -Y; Y, X]
-        # For each point: [u_x, u_y] = [α, θ] * [X, -Y; Y, X]
-        A = np.column_stack([X, -Y, Y, X])  # Design matrix
-        b = np.column_stack([u_x, u_y]).flatten()  # Target vector
-        
-        try:
-            # Solve least squares: [α, θ] = (A^T A)^(-1) A^T b
-            solution = np.linalg.lstsq(A, b, rcond=None)[0]
-            
-            # Extract parameters
-            alpha = solution[0]  # Scale factor: s = 1 + α
-            theta = solution[1]  # Rotation angle
-            
-            # Convert to scale
-            scale = 1.0 + alpha
-            
-            # Validate results
-            if abs(scale - 1.0) > 0.5 or abs(theta) > 0.5:  # More than 50% scale change or ~30 degrees
-                # Results seem unreasonable, return identity
-                return 1.0, 0.0, 0.1
-            
-            return scale, theta, 0.8  # High confidence for good fit
-            
-        except np.linalg.LinAlgError:
-            # Singular matrix or other numerical issues
-            return 1.0, 0.0, 0.1
+    # Calculate center of image
+    center_y, center_x = flow.shape[0] // 2, flow.shape[1] // 2
     
-    def lk_center_anchored_alignment(img1, img2):
-        """Lucas-Kanade optical flow with center-anchored similarity fitting"""
-        try:
-            # Convert to grayscale if needed
-            if len(img1.shape) == 3:
-                img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
-            if len(img2.shape) == 3:
-                img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
-            
-            # Convert to float32
-            img1 = img1.astype(np.float32)
-            img2 = img2.astype(np.float32)
-            
-            # Check if images are too small
-            if img1.shape[0] < 32 or img1.shape[1] < 32:
-                return 1.0, 0.0, 0.1
-            
-            # Light Gaussian blur for noise reduction
-            img1 = cv2.GaussianBlur(img1, (3, 3), 0.8)
-            img2 = cv2.GaussianBlur(img2, (3, 3), 0.8)
-            
-            # Create tracking grid
-            grid_spacing = max(8, min(img1.shape) // 16)  # Adaptive spacing
-            points = create_tracking_grid(img1.shape, grid_spacing)
-            
-            if len(points) < 4:
-                return 1.0, 0.0, 0.1
-            
-            # Lucas-Kanade parameters
-            lk_params = dict(
-                winSize=(15, 15),
-                maxLevel=3,
-                criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03),
-                flags=cv2.OPTFLOW_USE_INITIAL_FLOW,
-                minEigThreshold=1e-4
-            )
-            
-            # Forward flow
-            next_points, status, error = cv2.calcOpticalFlowPyrLK(img1, img2, points, None, **lk_params)
-            
-            # Backward flow for consistency check
-            back_points, back_status, back_error = cv2.calcOpticalFlowPyrLK(img2, img1, next_points, None, **lk_params)
-            
-            # Filter points with good forward-backward consistency
-            fb_error = np.abs(points - back_points).reshape(-1, 2)
-            fb_error_norm = np.linalg.norm(fb_error, axis=1)
-            
-            # Keep points with small forward-backward error
-            good_points = fb_error_norm < 0.5  # 0.5 pixel threshold
-            good_status = status.ravel() == 1
-            
-            # Combine conditions
-            valid_points = good_points & good_status
-            
-            if np.sum(valid_points) < 4:
-                return 1.0, 0.0, 0.1
-            
-            # Get valid point correspondences
-            points_old = points[valid_points]
-            points_new = next_points[valid_points]
-            
-            # Calculate image center
-            center = (img1.shape[1] / 2, img1.shape[0] / 2)
-            
-            # Fit center-anchored similarity transform
-            scale, angle, confidence = fit_center_anchored_similarity(points_old, points_new, center)
-            
-            return scale, angle, confidence
-            
-        except Exception as e:
-            # Fallback: return small random values to avoid binary output
-            import random
-            scale = 1.0 + random.uniform(-0.005, 0.005)  # Very small random scale variation
-            angle = random.uniform(-0.005, 0.005)  # Very small random angle variation
-            confidence = 0.1
-            return scale, angle, confidence
+    # Calculate size of centered region
+    shorter_dim = min(flow.shape[0], flow.shape[1])
+    region_size = int(shorter_dim * center_region_ratio)
     
-    # Main processing pipeline
-    # Convert to grayscale for processing
-    if len(color_channel.shape) == 3:
-        curr_gray = cv2.cvtColor(color_channel, cv2.COLOR_BGR2GRAY)
-        prev_gray = cv2.cvtColor(color_channel_prior, cv2.COLOR_BGR2GRAY)
-    else:
-        curr_gray = color_channel
-        prev_gray = color_channel_prior
+    # Calculate region boundaries
+    start_y = center_y - region_size // 2
+    end_y = center_y + region_size // 2
+    start_x = center_x - region_size // 2
+    end_x = center_x + region_size // 2
     
-    # Extract center region if requested
-    if center_region_ratio < 1.0:
-        curr_gray, prev_gray = extract_center_region(curr_gray, prev_gray, center_region_ratio)
+    # Ensure boundaries are within image
+    start_y = max(0, start_y)
+    end_y = min(flow.shape[0], end_y)
+    start_x = max(0, start_x)
+    end_x = min(flow.shape[1], end_x)
     
-    # Downscale if requested
+    # Extract centered region
+    flow_x_center = flow_x[start_y:end_y, start_x:end_x]
+    flow_y_center = flow_y[start_y:end_y, start_x:end_x]
+    
+    # Downscale the centered region if requested
     if downscale_factor is not None:
-        h, w = curr_gray.shape
-        new_h, new_w = h // downscale_factor, w // downscale_factor
-        curr_gray = cv2.resize(curr_gray, (new_w, new_h))
-        prev_gray = cv2.resize(prev_gray, (new_w, new_h))
+        h_center, w_center = flow_x_center.shape
+        h_small = h_center // downscale_factor
+        w_small = w_center // downscale_factor
+        flow_x_center = cv2.resize(flow_x_center, (w_small, h_small))
+        flow_y_center = cv2.resize(flow_y_center, (w_small, h_small))
     
-    # Apply Lucas-Kanade center-anchored alignment
-    scale, angle, confidence = lk_center_anchored_alignment(curr_gray, prev_gray)
+    # Create coordinate grids for the centered region (after downscaling if applied)
+    h_center, w_center = flow_x_center.shape
+    y_coords, x_coords = np.meshgrid(
+        np.arange(h_center), 
+        np.arange(w_center), 
+        indexing='ij'
+    )
     
-    # Debug output for first few frames
-    if hasattr(compute_global_transform_metrics, 'debug_count'):
-        compute_global_transform_metrics.debug_count += 1
-    else:
-        compute_global_transform_metrics.debug_count = 1
+    # Calculate relative positions from center
+    rel_x = x_coords - center_x
+    rel_y = y_coords - center_y
     
-    if compute_global_transform_metrics.debug_count <= 5:
-        print(f"Frame {compute_global_transform_metrics.debug_count}: scale={scale:.4f}, angle={angle:.4f}, confidence={confidence:.4f}")
+    # Calculate distance from center
+    distance_from_center = np.sqrt(rel_x**2 + rel_y**2)
     
-    # Return simplified metrics
+    # Zoom metrics (divergence of flow) - only in centered region
+    # Positive divergence = zoom out, negative = zoom in
+    # Divergence = ∂u/∂x + ∂v/∂y (approximated using finite differences)
+    du_dx = np.gradient(flow_x_center, axis=1)
+    dv_dy = np.gradient(flow_y_center, axis=0)
+    zoom_divergence = float(np.mean(du_dx + dv_dy))
+    
+    # Rotation metrics (curl of flow) - only in centered region
+    # Positive curl = counterclockwise rotation, negative = clockwise
+    # Curl = ∂v/∂x - ∂u/∂y (approximated using finite differences)
+    dv_dx = np.gradient(flow_y_center, axis=1)
+    du_dy = np.gradient(flow_x_center, axis=0)
+    rotation_curl = float(np.mean(dv_dx - du_dy))
+    
+    # Motion variance (how uniform the motion is) - full image
+    motion_variance = float(np.var(flow_x) + np.var(flow_y))
+    
     return {
-        'csc': scale,        # Scale factor
-        'can': angle,        # Angle in radians
-        'cco': confidence    # Confidence (0-1, higher is better)
+        'czd': zoom_divergence,      # Zoom divergence
+        'crc': rotation_curl,        # Rotation curl  
+        'cmv': motion_variance     # Motion variance
     }
 
 def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium):
@@ -700,8 +585,8 @@ def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium
         # rotational and zoom metrics should be the same for all color channels, 
         # so we only need to do it for the Gray channel
         if color_channel_name == "Gray":
-        # Compute global transform metrics for this color channel
-            lk_metrics = compute_global_transform_metrics(color_channel, color_channel_prior, 1.0, 2)
+        # Compute Lucas-Kanade metrics for this color channel
+            lk_metrics = compute_lucas_kanade_metrics(color_channel, color_channel_prior, 1.0, 2)
             
             # Add color channel prefix to metric names
             for metric_name, metric_value in lk_metrics.items():
