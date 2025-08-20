@@ -403,11 +403,21 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         # at the specified spatial scale
         reflect_metric_value = compute_reflect_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
         # at the specified spatial scale
-        radial_symmetry_metric_value = compute_radial_symmetry_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
-        # at the specified spatial scale
+        
+        # Radial symmetry metric - only compute for Gray channel to save time
+        if color_channel_name == "Gray":
+            radial_symmetry_metric_value = compute_radial_symmetry_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
+            # at the specified spatial scale
+        else:
+            # Use zero for other color channels (can be easily changed back later)
+            radial_symmetry_metric_value = 0.0
 
-        # Add error detection metrics
-        mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 = compute_error_dispersion_metrics(color_channel, downscale_large)
+        # Add error detection metrics - only compute for Gray channel to save time
+        if color_channel_name == "Gray":
+            mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 = compute_error_dispersion_metrics(color_channel, downscale_large)
+        else:
+            # Use zeros for other color channels (can be easily changed back later)
+            mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
 
         dark_count, light_count = compute_dark_light_metric(color_channel, 5) # needs to be within 5 (0 - 255) unites of max or min light or dark values
@@ -826,7 +836,7 @@ def process_video_to_csv(video_path,
         basic_metrics[key_i] = (180 - basic_metrics[key]) * diff_monos
 
     # Export metrics to CSV
-    csv_filename = f"{subdir_name}_basic.csv"
+    csv_filename = f"{subdir_name}_{farneback_preset}_basic.csv"
     export_metrics_to_csv(frame_count_list, basic_metrics, csv_filename)
     print(f"Metrics exported to {csv_filename}")
 
@@ -843,7 +853,7 @@ def process_video_to_csv(video_path,
         "farneback_preset": farneback_preset,
         "farneback_params": get_farneback_params(farneback_preset, **farneback_kwargs)
     }
-    config_filename = f"{subdir_name}_config.json"
+    config_filename = f"{subdir_name}_{farneback_preset}_config.json"
     with open(config_filename, 'w') as f:
         json.dump(config, f, indent=2)
     print(f"Config exported to {config_filename}")

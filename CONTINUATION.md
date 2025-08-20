@@ -268,6 +268,20 @@ The processing pipeline uses separate dictionaries for each stage:
 - **EFFICIENT**: Uses full-resolution optical flow with centered region analysis
 - **RELIABLE**: Motion variance provides confidence metric for detection quality
 
+### **Error Dispersion Metrics Optimization (Performance)**
+- **PERFORMANCE**: Error dispersion metrics (`ee0`, `ee1`, `ee2`, `ed0`, `ed1`, `ed2`, `es0`, `es1`, `es2`) now computed only for Gray channel
+- **EFFICIENT**: Other color channels use zero values for these metrics, significantly reducing processing time
+- **MAINTAINABLE**: Loop structure preserved for easy restoration of full color channel processing
+- **REVERSIBLE**: Can be easily changed back by removing the Gray channel condition
+- **RATIONALE**: Error dispersion metrics are computationally expensive and provide similar information across color channels
+
+### **Radial Symmetry Metrics Optimization (Performance)**
+- **PERFORMANCE**: Radial symmetry metrics (`rad`) now computed only for Gray channel
+- **EFFICIENT**: Other color channels use zero values for these metrics, further reducing processing time
+- **MAINTAINABLE**: Loop structure preserved for easy restoration of full color channel processing
+- **REVERSIBLE**: Can be easily changed back by removing the Gray channel condition
+- **RATIONALE**: Radial symmetry metrics are computationally expensive and provide similar information across color channels
+
 ## Remember
 - **Filtering comes LAST** in the processing pipeline
 - **Fix root causes**, not symptoms

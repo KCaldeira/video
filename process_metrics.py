@@ -126,9 +126,26 @@ def triangular_filter_odd(data, N):
 
 def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers):
 
-    if not os.path.exists(f"../video_midi/{prefix}"):
-        os.makedirs(f"../video_midi/{prefix}")
-
+    # Create output prefix with farneback preset
+    # Try to extract farneback preset from config file
+    farneback_preset = "default"  # default fallback
+    config_filename = f"{prefix}_config.json"
+    if os.path.exists(config_filename):
+        try:
+            with open(config_filename, 'r') as f:
+                config = json.load(f)
+                farneback_preset = config.get("farneback_preset", "default")
+        except:
+            pass
+    
+    output_prefix = f"{prefix}_{farneback_preset}"
+    
+    if not os.path.exists(f"../video_midi/{output_prefix}"):
+        os.makedirs(f"../video_midi/{output_prefix}")
+    
+    # Use original prefix for file names (without farneback preset)
+    file_prefix = prefix
+    
     # replace NA values with 0
     csv = csv.fillna(0)
 
@@ -264,9 +281,9 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                                             time=time_tick))
 
                     
-                    # Create file name: var_rank_averaging_stretch.mid (exclude metric and inversion)
-                    file_name = f"../video_midi/{prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}.mid"
-                    midi_file.save(file_name)
+            # Create file name: var_rank_averaging_stretch.mid (exclude metric and inversion)
+            file_name = f"../video_midi/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}.mid"
+            midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
     print(f"Writing out midi files by postprocessing methods")
@@ -316,7 +333,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                             channel=7,
                             time=time_tick))
                     
-        midi_file.save("../video_midi/" + prefix + "/" + base_suffix + ".mid")
+        midi_file.save("../video_midi/" + output_prefix + "/" + base_suffix + ".mid")
 
     # write out the master xlsx
     print(f"Writing out master xlsx")
@@ -327,8 +344,8 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
-    master_df.to_excel(f"../video_midi/{prefix}/{prefix}_derived.xlsx", index=False)
-    print(f"Derived data saved to ../video_midi/{prefix}/{prefix}_derived.xlsx")
+    master_df.to_excel(f"../video_midi/{output_prefix}/{file_prefix}_derived.xlsx", index=False)
+    print(f"Derived data saved to ../video_midi/{output_prefix}/{file_prefix}_derived.xlsx")
 
     # Flexible sorting configuration
     # Define the order of fields for sorting (can be easily modified)
@@ -415,7 +432,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
-    pdf = PdfPages(f"../video_midi/{prefix}/{prefix}_plots.pdf")
+    pdf = PdfPages(f"../video_midi/{output_prefix}/{file_prefix}_plots.pdf")
     
     plt.rcParams['figure.max_open_warning'] = 50  # Allow more figures before warning
 
@@ -454,14 +471,32 @@ def process_metrics_to_midi(prefix, config=None):
         prefix (str): The prefix for input/output files
         config (dict, optional): Configuration dictionary. If None, will try to load from {prefix}_config.json
     """
+    # Extract farneback preset from config for output naming
+    farneback_preset = "default"  # default fallback
+    if config and "farneback_preset" in config:
+        farneback_preset = config["farneback_preset"]
+    
+    # Create output prefix with farneback preset
+    output_prefix = f"{prefix}_{farneback_preset}"
     # Try to load config from JSON if it exists and config not provided
     if config is None:
+        # First try the original config filename
         config_filename = f"{prefix}_config.json"
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as f:
                 config = json.load(f)
         else:
-            config = {}
+            # Try to find config file with farneback preset suffix
+            import glob
+            config_files = glob.glob(f"{prefix}_*_config.json")
+            if config_files:
+                # Use the first matching config file
+                config_filename = config_files[0]
+                with open(config_filename, 'r') as f:
+                    config = json.load(f)
+                print(f"Using config file: {config_filename}")
+            else:
+                config = {}
     
     # Extract parameters from config with defaults
     ticks_per_beat = config.get("ticks_per_beat", 480)
@@ -475,7 +510,19 @@ def process_metrics_to_midi(prefix, config=None):
     stretch_values = config.get("stretch_values", [8])
     stretch_centers = config.get("stretch_centers", [0.33, 0.67])
 
-    csv = pd.read_csv(prefix + "_basic.csv", index_col=0)
+    # Try to find the CSV file with farneback preset suffix
+    csv_filename = f"{prefix}_basic.csv"
+    if not os.path.exists(csv_filename):
+        # Try to find CSV file with farneback preset suffix
+        import glob
+        csv_files = glob.glob(f"{prefix}_*_basic.csv")
+        if csv_files:
+            csv_filename = csv_files[0]
+            print(f"Using CSV file: {csv_filename}")
+        else:
+            raise FileNotFoundError(f"Could not find CSV file: {csv_filename} or any matching files with preset suffix")
+    
+    csv = pd.read_csv(csv_filename, index_col=0)
     
     # Add derived columns
     csv = add_derived_columns(csv)

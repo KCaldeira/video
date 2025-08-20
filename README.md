@@ -88,11 +88,11 @@ python run_video_processing.py --help
 ### Output Files Created
 
 #### From process_video.py
-- `{subdir_name}_basic.csv` - Raw metrics data for each frame
-- `{subdir_name}_config.json` - Configuration parameters used
+- `{subdir_name}_{farneback_preset}_basic.csv` - Raw metrics data for each frame
+- `{subdir_name}_{farneback_preset}_config.json` - Configuration parameters used
 
 #### From process_metrics.py
-- `../video_midi/{subdir_name}/` - Output directory containing:
+- `../video_midi/{subdir_name}_{farneback_preset}/` - Output directory containing:
   - `{subdir_name}_derived.xlsx` - All derived metrics in Excel format
   - `{subdir_name}_plots.pdf` - Visual plots of all metrics
   - Multiple MIDI files organized by:
@@ -396,12 +396,12 @@ project/
 ├── process_video.py           # Video analysis script
 ├── process_metrics.py         # Metrics processing script
 ├── {video_name}.wmv          # Input video file
-├── {video_name}_basic.csv    # Basic metrics output
-├── {video_name}_config.json  # Configuration file
-└── ../video_midi/{video_name}/  # Output directory
+├── {video_name}_{preset}_basic.csv    # Basic metrics output
+├── {video_name}_{preset}_config.json  # Configuration file
+└── ../video_midi/{video_name}_{preset}/  # Output directory
     ├── {video_name}_derived.xlsx
     ├── {video_name}_plots.pdf
-    └── *.mid                 # MIDI files
+    └── *.mid                 # MIDI files (original names, no preset suffix)
 ```
 
 ## Dependencies

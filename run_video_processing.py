@@ -39,6 +39,14 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
             if not os.path.exists(video_file):
                 raise FileNotFoundError(f"Neither {subdir_name}.wmv nor {subdir_name}.mp4 found")
         print(f"Using video file: {video_file}")
+        # Extract Farneback parameters and strip the prefix
+        farneback_kwargs = {}
+        for k, v in kwargs.items():
+            if k.startswith("farneback_") and k != "farneback_preset":
+                # Strip the "farneback_" prefix
+                param_name = k.replace("farneback_", "")
+                farneback_kwargs[param_name] = v
+        
         process_video_to_csv(
             video_file,
             subdir_name,
@@ -50,7 +58,7 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
             kwargs.get("downscale_medium", 10),
             kwargs.get("max_frames", None),
             kwargs.get("farneback_preset", "default"),
-            **{k: v for k, v in kwargs.items() if k.startswith("farneback_") and k != "farneback_preset"}
+            **farneback_kwargs
         )
         print("process_video_to_csv completed successfully")
         return True
@@ -74,7 +82,8 @@ def run_process_metrics(subdir_name, **kwargs):
             'ticks_per_beat': kwargs.get('ticks_per_beat', 480),
             'beats_per_minute': kwargs.get('beats_per_minute', 100),
             'frames_per_second': kwargs.get('frames_per_second', 30),
-            'beats_per_midi_event': kwargs.get('beats_per_midi_event', 1)
+            'beats_per_midi_event': kwargs.get('beats_per_midi_event', 1),
+            'farneback_preset': kwargs.get('farneback_preset', 'default')
         }
         
         # Call the function directly with config
@@ -166,6 +175,13 @@ def main():
         stretch_centers = config.get('stretch_centers', [0.33, 0.67])
         cc_number = config.get('cc_number', 1)
         max_frames = config.get('max_frames', None)
+        farneback_preset = config.get('farneback_preset', 'default')
+        farneback_pyr_scale = config.get('farneback_pyr_scale', 0.5)
+        farneback_levels = config.get('farneback_levels', 3)
+        farneback_winsize = config.get('farneback_winsize', 15)
+        farneback_iterations = config.get('farneback_iterations', 3)
+        farneback_poly_n = config.get('farneback_poly_n', 5)
+        farneback_poly_sigma = config.get('farneback_poly_sigma', 1.2)
     else:
         # Use command line arguments
         if not args.subdir_name:
@@ -191,6 +207,13 @@ def main():
         stretch_centers = args.stretch_centers
         cc_number = args.cc_number
         max_frames = args.max_frames
+        farneback_preset = args.farneback_preset
+        farneback_pyr_scale = args.farneback_pyr_scale
+        farneback_levels = args.farneback_levels
+        farneback_winsize = args.farneback_winsize
+        farneback_iterations = args.farneback_iterations
+        farneback_poly_n = args.farneback_poly_n
+        farneback_poly_sigma = args.farneback_poly_sigma
     
     print(f"Starting video processing pipeline:")
     print(f"  Subdir name: {subdir_name}")
@@ -227,7 +250,14 @@ def main():
             'ticks_per_beat': ticks_per_beat,
             'downscale_large': downscale_large,
             'downscale_medium': downscale_medium,
-            'max_frames': max_frames
+            'max_frames': max_frames,
+            'farneback_preset': farneback_preset,
+            'farneback_pyr_scale': farneback_pyr_scale,
+            'farneback_levels': farneback_levels,
+            'farneback_winsize': farneback_winsize,
+            'farneback_iterations': farneback_iterations,
+            'farneback_poly_n': farneback_poly_n,
+            'farneback_poly_sigma': farneback_poly_sigma
         }
         if not run_process_video(subdir_name, beats_per_minute, **video_params):
             success = False
@@ -249,7 +279,8 @@ def main():
             'ticks_per_beat': ticks_per_beat,
             'beats_per_minute': beats_per_minute,
             'frames_per_second': frames_per_second,
-            'beats_per_midi_event': beats_per_midi_event
+            'beats_per_midi_event': beats_per_midi_event,
+            'farneback_preset': farneback_preset
         }
         if not run_process_metrics(subdir_name, **metrics_params):
             success = False
@@ -261,7 +292,7 @@ def main():
     if success:
         print("=" * 50)
         print("✓ Video processing pipeline completed successfully!")
-        print(f"Output files are in: ../video_midi/{subdir_name}/")
+        print(f"Output files are in: ../video_midi/{subdir_name}_{farneback_preset}/")
         print("=" * 50)
         return 0
     else:
