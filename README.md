@@ -135,39 +135,41 @@ Module containing functions to extract comprehensive visual metrics from video f
 ### Key Features
 - **Multi-scale analysis**: Analyzes video at different spatial resolutions
 - **Color space support**: RGB, grayscale, HSV, and hue-specific metrics
-- **Motion analysis**: ECC-based global transform analysis for zoom, rotation, and motion detection
-- **Symmetry metrics**: Transpose, reflection, and radial symmetry analysis
-- **Error dispersion**: Multi-scale information content analysis
+- **Motion analysis**: Lucas-Kanade Farneback optical flow analysis for zoom, rotation, and motion detection
+- **Symmetry metrics**: Transpose, reflection, and radial symmetry analysis (Gray channel only for performance)
+- **Error dispersion**: Multi-scale information content analysis (Gray channel only for performance)
 - **Performance timing**: Detailed timing analysis for optimization
+- **Performance optimization**: Computationally expensive metrics computed only for Gray channel to improve processing speed
 
 ### Metrics Computed
 
 #### Basic Intensity Metrics
 - **`avg`** - Average intensity per color channel
-- **`std`** - Standard deviation of intensity
-- **`dcd`** - Dark count (pixels near minimum value)
-- **`dcl`** - Light count (pixels near maximum value)
 
-#### Symmetry Metrics
-- **`xps`** - Transpose symmetry (flip around center point)
-- **`rfl`** - Reflection symmetry (vertical and horizontal flips)
-- **`rad`** - Radial symmetry (circular patterns)
+#### Symmetry Metrics (Gray channel only for performance)
+- **`xps`** - Transpose symmetry (flip around center point) - computed only for Gray channel
+- **`rfl`** - Reflection symmetry (vertical and horizontal flips) - computed only for Gray channel
+- **`rad`** - Radial symmetry (circular patterns) - computed only for Gray channel
 
-#### Error Dispersion Metrics (Multi-scale Analysis)
-- **`ee0`** - Total error dispersion (total detail content)
-- **`ee1`** - Large-scale error dispersion (low-resolution detail)
-- **`ee2`** - Small-scale error dispersion (high-resolution detail)
-- **`ed0`** - Distance of total error center from image center
-- **`ed1`** - Distance of large-scale error center from image center
-- **`ed2`** - Distance of small-scale error center from image center
-- **`es0`** - Spatial standard deviation of total error
-- **`es1`** - Spatial standard deviation of large-scale error
-- **`es2`** - Spatial standard deviation of small-scale error
+#### Error Dispersion Metrics (Gray channel only for performance)
+- **`ee0`** - Total error dispersion (total detail content) - computed only for Gray channel
+- **`ee1`** - Large-scale error dispersion (low-resolution detail) - computed only for Gray channel
+- **`ee2`** - Small-scale error dispersion (high-resolution detail) - computed only for Gray channel
+- **`ed0`** - Distance of total error center from image center - computed only for Gray channel
+- **`ed1`** - Distance of large-scale error center from image center - computed only for Gray channel
+- **`ed2`** - Distance of small-scale error center from image center - computed only for Gray channel
+- **`es0`** - Spatial standard deviation of total error - computed only for Gray channel
+- **`es1`** - Spatial standard deviation of large-scale error - computed only for Gray channel
+- **`es2`** - Spatial standard deviation of small-scale error - computed only for Gray channel
+
+#### Dark/Light Metrics (Gray channel only for performance)
+- **`dcd`** - Dark count (pixels near minimum value) - computed only for Gray channel
+- **`dcl`** - Light count (pixels near maximum value) - computed only for Gray channel
 
 #### Motion Metrics (Lucas-Kanade Optical Flow Analysis)
-- **`czd`** - Zoom divergence (positive = zoom out, negative = zoom in)
-- **`crc`** - Rotation curl (positive = counterclockwise, negative = clockwise)
-- **`cmv`** - Motion variance (how uniform the motion is)
+- **`czd`** - Zoom divergence (positive = zoom out, negative = zoom in) - computed only for Gray channel
+- **`crc`** - Rotation curl (positive = counterclockwise, negative = clockwise) - computed only for Gray channel
+- **`cmv`** - Motion variance (how uniform the motion is) - computed only for Gray channel
 
 ##### Motion Metrics Overview
 These metrics are computed by analyzing the optical flow between consecutive video frames using Lucas-Kanade Farneback algorithm. This approach extracts zoom and rotation information from the flow field using a centered region analysis, focusing on center-anchored motion (zoom and rotation around center, no panning).
@@ -187,10 +189,8 @@ These metrics are computed by analyzing the optical flow between consecutive vid
 - **Mathematical basis**: Variance of flow components (var(flow_x) + var(flow_y))
 - **Interpretation**: High values indicate non-uniform motion (complex scenes), low values indicate uniform motion (simple scenes)
 
-##### Derived Motion Metrics
-The system automatically computes additional derived metrics:
-- **`crl`** - Positive rotation component (`max(crc, 0)`) - captures counterclockwise rotation
-- **`crr`** - Negative rotation component (`max(-crc, 0)`) - captures clockwise rotation
+##### Motion Metrics Implementation
+The motion metrics are computed using Lucas-Kanade Farneback optical flow algorithm with optimized parameters for different motion scenarios. The system provides several preset configurations to handle various types of video content.
 
 ##### Technical Implementation Details
 - **Algorithm**: Uses Lucas-Kanade Farneback optical flow with optimized parameters
@@ -199,13 +199,15 @@ The system automatically computes additional derived metrics:
 - **Flow Calculation**: Full-resolution optical flow using Farneback algorithm with pyramid levels
 - **Mathematical Framework**: Uses finite differences to compute divergence and curl of the flow field
 - **Coordinate System**: Analyzes motion relative to image center for zoom and rotation detection
+- **Performance**: Motion metrics computed only for Gray channel to improve processing speed
 
 ##### Farneback Parameter Presets
 The system provides several preset configurations for different motion scenarios:
 
 | Preset | Description | Best For | Parameters |
 |--------|-------------|----------|------------|
-| `default` | Standard parameters for general use | General video content | `pyr_scale=0.5, levels=3, winsize=15, iterations=3, poly_n=5, poly_sigma=1.2` |
+| `default` | Optimized for noisy video content (recommended) | Low-quality video, compression artifacts | `pyr_scale=0.5, levels=3, winsize=25, iterations=4, poly_n=5, poly_sigma=1.4` |
+| `balanced` | Standard parameters for general use | General video content | `pyr_scale=0.5, levels=3, winsize=15, iterations=3, poly_n=5, poly_sigma=1.2` |
 | `small_motion` | Optimized for detecting very small motions | Near-still images, subtle movements | `pyr_scale=0.5, levels=4, winsize=21, iterations=5, poly_n=7, poly_sigma=1.5` |
 | `large_motion` | Optimized for detecting large motions | Fast-moving content, action scenes | `pyr_scale=0.5, levels=2, winsize=11, iterations=2, poly_n=5, poly_sigma=1.1` |
 | `noisy_scene` | Optimized for noisy video content | Low-quality video, compression artifacts | `pyr_scale=0.5, levels=3, winsize=25, iterations=4, poly_n=5, poly_sigma=1.4` |
@@ -230,11 +232,13 @@ The system provides several preset configurations for different motion scenarios
 - **`Hmon`** - Monochromaticity (color uniformity)
 
 ### Color Channels Analyzed
-- **R, G, B** - Red, Green, Blue channels
-- **Gray** - Grayscale intensity
-- **S, V** - Saturation and Value from HSV
+- **R, G, B** - Red, Green, Blue channels (basic intensity metrics only)
+- **Gray** - Grayscale intensity (all metrics computed)
+- **S, V** - Saturation and Value from HSV (basic intensity metrics only)
 - **H000-H300** - Hue-specific metrics (6 cardinal colors)
 - **Hmon** - Monochromaticity metric
+
+**Performance Optimization Note**: To improve processing speed, computationally expensive metrics (symmetry, error dispersion, dark/light, and motion metrics) are computed only for the Gray channel. Other color channels receive zero values for these metrics. This optimization can be easily reversed by removing the Gray channel conditions in the code.
 
 ### Processing Parameters
 - **`downscale_large`** - Large scale analysis factor (default: 100)
@@ -251,14 +255,21 @@ The system provides several preset configurations for different motion scenarios
 ### Overview
 Module containing functions to process basic metrics from `process_video.py`, compute derived metrics, apply various transformations, and generate MIDI files. This module is called by `run_video_processing.py` and is not designed for standalone execution.
 
+**Performance Note**: Due to the optimizations in `process_video.py` where computationally expensive metrics are computed only for the Gray channel, many metrics will have zero values for non-Gray color channels. This is expected behavior and improves processing speed significantly.
+
 ### Derived Metrics Computation
 
 #### Automatic Ratio Calculations
-The script automatically computes ratio metrics for error dispersion data:
+The script automatically computes ratio metrics for error dispersion data (Gray channel only):
 - **`ee1r`** - `ee1/ee0` (large-scale to total error ratio)
 - **`ee2r`** - `ee2/ee0` (small-scale to total error ratio)
 - **`es1r`** - `es1/es0` (large-scale to total spatial variation ratio)
 - **`es2r`** - `es2/es0` (small-scale to total spatial variation ratio)
+
+#### Motion Metrics Derived Calculations
+The script automatically computes derived motion metrics from the base Lucas-Kanade metrics:
+- **`crl`** - Positive rotation component (`max(crc, 0)`) - captures counterclockwise rotation
+- **`crr`** - Negative rotation component (`max(-crc, 0)`) - captures clockwise rotation
 
 #### Processing Pipeline
 The script applies multiple transformation stages to each metric in sequence:

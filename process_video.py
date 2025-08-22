@@ -399,10 +399,21 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
                                 ("Gray", gray),("S", s),("V", v)]:
         avg_intensity = np.mean(color_channel)
 
-        transpose_metric_value = compute_transpose_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
-        # at the specified spatial scale
-        reflect_metric_value = compute_reflect_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
-        # at the specified spatial scale
+        # Transpose metric - only compute for Gray channel to save time
+        if color_channel_name == "Gray":
+            transpose_metric_value = compute_transpose_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
+            # at the specified spatial scale
+        else:
+            # Use zero for other color channels (can be easily changed back later)
+            transpose_metric_value = 0.0
+
+        # Reflect metric - only compute for Gray channel to save time
+        if color_channel_name == "Gray":
+            reflect_metric_value = compute_reflect_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
+            # at the specified spatial scale
+        else:
+            # Use zero for other color channels (can be easily changed back later)
+            reflect_metric_value = 0.0
         
         # Radial symmetry metric - only compute for Gray channel to save time
         if color_channel_name == "Gray":
@@ -419,8 +430,12 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
             # Use zeros for other color channels (can be easily changed back later)
             mnsqerror0, mnsqerror1, mnsqerror2, dist0, dist1, dist2, stdev0, stdev1, stdev2 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
-
-        dark_count, light_count = compute_dark_light_metric(color_channel, 5) # needs to be within 5 (0 - 255) unites of max or min light or dark values
+        # Dark/light metric - only compute for Gray channel to save time
+        if color_channel_name == "Gray":
+            dark_count, light_count = compute_dark_light_metric(color_channel, 5) # needs to be within 5 (0 - 255) unites of max or min light or dark values
+        else:
+            # Use zeros for other color channels (can be easily changed back later)
+            dark_count, light_count = 0, 0
 
 
         # Store values
@@ -573,6 +588,14 @@ FARNEBACK_PRESETS = {
     'default': {
         'pyr_scale': 0.5,
         'levels': 3,
+        'winsize': 25,
+        'iterations': 4,
+        'poly_n': 5,
+        'poly_sigma': 1.4
+    },
+    'balanced': {
+        'pyr_scale': 0.5,
+        'levels': 3,
         'winsize': 15,
         'iterations': 3,
         'poly_n': 5,
@@ -625,14 +648,21 @@ def get_farneback_params(preset='default', **kwargs):
     Get Farneback parameters for a given preset, with optional overrides.
     
     Parameters:
-    - preset: One of 'default', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene'
-    - **kwargs: Optional parameter overrides
+    - preset: One of 'default', 'balanced', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene', 'center_only'
+    - **kwargs: Optional parameter overrides (only used if preset is 'default')
     
     Returns:
     - Dictionary of Farneback parameters
     """
-    params = FARNEBACK_PRESETS[preset].copy()
-    params.update(kwargs)  # Override with any provided kwargs
+    if preset == 'default':
+        # For default preset, allow overrides from kwargs
+        params = FARNEBACK_PRESETS[preset].copy()
+        params.update(kwargs)  # Override with any provided kwargs
+    else:
+        # For named presets, ignore individual parameter overrides
+        # This ensures presets work as intended
+        params = FARNEBACK_PRESETS[preset].copy()
+    
     return params
 
 def compute_change_metrics(frame, frame_prior, downscale_large, downscale_medium, farneback_preset='default', **farneback_kwargs):
@@ -821,7 +851,6 @@ def process_video_to_csv(video_path,
     timing_data['total_end_time'] = time.time()
     # Print timing summary
     print_timing_summary()
-
     #now compute derivative metrics that are computed after all frames are processed
     basic_metrics["Hmon_std"] = np.array(basic_metrics["Hmon_std"])
     if np.max(basic_metrics["Hmon_std"]) == 0.0:

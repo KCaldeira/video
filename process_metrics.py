@@ -124,20 +124,9 @@ def triangular_filter_odd(data, N):
     return filtered
 
 
-def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers):
+def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers, farneback_preset="default"):
 
     # Create output prefix with farneback preset
-    # Try to extract farneback preset from config file
-    farneback_preset = "default"  # default fallback
-    config_filename = f"{prefix}_config.json"
-    if os.path.exists(config_filename):
-        try:
-            with open(config_filename, 'r') as f:
-                config = json.load(f)
-                farneback_preset = config.get("farneback_preset", "default")
-        except:
-            pass
-    
     output_prefix = f"{prefix}_{farneback_preset}"
     
     if not os.path.exists(f"../video_midi/{output_prefix}"):
@@ -529,7 +518,7 @@ def process_metrics_to_midi(prefix, config=None):
     # All transformations are now applied by default (no conditional logic needed)
 
     post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
-                 stretch_values, stretch_centers)
+                 stretch_values, stretch_centers, farneback_preset)
 
 # This script is designed to be called by run_video_processing.py
 # For standalone usage, use: python run_video_processing.py <video_name>

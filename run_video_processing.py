@@ -140,7 +140,7 @@ def main():
                        help='MIDI CC number (default: 1)')
     parser.add_argument('--max-frames', type=int, default=None,
                        help='Maximum number of frames to process (default: process all frames)')
-    parser.add_argument('--farneback-preset', choices=['default', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene', 'center_only'],
+    parser.add_argument('--farneback-preset', choices=['default', 'balanced', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene', 'center_only'],
                        default='default', help='Farneback optical flow preset (default: default)')
     parser.add_argument('--farneback-pyr-scale', type=float, default=0.5,
                        help='Farneback pyramid scale (default: 0.5)')
