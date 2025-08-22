@@ -26,6 +26,7 @@ import json
 import time
 import functools
 from datetime import datetime
+from sklearn.mixture import GaussianMixture
 
 # Global timing dictionary to store timing data
 timing_data = {
@@ -228,6 +229,132 @@ def compute_radial_symmetry_metric(color_channel, dowscale_factor):
     # return np.var(radial_mean[valid])
 
     return np.var(radial_mean)
+
+@timing_decorator("compute_gaussian_mixture_metrics")
+def compute_gaussian_mixture_metrics(color_channel, histogram_bin_count=256, downscale_factor=1, max_gaussians=4):
+    """
+    Compute multi-Gaussian mixture model metrics for a color channel using BIC model selection.
+    
+    Parameters:
+    - color_channel: 2D numpy array of pixel values
+    - histogram_bin_count: Number of bins for histogram (default: 256)
+    - downscale_factor: Factor to downscale image (1=full resolution, 2=1/4 resolution, etc.)
+    - max_gaussians: Maximum number of Gaussian components to test (default: 4)
+    
+    Returns:
+    - Dictionary containing:
+      - gm_n: Number of Gaussian components in best model
+      - gm_m1-gm_m4: Means of each Gaussian component
+      - gm_s1-gm_s4: Standard deviations of each Gaussian component  
+      - gm_a1-gm_a4: Amplitudes/weights of each Gaussian component
+      - gm_bic: BIC value of the best model
+    """
+    try:
+        # Downscale the image if requested
+        if downscale_factor > 1:
+            h, w = color_channel.shape
+            h_small = h // downscale_factor
+            w_small = w // downscale_factor
+            color_channel = cv2.resize(color_channel, (w_small, h_small))
+        
+        # Create histogram of pixel values
+        hist, bin_edges = np.histogram(color_channel.ravel(), bins=histogram_bin_count, range=(0, 256))
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        
+        # Normalize histogram to create probability distribution
+        hist_normalized = hist.astype(np.float64) / np.sum(hist)
+        
+        # Remove bins with zero counts to avoid numerical issues
+        non_zero_mask = hist_normalized > 0
+        if np.sum(non_zero_mask) < 2:
+            # Image is too uniform, return single Gaussian model
+            return {
+                'gm_n': 1,
+                'gm_m1': np.mean(color_channel),
+                'gm_m2': 0.0, 'gm_m3': 0.0, 'gm_m4': 0.0,
+                'gm_s1': np.std(color_channel),
+                'gm_s2': 0.0, 'gm_s3': 0.0, 'gm_s4': 0.0,
+                'gm_a1': 1.0,
+                'gm_a2': 0.0, 'gm_a3': 0.0, 'gm_a4': 0.0,
+                'gm_bic': 0.0
+            }
+        
+        bin_centers_filtered = bin_centers[non_zero_mask]
+        hist_filtered = hist_normalized[non_zero_mask]
+        
+        # Test different numbers of Gaussian components
+        best_bic = np.inf
+        best_model = None
+        best_n_components = 1
+        
+        for n_components in range(1, max_gaussians + 1):
+            try:
+                # Fit Gaussian mixture model
+                gmm = GaussianMixture(n_components=n_components, random_state=42, n_init=3)
+                
+                # Reshape data for sklearn (samples, features)
+                X = bin_centers_filtered.reshape(-1, 1)
+                sample_weights = hist_filtered
+                
+                # Fit the model
+                gmm.fit(X, sample_weight=sample_weights)
+                
+                # Calculate BIC
+                bic = gmm.bic(X, sample_weight=sample_weights)
+                
+                # Update best model if BIC is lower
+                if bic < best_bic:
+                    best_bic = bic
+                    best_model = gmm
+                    best_n_components = n_components
+                    
+            except Exception as e:
+                # If fitting fails for this number of components, continue to next
+                continue
+        
+        # If no model was successfully fitted, return fallback values
+        if best_model is None:
+            return {
+                'gm_n': 0,
+                'gm_m1': 0.0, 'gm_m2': 0.0, 'gm_m3': 0.0, 'gm_m4': 0.0,
+                'gm_s1': 0.0, 'gm_s2': 0.0, 'gm_s3': 0.0, 'gm_s4': 0.0,
+                'gm_a1': 0.0, 'gm_a2': 0.0, 'gm_a3': 0.0, 'gm_a4': 0.0,
+                'gm_bic': 0.0
+            }
+        
+        # Extract parameters from best model
+        means = best_model.means_.flatten()
+        covariances = best_model.covariances_.flatten()
+        weights = best_model.weights_
+        
+        # Calculate standard deviations from variances
+        stds = np.sqrt(covariances)
+        
+        # Pad arrays to fixed length of 4
+        means_padded = np.pad(means, (0, 4 - len(means)), mode='constant', constant_values=0.0)
+        stds_padded = np.pad(stds, (0, 4 - len(stds)), mode='constant', constant_values=0.0)
+        weights_padded = np.pad(weights, (0, 4 - len(weights)), mode='constant', constant_values=0.0)
+        
+        return {
+            'gm_n': best_n_components,
+            'gm_m1': float(means_padded[0]), 'gm_m2': float(means_padded[1]), 
+            'gm_m3': float(means_padded[2]), 'gm_m4': float(means_padded[3]),
+            'gm_s1': float(stds_padded[0]), 'gm_s2': float(stds_padded[1]), 
+            'gm_s3': float(stds_padded[2]), 'gm_s4': float(stds_padded[3]),
+            'gm_a1': float(weights_padded[0]), 'gm_a2': float(weights_padded[1]), 
+            'gm_a3': float(weights_padded[2]), 'gm_a4': float(weights_padded[3]),
+            'gm_bic': float(best_bic)
+        }
+        
+    except Exception as e:
+        # Complete failure - return zeros
+        return {
+            'gm_n': 0,
+            'gm_m1': 0.0, 'gm_m2': 0.0, 'gm_m3': 0.0, 'gm_m4': 0.0,
+            'gm_s1': 0.0, 'gm_s2': 0.0, 'gm_s3': 0.0, 'gm_s4': 0.0,
+            'gm_a1': 0.0, 'gm_a2': 0.0, 'gm_a3': 0.0, 'gm_a4': 0.0,
+            'gm_bic': 0.0
+        }
 
 def weighted_std(values, weights):
     """
@@ -437,6 +564,18 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
             # Use zeros for other color channels (can be easily changed back later)
             dark_count, light_count = 0, 0
 
+        # Gaussian mixture metrics - only compute for Gray channel to save time
+        if color_channel_name == "Gray":
+            gm_metrics = compute_gaussian_mixture_metrics(color_channel, histogram_bin_count=256, downscale_factor=1, max_gaussians=4)
+        else:
+            # Use zeros for other color channels (can be easily changed back later)
+            gm_metrics = {
+                'gm_n': 0,
+                'gm_m1': 0.0, 'gm_m2': 0.0, 'gm_m3': 0.0, 'gm_m4': 0.0,
+                'gm_s1': 0.0, 'gm_s2': 0.0, 'gm_s3': 0.0, 'gm_s4': 0.0,
+                'gm_a1': 0.0, 'gm_a2': 0.0, 'gm_a3': 0.0, 'gm_a4': 0.0,
+                'gm_bic': 0.0
+            }
 
         # Store values
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
@@ -454,6 +593,22 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
         basic_metrics[f"{color_channel_name}_es2"] = stdev2  # How much spatial variation in high res detail
         basic_metrics[f"{color_channel_name}_dcd"] = dark_count
         basic_metrics[f"{color_channel_name}_dcl"] = light_count
+        
+        # Store Gaussian mixture metrics
+        basic_metrics[f"{color_channel_name}_gm_n"] = gm_metrics['gm_n']
+        #basic_metrics[f"{color_channel_name}_gm_m1"] = gm_metrics['gm_m1']
+        #basic_metrics[f"{color_channel_name}_gm_m2"] = gm_metrics['gm_m2']
+        #basic_metrics[f"{color_channel_name}_gm_m3"] = gm_metrics['gm_m3']
+        #basic_metrics[f"{color_channel_name}_gm_m4"] = gm_metrics['gm_m4']
+        #basic_metrics[f"{color_channel_name}_gm_s1"] = gm_metrics['gm_s1']
+        #basic_metrics[f"{color_channel_name}_gm_s2"] = gm_metrics['gm_s2']
+        #basic_metrics[f"{color_channel_name}_gm_s3"] = gm_metrics['gm_s3']
+        #basic_metrics[f"{color_channel_name}_gm_s4"] = gm_metrics['gm_s4']
+        #basic_metrics[f"{color_channel_name}_gm_a1"] = gm_metrics['gm_a1']
+        #basic_metrics[f"{color_channel_name}_gm_a2"] = gm_metrics['gm_a2']
+        #basic_metrics[f"{color_channel_name}_gm_a3"] = gm_metrics['gm_a3']
+        #basic_metrics[f"{color_channel_name}_gm_a4"] = gm_metrics['gm_a4']
+        #basic_metrics[f"{color_channel_name}_gm_bic"] = gm_metrics['gm_bic']
 
 
     #monochrome metric is the standard deviation of hue weighted by saturation
