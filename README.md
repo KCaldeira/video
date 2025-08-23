@@ -138,6 +138,7 @@ Module containing functions to extract comprehensive visual metrics from video f
 - **Motion analysis**: Lucas-Kanade Farneback optical flow analysis for zoom, rotation, and motion detection
 - **Symmetry metrics**: Transpose, reflection, and radial symmetry analysis (Gray channel only for performance)
 - **Error dispersion**: Multi-scale information content analysis (Gray channel only for performance)
+- **Gaussian mixture modeling**: Multi-Gaussian fit to gray-tone distribution with BIC model selection
 - **Performance timing**: Detailed timing analysis for optimization
 - **Performance optimization**: Computationally expensive metrics computed only for Gray channel to improve processing speed
 
@@ -165,6 +166,45 @@ Module containing functions to extract comprehensive visual metrics from video f
 #### Dark/Light Metrics (Gray channel only for performance)
 - **`dcd`** - Dark count (pixels near minimum value) - computed only for Gray channel
 - **`dcl`** - Light count (pixels near maximum value) - computed only for Gray channel
+
+#### Gaussian Mixture Model Metrics
+- **`gm_n`** - Number of Gaussian components in best model (0-6) - computed for all color channels
+- **`gm_m1`** - Mean of first Gaussian component (highest weight) - computed for all color channels
+- **`gm_m2`** - Mean of second Gaussian component (second highest weight) - computed for all color channels
+- **`gm_m3`** - Mean of third Gaussian component (third highest weight) - computed for all color channels
+- **`gm_m4`** - Mean of fourth Gaussian component (fourth highest weight) - computed for all color channels
+- **`gm_m5`** - Mean of fifth Gaussian component (fifth highest weight) - computed for all color channels
+- **`gm_m6`** - Mean of sixth Gaussian component (lowest weight) - computed for all color channels
+- **`gm_s1`** - Standard deviation of first Gaussian component (highest weight) - computed for all color channels
+- **`gm_s2`** - Standard deviation of second Gaussian component (second highest weight) - computed for all color channels
+- **`gm_s3`** - Standard deviation of third Gaussian component (third highest weight) - computed for all color channels
+- **`gm_s4`** - Standard deviation of fourth Gaussian component (fourth highest weight) - computed for all color channels
+- **`gm_s5`** - Standard deviation of fifth Gaussian component (fifth highest weight) - computed for all color channels
+- **`gm_s6`** - Standard deviation of sixth Gaussian component (lowest weight) - computed for all color channels
+- **`gm_a1`** - Amplitude/weight of first Gaussian component (highest weight) - computed for all color channels
+- **`gm_a2`** - Amplitude/weight of second Gaussian component (second highest weight) - computed for all color channels
+- **`gm_a3`** - Amplitude/weight of third Gaussian component (third highest weight) - computed for all color channels
+- **`gm_a4`** - Amplitude/weight of fourth Gaussian component (fourth highest weight) - computed for all color channels
+- **`gm_a5`** - Amplitude/weight of fifth Gaussian component (fifth highest weight) - computed for all color channels
+- **`gm_a6`** - Amplitude/weight of sixth Gaussian component (lowest weight) - computed for all color channels
+- **`gm_bic`** - Bayesian Information Criterion value of best model - computed for all color channels
+
+**Gaussian Mixture Model Overview**: These metrics analyze the distribution of gray-tone values in each frame using a multi-Gaussian mixture model with Bayesian Information Criterion (BIC) for model selection. The system fits models with 1-4 Gaussian components and selects the best model based on BIC scores.
+
+**Parameters**:
+- **`histogram_bin_count`** - Number of histogram bins (default: 256)
+- **`downscale_factor`** - Image downscaling factor (default: 1 = full resolution)
+- **`max_gaussians`** - Maximum number of Gaussian components to test (default: 6)
+- **`penalty_factor`** - BIC penalty factor for model complexity (default: 8, higher values prefer fewer components)
+
+**Interpretation**:
+- **`gm_n`**: Number of distinct intensity regions in the image (1-6, or 0 for failure)
+- **`gm_m1-gm_m6`**: Center intensity values of each region (sorted by weight, highest to lowest)
+- **`gm_s1-gm_s6`**: Spread of each intensity region (sorted by weight, highest to lowest)
+- **`gm_a1-gm_a6`**: Relative importance/area of each region (sorted by weight, highest to lowest)
+- **`gm_bic`**: Model quality score (lower is better)
+
+**Model Selection**: The system uses a modified Bayesian Information Criterion (BIC) with a penalty factor of 8 to strongly prefer simpler models (fewer Gaussian components). This helps avoid overfitting and produces more interpretable results.
 
 #### Motion Metrics (Lucas-Kanade Optical Flow Analysis)
 - **`czd`** - Zoom divergence (positive = zoom out, negative = zoom in) - computed only for Gray channel
@@ -232,11 +272,11 @@ The system provides several preset configurations for different motion scenarios
 - **`Hmon`** - Monochromaticity (color uniformity)
 
 ### Color Channels Analyzed
-- **R, G, B** - Red, Green, Blue channels (basic intensity metrics only)
+- **R, G, B** - Red, Green, Blue channels (basic intensity metrics and Gaussian mixture model metrics)
 - **Gray** - Grayscale intensity (all metrics computed)
-- **S, V** - Saturation and Value from HSV (basic intensity metrics only)
-- **H000-H300** - Hue-specific metrics (6 cardinal colors)
-- **Hmon** - Monochromaticity metric
+- **S, V** - Saturation and Value from HSV (basic intensity metrics and Gaussian mixture model metrics)
+- **H000-H300** - Hue-specific metrics (6 cardinal colors, basic intensity metrics and Gaussian mixture model metrics)
+- **Hmon** - Monochromaticity metric (basic intensity metrics and Gaussian mixture model metrics)
 
 **Performance Optimization Note**: To improve processing speed, computationally expensive metrics (symmetry, error dispersion, dark/light, and motion metrics) are computed only for the Gray channel. Other color channels receive zero values for these metrics. This optimization can be easily reversed by removing the Gray channel conditions in the code.
 
@@ -422,6 +462,7 @@ project/
 - **Mido** - MIDI file generation
 - **Matplotlib** - Plotting and PDF generation
 - **SciPy** - Statistical functions
+- **scikit-learn** - Machine learning (Gaussian mixture models)
 - **JSON** - Configuration file handling
 
 ## Notes

@@ -282,6 +282,22 @@ The processing pipeline uses separate dictionaries for each stage:
 - **REVERSIBLE**: Can be easily changed back by removing the Gray channel condition
 - **RATIONALE**: Radial symmetry metrics are computationally expensive and provide similar information across color channels
 
+### **Gaussian Mixture Model Metrics (Full Color Channel Support)**
+- **PERFORMANCE**: Gaussian mixture model metrics (`gm_n`, `gm_m1-gm_m6`, `gm_s1-gm_s6`, `gm_a1-gm_a6`, `gm_bic`) computed for all color channels
+- **COMPREHENSIVE**: Provides detailed analysis of intensity distributions across all color spaces
+- **IMPLEMENTATION**: Uses scikit-learn's GaussianMixture with modified BIC model selection for 1-6 components
+- **MODEL SELECTION**: Uses penalty factor of 8 to strongly prefer simpler models (fewer components)
+- **SORTING**: Gaussian components are sorted by weight (highest to lowest) for consistent interpretation
+- **APPLICATION**: Useful for analyzing color-specific intensity patterns and distributions
+
+### **Recent GMM Improvements (Latest Update)**
+- **ERROR HANDLING**: Removed main try-except block to allow failures to propagate rather than return null values
+- **DEBUG CLEANUP**: Removed all GMM debug print statements for cleaner output
+- **BIC CALCULATION**: Fixed BIC calculation to use total log-likelihood instead of average log-likelihood
+- **PENALTY FACTOR**: Increased penalty factor to 8 to strongly prefer simpler models and avoid overfitting
+- **COMPONENT SORTING**: Added automatic sorting of Gaussian components by weight (descending) for consistent interpretation
+- **RESULT ORGANIZATION**: Now `gm_m1`, `gm_s1`, `gm_a1` always correspond to the highest-weight component
+
 ## Remember
 - **Filtering comes LAST** in the processing pipeline
 - **Fix root causes**, not symptoms
