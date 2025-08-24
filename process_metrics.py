@@ -58,7 +58,7 @@ def add_derived_columns(csv):
             csv[es1r_col] = np.where(csv[es0_col] != 0, csv[es1_col] / csv[es0_col], 0)
             csv[es2r_col] = np.where(csv[es0_col] != 0, csv[es2_col] / csv[es0_col], 0)
     
-    # Add rotation metrics (crl and crr) based on crc metrics
+    # Add rotation metrics (crl, crr, and cra) based on crc metrics
     # Find all columns that contain "_crc" in their name
     crc_columns = [col for col in csv.columns if "_crc" in col]
     
@@ -66,9 +66,10 @@ def add_derived_columns(csv):
         # Extract the base name (everything before "_crc")
         base_name = crc_col.replace("_crc", "")
         
-        # Create crl and crr column names
+        # Create crl, crr, and cra column names
         crl_col = f"{base_name}_crl"
         crr_col = f"{base_name}_crr"
+        cra_col = f"{base_name}_cra"
         
         # Create the new metrics
         # crl = max(crc, 0) - captures positive rotation (counterclockwise)
@@ -76,6 +77,9 @@ def add_derived_columns(csv):
         
         # crr = max(-crc, 0) - captures negative rotation (clockwise)
         csv[crr_col] = np.maximum(-csv[crc_col], 0)
+        
+        # cra = abs(crc) - captures absolute rotation magnitude
+        csv[cra_col] = np.abs(csv[crc_col])
     
     return csv
 

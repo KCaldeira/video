@@ -146,6 +146,7 @@ Module containing functions to extract comprehensive visual metrics from video f
 
 #### Basic Intensity Metrics
 - **`avg`** - Average intensity per color channel
+- **`std`** - Standard deviation of intensity per color channel
 
 #### Symmetry Metrics (Gray channel only for performance)
 - **`xps`** - Transpose symmetry (flip around center point) - computed only for Gray channel
@@ -310,6 +311,7 @@ The script automatically computes ratio metrics for error dispersion data (Gray 
 The script automatically computes derived motion metrics from the base Lucas-Kanade metrics:
 - **`crl`** - Positive rotation component (`max(crc, 0)`) - captures counterclockwise rotation
 - **`crr`** - Negative rotation component (`max(-crc, 0)`) - captures clockwise rotation
+- **`cra`** - Absolute rotation magnitude (`abs(crc)`) - captures total rotation regardless of direction
 
 #### Processing Pipeline
 The script applies multiple transformation stages to each metric in sequence:
