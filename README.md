@@ -123,6 +123,9 @@ python run_video_processing.py N17_Mz7fo6C2f --farneback-preset center_only
 
 # Use small motion preset with custom window size
 python run_video_processing.py N17_Mz7fo6C2f --farneback-preset small_motion --farneback-winsize 25
+
+# specify stretch centers
+python run_video_processing.py N22_M5to\(1e-20\)M2ta9f-DE2-1 97 --stretch-centers 0.1 0.33 0.67 0.9
 ```
 
 ---
