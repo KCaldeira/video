@@ -239,44 +239,50 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                 if 1 not in stretch_values_to_process:
                     stretch_values_to_process.append(1)
                 
+                # Create a list of stretch centers to process, including the special case
+                stretch_centers_to_process = list(stretch_centers)
+                if 0.5 not in stretch_centers_to_process:
+                    stretch_centers_to_process.append(0.5)
+                
                 for stretch_value in stretch_values_to_process:
-                    midi_file = mido.MidiFile()
-                    
-                    # Process both inversion types ("o" and "i") in the same MIDI file
-                    for inversion_type in ["o", "i"]:
-                        for key in master_dict:
-                            if  "_" + averaging+"_" not in key:
-                                continue
-                            # Check if this key matches the pattern: var_metric_rank_averaging_stretch_inversion
-                            if not key.startswith(f"{var}_"):
-                                continue
-                            if not f"_{rank_type}_{averaging}_s{stretch_value}-" in key:
-                                continue
-                            if not key.endswith(f"_{inversion_type}"):
-                                continue
-                            
+                    for stretch_center in stretch_centers_to_process:
+                        midi_file = mido.MidiFile()
+                        
+                        # Process both inversion types ("o" and "i") in the same MIDI file
+                        for inversion_type in ["o", "i"]:
+                            for key in master_dict:
+                                if  "_" + averaging+"_" not in key:
+                                    continue
+                                # Check if this key matches the pattern: var_metric_rank_averaging_stretch_inversion
+                                if not key.startswith(f"{var}_"):
+                                    continue
+                                if not f"_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}" in key:
+                                    continue
+                                if not key.endswith(f"_{inversion_type}"):
+                                    continue
+                                
 
 
-                            midi_track = mido.MidiTrack()
-                            midi_file.tracks.append(midi_track)
+                                midi_track = mido.MidiTrack()
+                                midi_file.tracks.append(midi_track)
 
-                            midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
+                                midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
 
-                            midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
+                                midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
 
-                            for i, midi_value in enumerate(midi_val_base):
-                                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-                                midi_track.append(
-                                    mido.Message('control_change',
-                                            control=cc_number,
-                                            value=midi_value,
-                                            channel=7,
-                                            time=time_tick))
+                                for i, midi_value in enumerate(midi_val_base):
+                                    time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                                    midi_track.append(
+                                        mido.Message('control_change',
+                                                control=cc_number,
+                                                value=midi_value,
+                                                channel=7,
+                                                time=time_tick))
 
-                    
-            # Create file name: var_rank_averaging_stretch.mid (exclude metric and inversion)
-            file_name = f"../video_midi/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}.mid"
-            midi_file.save(file_name)
+                        
+                        # Create file name: var_rank_averaging_stretch-center.mid (exclude metric and inversion)
+                        file_name = f"../video_midi/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
+                        midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
     print(f"Writing out midi files by postprocessing methods")
