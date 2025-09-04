@@ -152,8 +152,8 @@ Module containing functions to extract comprehensive visual metrics from video f
 - **`std`** - Standard deviation of intensity per color channel
 
 #### Symmetry Metrics (Gray channel only for performance)
-- **`xps`** - Transpose symmetry (flip around center point) - computed only for Gray channel
-- **`rfl`** - Reflection symmetry (vertical and horizontal flips) - computed only for Gray channel
+- **`rsn`** - Rotational symmetry n-fold (detected symmetry order: 2-fold, 3-fold, etc.) - computed only for Gray channel
+- **`rss`** - Rotational symmetry strength (confidence ratio vs median score) - computed only for Gray channel
 - **`rad`** - Radial symmetry (circular patterns) - computed only for Gray channel
 
 #### Error Dispersion Metrics (Gray channel only for performance)
