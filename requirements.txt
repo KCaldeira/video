@@ -17,6 +17,9 @@ matplotlib==3.10.6
 # Machine learning
 scikit-learn==1.7.1
 
+# Image processing (for rotational symmetry detection)
+scikit-image==0.24.0
+
 # Excel file handling (for derived data output)
 openpyxl==3.1.5
 

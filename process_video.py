@@ -21,12 +21,14 @@ import numpy as np
 import re
 from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
+from scipy.signal import get_window
 from collections import defaultdict
 import json
 import time
 import functools
 from datetime import datetime
 from sklearn.mixture import GaussianMixture
+from skimage.transform import warp_polar
 
 # Global timing dictionary to store timing data
 timing_data = {
@@ -143,60 +145,140 @@ def compute_dark_light_metric(color_channel, tolerance = 0):
     return dark_count, light_count
 
 
-@timing_decorator("compute_transpose_metric")
-def compute_transpose_metric(color_channel, downscale_factor):
+def _angular_power_spectrum_circle(img, ntheta=720):
     """
-    Returns a metric of information loss when a color channel from a frame 
-    is downscaled and then upscaled.
+    Build the angular power spectrum using ONLY the inscribed circle
+    centered at the image center (radius = min(H, W)/2).
     
-    frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
+    Parameters
+    ----------
+    img : ndarray
+        2D grayscale image
+    ntheta : int, optional
+        Number of angular samples (default: 720)
+        
+    Returns
+    -------
+    k : ndarray
+        Angular frequency indices
+    P : ndarray
+        Angular power spectrum
     """
+    H, W = img.shape
+    cx, cy = W / 2.0, H / 2.0
+    r = min(H, W) / 2.0  # exact inscribed-circle radius
 
-    # Original size
-    h, w = color_channel.shape[0:2]
+    # Polar unwrap restricted to that circle.
+    # skimage expects center as (row, col) = (y, x).
+    R = int(np.floor(r))
+    if R <= 1:
+        # Handle edge case of very small images
+        return np.array([0]), np.array([0.0])
+        
+    polar = warp_polar(
+        img,
+        center=(cy, cx),
+        radius=R,
+        output_shape=(R, ntheta),
+        scaling="linear",
+        preserve_range=True
+    )
 
-    # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
+    # Remove angular DC per radius and window along theta
+    polar = polar - polar.mean(axis=1, keepdims=True)
+    win = get_window('hann', ntheta, fftbins=True)[None, :]
+    polar = polar * win
 
-    # Compute mean squared error (MSE) between original and restored image
-    mse = np.mean((downscaled - downscaled[::-1,::-1]) ** 2)
+    # FFT over angle only, then average power across radii
+    F = np.fft.rfft(polar, axis=1)               # (R, ntheta//2+1)
+    P = (np.abs(F) ** 2).mean(axis=0)            # 1D angular power
+    k = np.arange(P.size)                        # k=0..ntheta//2
+    return k, P
 
-    # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse =  mse / (np.var(downscaled) + 1e-6)  # avoid division by zero
-    # 1 means perfect symmetry at this scale 
-    # 0 means no symmetry at this scale
-
-    return normalized_mse
-
-@timing_decorator("compute_reflect_metric")
-def compute_reflect_metric(color_channel, downscale_factor=4):
+@timing_decorator("detect_rotational_symmetry")
+def detect_rotational_symmetry(
+    img, max_n=24, ntheta=720, min_n=2, weights="inv", use_fourier_magnitude=False
+):
     """
-    Returns a metric of information loss when a color channel from a frame 
-    is downscaled and then upscaled.
+    Detect fundamental n-fold rotational symmetry using ONLY the inscribed circle.
     
-    frame: color channel (e.g., R, G, B, or grayscale)
-    downscale_factor: how much to shrink (e.g., 4 means 1/4 size)
+    Parameters
+    ----------
+    img : ndarray
+        2D grayscale image
+    max_n : int, optional
+        Maximum symmetry order to test (default: 24)
+    ntheta : int, optional
+        Number of angular samples (default: 720)
+    min_n : int, optional
+        Minimum symmetry order to test (default: 2)
+    weights : str, optional
+        Weighting scheme for harmonics: 'inv', 'sqrt', or 'uniform' (default: 'inv')
+    use_fourier_magnitude : bool, optional
+        Whether to use Fourier magnitude of the image (default: False)
+    
+    Returns
+    -------
+    n_fund : int
+        Detected fundamental symmetry order (2-fold, 3-fold, etc.)
+    strength : float
+        Ratio vs. median score across n (>>1 is stronger symmetry)
     """
+    # Input validation
+    if img.size == 0 or img.ndim != 2:
+        return 1, 0.0
+        
+    X = img.astype(np.float64)
+    if use_fourier_magnitude:
+        S = np.fft.fftshift(np.fft.fft2(X))
+        X = np.log1p(np.abs(S))
 
-    # Original size
-    h, w = color_channel.shape[0:2]
+    k, P = _angular_power_spectrum_circle(X, ntheta=ntheta)
+    
+    # Handle edge cases
+    if len(k) <= 1:
+        return 1, 0.0
 
-    # Downscale and then upscale
-    downscaled  = cv2.resize(color_channel, (w // downscale_factor, h // downscale_factor), interpolation=cv2.INTER_AREA)
+    # Drop DC and restrict to k <= max_n
+    k, P = k[1:], P[1:]
+    keep = k <= max_n
+    k, P = k[keep], P[keep]
+    
+    if len(k) == 0:
+        return 1, 0.0
 
-    # Compute mean squared error (MSE) between original and vertically reflected image
-    mse0 = np.mean((downscaled - downscaled[::-1]) ** 2)
+    # Normalize to robust baseline
+    baseline = np.median(P) + 1e-12
+    S_norm = P / baseline
+    Smap = {int(kk): float(ss) for kk, ss in zip(k, S_norm)}
 
-    # Compute mean squared error (MSE) between original and horizontally reflected image
-    mse1 = np.mean((downscaled - downscaled[:,::-1]) ** 2)
+    def w(m):
+        """Weighting function for harmonics"""
+        if weights == "inv":  
+            return 1.0 / m
+        elif weights == "sqrt": 
+            return 1.0 / np.sqrt(m)
+        else:
+            return 1.0
 
-    # Optional: normalize MSE to 0–1 by dividing by max possible value (variance)
-    normalized_mse = (mse0 + mse1) / (2. * (np.var(downscaled) + 1e-6)) # avoid division by zero
-    # 1 means perfect symmetry at this scale 
-    # 0 means no symmetry at this scale
+    # Harmonic-sum scoring to prefer the true fundamental
+    scores = {}
+    for n in range(min_n, max_n + 1):
+        s = 0.0
+        m = 1
+        while m * n <= max_n:
+            s += w(m) * Smap.get(m * n, 0.0)
+            m += 1
+        scores[n] = s
 
-    return normalized_mse
+    if not scores:
+        return 1, 0.0
+        
+    n_fund = max(scores, key=scores.get)
+    median_score = np.median(list(scores.values()))
+    strength = float(scores[n_fund] / (median_score + 1e-12))
+    
+    return int(n_fund), strength
 
 @timing_decorator("compute_radial_symmetry_metric")
 def compute_radial_symmetry_metric(color_channel, dowscale_factor):
@@ -543,17 +625,12 @@ def compute_basic_metrics(frame, downscale_large, downscale_medium):
 
         basic_metrics[f"{color_channel_name}_avg"] = avg_intensity
         basic_metrics[f"{color_channel_name}_std"] = std_intensity
-        # Transpose metric - only compute for Gray channel to save time
+        # Rotational symmetry detection - only compute for Gray channel to save time
         if color_channel_name == "Gray":
-            transpose_metric_value = compute_transpose_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
-            # at the specified spatial scale
-            basic_metrics[f"{color_channel_name}_xps"] = transpose_metric_value
-
-        # Reflect metric - only compute for Gray channel to save time
-        if color_channel_name == "Gray":
-            reflect_metric_value = compute_reflect_metric(color_channel, downscale_medium) # degree of symmettry for flipping around the center point
-            # at the specified spatial scale
-            basic_metrics[f"{color_channel_name}_rfl"] = reflect_metric_value
+            symmetry_order, symmetry_strength = detect_rotational_symmetry(color_channel, max_n=24, ntheta=720)
+            # Store both the detected symmetry order (n-fold) and the strength of detection
+            basic_metrics[f"{color_channel_name}_rsn"] = symmetry_order      # rotational symmetry n-fold
+            basic_metrics[f"{color_channel_name}_rss"] = symmetry_strength   # rotational symmetry strength
         
         # Radial symmetry metric - only compute for Gray channel to save time
         if color_channel_name == "Gray":
