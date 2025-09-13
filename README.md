@@ -126,6 +126,9 @@ python run_video_processing.py N17_Mz7fo6C2f --farneback-preset small_motion --f
 
 # specify stretch centers
 python run_video_processing.py N22_M5to\(1e-20\)M2ta9f-DE2-1 97 --stretch-centers 0.1 0.33 0.67 0.9
+
+# avoid processing video, generate new midi files based on existing video processing
+python run_video_processing.py N24_M6to\(1e-50\)M2tb6f 132 --skip-video --stretch-centers 0.1 0.33 0.5 0.67 0.9 --stretch-values 1 2 4 --filter-periods 5 17 65
 ```
 
 ---

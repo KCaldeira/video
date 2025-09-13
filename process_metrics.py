@@ -280,9 +280,10 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                                                 time=time_tick))
 
                         
-                        # Create file name: var_rank_averaging_stretch-center.mid (exclude metric and inversion)
-                        file_name = f"../video_midi/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
-                        midi_file.save(file_name)
+                        # Only save MIDI file if it contains tracks
+                        if midi_file.tracks:
+                            file_name = f"../video_midi/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
+                            midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
     print(f"Writing out midi files by postprocessing methods")
