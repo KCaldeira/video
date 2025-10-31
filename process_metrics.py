@@ -133,8 +133,8 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     # Create output prefix with farneback preset
     output_prefix = f"{prefix}_{farneback_preset}"
     
-    if not os.path.exists(f"../video_midi/{output_prefix}"):
-        os.makedirs(f"../video_midi/{output_prefix}")
+    if not os.path.exists(f"data/output/{output_prefix}"):
+        os.makedirs(f"data/output/{output_prefix}")
     
     # Use original prefix for file names (without farneback preset)
     file_prefix = prefix
@@ -282,7 +282,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                         
                         # Only save MIDI file if it contains tracks
                         if midi_file.tracks:
-                            file_name = f"../video_midi/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
+                            file_name = f"data/output/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
                             midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
@@ -333,7 +333,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                             channel=7,
                             time=time_tick))
                     
-        midi_file.save("../video_midi/" + output_prefix + "/" + base_suffix + ".mid")
+        midi_file.save("data/output/" + output_prefix + "/" + base_suffix + ".mid")
 
     # write out the master xlsx
     print(f"Writing out master xlsx")
@@ -344,8 +344,8 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
-    master_df.to_excel(f"../video_midi/{output_prefix}/{file_prefix}_derived.xlsx", index=False)
-    print(f"Derived data saved to ../video_midi/{output_prefix}/{file_prefix}_derived.xlsx")
+    master_df.to_excel(f"data/output/{output_prefix}/{file_prefix}_derived.xlsx", index=False)
+    print(f"Derived data saved to data/output/{output_prefix}/{file_prefix}_derived.xlsx")
 
     # Flexible sorting configuration
     # Define the order of fields for sorting (can be easily modified)
@@ -432,7 +432,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
-    pdf = PdfPages(f"../video_midi/{output_prefix}/{file_prefix}_plots.pdf")
+    pdf = PdfPages(f"data/output/{output_prefix}/{file_prefix}_plots.pdf")
     
     plt.rcParams['figure.max_open_warning'] = 50  # Allow more figures before warning
 
@@ -510,18 +510,19 @@ def process_metrics_to_midi(prefix, config=None):
     stretch_values = config.get("stretch_values", [8])
     stretch_centers = config.get("stretch_centers", [0.33, 0.67])
 
-    # Try to find the CSV file with farneback preset suffix
-    csv_filename = f"{prefix}_basic.csv"
-    if not os.path.exists(csv_filename):
-        # Try to find CSV file with farneback preset suffix
-        import glob
-        csv_files = glob.glob(f"{prefix}_*_basic.csv")
-        if csv_files:
-            csv_filename = csv_files[0]
-            print(f"Using CSV file: {csv_filename}")
-        else:
-            raise FileNotFoundError(f"Could not find CSV file: {csv_filename} or any matching files with preset suffix")
-    
+    # Try to find the CSV file with farneback preset suffix in data/output/
+    import glob
+    csv_files = glob.glob(f"data/output/{prefix}_{farneback_preset}/{prefix}_{farneback_preset}_basic.csv")
+    if not csv_files:
+        # Try older pattern without preset
+        csv_files = glob.glob(f"data/output/{prefix}_*/{prefix}_*_basic.csv")
+
+    if csv_files:
+        csv_filename = csv_files[0]
+        print(f"Using CSV file: {csv_filename}")
+    else:
+        raise FileNotFoundError(f"Could not find CSV file in data/output/ for prefix: {prefix}")
+
     csv = pd.read_csv(csv_filename, index_col=0)
     
     # Add derived columns

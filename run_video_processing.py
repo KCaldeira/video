@@ -4,19 +4,19 @@ Wrapper script to run video processing pipeline.
 This script runs both process_video.py and process_metrics.py with configurable parameters.
 
 Usage:
-    python run_video_processing.py <subdir_name> [beats_per_minute]
-    python run_video_processing.py --config config.json
+    python run_video_processing.py <config_file.json>
     python run_video_processing.py --help
-    
+
 Examples:
-    python run_video_processing.py N17_Mz7fo6C2f
-    python run_video_processing.py N17_Mz7fo6C2f 120
-    python run_video_processing.py --config my_config.json
+    python run_video_processing.py default_config.json
+    python run_video_processing.py my_custom_config.json
+    python run_video_processing.py N29_3M2pM6dispA7_config.json
+
+Note: Configuration is exclusively via JSON files. See default_config.json for template.
 """
 
 import sys
 import os
-import subprocess
 import json
 import argparse
 
@@ -32,12 +32,13 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
     
     try:
         # Call the function directly
+        # Look for video file in data/input directory
         # Try .wmv first, then .mp4 if not found
-        video_file = f"{subdir_name}.wmv"
+        video_file = f"data/input/{subdir_name}.wmv"
         if not os.path.exists(video_file):
-            video_file = f"{subdir_name}.mp4"
+            video_file = f"data/input/{subdir_name}.mp4"
             if not os.path.exists(video_file):
-                raise FileNotFoundError(f"Neither {subdir_name}.wmv nor {subdir_name}.mp4 found")
+                raise FileNotFoundError(f"Neither data/input/{subdir_name}.wmv nor data/input/{subdir_name}.mp4 found")
         print(f"Using video file: {video_file}")
         # Extract Farneback parameters and strip the prefix
         farneback_kwargs = {}
@@ -110,112 +111,67 @@ def load_config(config_file):
         return None
 
 def main():
-    parser = argparse.ArgumentParser(description='Run video processing pipeline')
-    parser.add_argument('subdir_name', nargs='?', help='Name of the subdirectory/video file (without .wmv extension)')
-    parser.add_argument('beats_per_minute', nargs='?', type=int, help='Beats per minute (default: 64)')
-    parser.add_argument('--beats-per-minute', '-b', type=int, 
-                       help='Beats per minute (alternative to positional argument)')
-    parser.add_argument('--config', '-c', help='Path to config.json file')
-    parser.add_argument('--skip-video', action='store_true',
-                       help='Skip process_video.py and only run process_metrics.py')
-    parser.add_argument('--skip-metrics', action='store_true',
-                       help='Skip process_metrics.py and only run process_video.py')
-    parser.add_argument('--frames-per-second', type=int, default=30,
-                       help='Frames per second (default: 30)')
-    parser.add_argument('--beats-per-midi-event', type=int, default=1,
-                       help='Beats per MIDI event (default: 1)')
-    parser.add_argument('--ticks-per-beat', type=int, default=480,
-                       help='Ticks per beat (default: 480)')
-    parser.add_argument('--downscale-large', type=int, default=100,
-                       help='Large downscale factor (default: 100)')
-    parser.add_argument('--downscale-medium', type=int, default=10,
-                       help='Medium downscale factor (default: 10)')
-    parser.add_argument('--filter-periods', nargs='+', type=int, default=[17, 65, 257],
-                       help='Filter periods for smoothing (default: 17 65 257)')
-    parser.add_argument('--stretch-values', nargs='+', type=int, default=[8],
-                       help='Stretch values (default: 8)')
-    parser.add_argument('--stretch-centers', nargs='+', type=float, default=[0.33, 0.67],
-                       help='Stretch centers (default: 0.33 0.67)')
-    parser.add_argument('--cc-number', type=int, default=1,
-                       help='MIDI CC number (default: 1)')
-    parser.add_argument('--max-frames', type=int, default=None,
-                       help='Maximum number of frames to process (default: process all frames)')
-    parser.add_argument('--farneback-preset', choices=['default', 'balanced', 'small_motion', 'large_motion', 'noisy_scene', 'smooth_scene', 'center_only'],
-                       default='default', help='Farneback optical flow preset (default: default)')
-    parser.add_argument('--farneback-pyr-scale', type=float, default=0.5,
-                       help='Farneback pyramid scale (default: 0.5)')
-    parser.add_argument('--farneback-levels', type=int, default=3,
-                       help='Farneback pyramid levels (default: 3)')
-    parser.add_argument('--farneback-winsize', type=int, default=15,
-                       help='Farneback window size (default: 15)')
-    parser.add_argument('--farneback-iterations', type=int, default=3,
-                       help='Farneback iterations (default: 3)')
-    parser.add_argument('--farneback-poly-n', type=int, default=5,
-                       help='Farneback polynomial degree (default: 5)')
-    parser.add_argument('--farneback-poly-sigma', type=float, default=1.2,
-                       help='Farneback polynomial sigma (default: 1.2)')
-    
+    parser = argparse.ArgumentParser(
+        description='Run video processing pipeline using JSON configuration',
+        epilog='See default_config.json for a complete configuration template'
+    )
+    parser.add_argument('config',
+                       help='Path to JSON configuration file')
+
     args = parser.parse_args()
-    
-    # Load config if specified
-    if args.config:
-        config = load_config(args.config)
-        if config is None:
-            return 1
-        
-        subdir_name = config.get('subdir_name')
-        beats_per_minute = config.get('beats_per_minute', 64)
-        frames_per_second = config.get('frames_per_second', 30)
-        beats_per_midi_event = config.get('beats_per_midi_event', 1)
-        ticks_per_beat = config.get('ticks_per_beat', 480)
-        downscale_large = config.get('downscale_large', 100)
-        downscale_medium = config.get('downscale_medium', 10)
-        filter_periods = config.get('filter_periods', [17, 65, 257])
-        stretch_values = config.get('stretch_values', [8])
-        stretch_centers = config.get('stretch_centers', [0.33, 0.67])
-        cc_number = config.get('cc_number', 1)
-        max_frames = config.get('max_frames', None)
-        farneback_preset = config.get('farneback_preset', 'default')
-        farneback_pyr_scale = config.get('farneback_pyr_scale', 0.5)
-        farneback_levels = config.get('farneback_levels', 3)
-        farneback_winsize = config.get('farneback_winsize', 15)
-        farneback_iterations = config.get('farneback_iterations', 3)
-        farneback_poly_n = config.get('farneback_poly_n', 5)
-        farneback_poly_sigma = config.get('farneback_poly_sigma', 1.2)
-    else:
-        # Use command line arguments
-        if not args.subdir_name:
-            print("Error: Either provide subdir_name as argument or use --config option")
-            parser.print_help()
-            return 1
-        
-        subdir_name = args.subdir_name
-        
-        # Handle beats_per_minute: positional argument takes precedence over named argument
-        if args.beats_per_minute is not None:
-            beats_per_minute = args.beats_per_minute
-        else:
-            beats_per_minute = 64  # default value
-        
-        frames_per_second = args.frames_per_second
-        beats_per_midi_event = args.beats_per_midi_event
-        ticks_per_beat = args.ticks_per_beat
-        downscale_large = args.downscale_large
-        downscale_medium = args.downscale_medium
-        filter_periods = args.filter_periods
-        stretch_values = args.stretch_values
-        stretch_centers = args.stretch_centers
-        cc_number = args.cc_number
-        max_frames = args.max_frames
-        farneback_preset = args.farneback_preset
-        farneback_pyr_scale = args.farneback_pyr_scale
-        farneback_levels = args.farneback_levels
-        farneback_winsize = args.farneback_winsize
-        farneback_iterations = args.farneback_iterations
-        farneback_poly_n = args.farneback_poly_n
-        farneback_poly_sigma = args.farneback_poly_sigma
-    
+
+    # Load configuration
+    config = load_config(args.config)
+    if config is None:
+        return 1
+
+    # Extract configuration values with defaults
+    video_config = config.get('video', {})
+    timing_config = config.get('timing', {})
+    video_proc_config = config.get('video_processing', {})
+    optical_flow_config = video_proc_config.get('optical_flow', {})
+    metrics_config = config.get('metrics_processing', {})
+    pipeline_config = config.get('pipeline_control', {})
+
+    # Required configuration
+    subdir_name = video_config.get('video_name')
+    if not subdir_name or subdir_name == 'your_video_name_here':
+        print("Error: 'video.video_name' must be set in configuration file")
+        return 1
+
+    # Timing parameters
+    beats_per_minute = timing_config.get('beats_per_minute', 64)
+    frames_per_second = timing_config.get('frames_per_second', 30)
+    beats_per_midi_event = timing_config.get('beats_per_midi_event', 1)
+    ticks_per_beat = timing_config.get('ticks_per_beat', 480)
+
+    # Video processing parameters
+    downscale_large = video_proc_config.get('downscale_large', 100)
+    downscale_medium = video_proc_config.get('downscale_medium', 10)
+    max_frames = video_config.get('max_frames', None)
+
+    # Optical flow parameters
+    farneback_preset = optical_flow_config.get('preset', 'default')
+    farneback_pyr_scale = optical_flow_config.get('pyr_scale', 0.5)
+    farneback_levels = optical_flow_config.get('levels', 3)
+    farneback_winsize = optical_flow_config.get('winsize', 15)
+    farneback_iterations = optical_flow_config.get('iterations', 3)
+    farneback_poly_n = optical_flow_config.get('poly_n', 5)
+    farneback_poly_sigma = optical_flow_config.get('poly_sigma', 1.2)
+
+    # Metrics processing parameters
+    filter_periods = metrics_config.get('filter_periods', [17, 65, 257])
+    stretch_values = metrics_config.get('stretch_values', [8])
+    stretch_centers = metrics_config.get('stretch_centers', [0.33, 0.67])
+    cc_number = metrics_config.get('cc_number', 1)
+
+    # Pipeline control
+    skip_video = pipeline_config.get('skip_video', False)
+    skip_metrics = pipeline_config.get('skip_metrics', False)
+
+    # Print configuration summary
     print(f"Starting video processing pipeline:")
+    print(f"  Configuration file: {args.config}")
     print(f"  Subdir name: {subdir_name}")
     print(f"  Beats per minute: {beats_per_minute}")
     print(f"  Frames per second: {frames_per_second}")
@@ -228,19 +184,27 @@ def main():
     print(f"  Stretch centers: {stretch_centers}")
     print(f"  CC number: {cc_number}")
     print(f"  Max frames: {max_frames if max_frames else 'All frames'}")
-    print(f"  Video file: {subdir_name}.wmv")
+    print(f"  Optical flow preset: {farneback_preset}")
     print()
-    
-    # Check if video file exists
-    video_file = f"{subdir_name}.wmv"
-    if not os.path.exists(video_file):
-        print(f"Error: Video file '{video_file}' not found!")
+
+    # Check if video file exists in data/input directory (try configured extensions)
+    file_extensions = video_config.get('file_extensions', ['.wmv', '.mp4'])
+    video_file = None
+    for ext in file_extensions:
+        candidate = f"data/input/{subdir_name}{ext}"
+        if os.path.exists(candidate):
+            video_file = candidate
+            print(f"Found video file: {video_file}")
+            break
+
+    if not video_file:
+        print(f"Error: No video file found for '{subdir_name}' in data/input/ with extensions {file_extensions}")
         return 1
-    
+
     success = True
-    
+
     # Step 1: Run process_video.py
-    if not args.skip_video:
+    if not skip_video:
         print("=" * 50)
         print("STEP 1: Running process_video.py")
         print("=" * 50)
@@ -263,11 +227,11 @@ def main():
             success = False
             print("Failed to run process_video.py")
         else:
-            print("✓ process_video.py completed successfully")
+            print("process_video.py completed successfully")
         print()
-    
+
     # Step 2: Run process_metrics.py
-    if not args.skip_metrics and success:
+    if not skip_metrics and success:
         print("=" * 50)
         print("STEP 2: Running process_metrics.py")
         print("=" * 50)
@@ -286,18 +250,18 @@ def main():
             success = False
             print("Failed to run process_metrics.py")
         else:
-            print("✓ process_metrics.py completed successfully")
+            print("process_metrics.py completed successfully")
         print()
-    
+
     if success:
         print("=" * 50)
-        print("✓ Video processing pipeline completed successfully!")
-        print(f"Output files are in: ../video_midi/{subdir_name}_{farneback_preset}/")
+        print("Video processing pipeline completed successfully!")
+        print(f"Output files are in: data/output/{subdir_name}_{farneback_preset}/")
         print("=" * 50)
         return 0
     else:
         print("=" * 50)
-        print("✗ Video processing pipeline failed!")
+        print("Video processing pipeline failed!")
         print("=" * 50)
         return 1
 

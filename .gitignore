@@ -23,3 +23,7 @@
 venv/
 env/
 ENV/
+
+# Ignore all data directories
+data/input/
+data/output/
