@@ -56,7 +56,7 @@ Step 2: process_metrics.py → MIDI + Excel + Plots (data/output/)
 Step 3: cluster_primary.py → Cluster assignments + Quality metrics (data/output/)
 ```
 
-Each step can be skipped via configuration (`skip_video`, `skip_metrics`, `skip_clustering`).
+Each step can be enabled/disabled via configuration (`process_video`, `process_metrics`, `process_clusters`).
 
 ---
 
@@ -220,25 +220,25 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `skip_video` | bool | `false` | Skip video analysis (use existing CSV) |
-| `skip_metrics` | bool | `false` | Skip metrics processing |
-| `skip_clustering` | bool | `false` | Skip clustering analysis |
+| `process_video` | bool | `true` | Run video analysis (extract primary metrics) |
+| `process_metrics` | bool | `true` | Run metrics processing (MIDI generation) |
+| `process_clusters` | bool | `true` | Run clustering analysis |
 
 **Example - Reprocess metrics only**:
 ```json
 "pipeline_control": {
-  "skip_video": true,
-  "skip_metrics": false,
-  "skip_clustering": false
+  "process_video": false,
+  "process_metrics": true,
+  "process_clusters": true
 }
 ```
 
 **Example - Run clustering only**:
 ```json
 "pipeline_control": {
-  "skip_video": true,
-  "skip_metrics": true,
-  "skip_clustering": false
+  "process_video": false,
+  "process_metrics": false,
+  "process_clusters": true
 }
 ```
 
@@ -269,8 +269,9 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 **Regenerate MIDI from existing analysis**:
 ```json
 "pipeline_control": {
-  "skip_video": true,
-  "skip_metrics": false
+  "process_video": false,
+  "process_metrics": true,
+  "process_clusters": true
 }
 ```
 
@@ -513,11 +514,11 @@ Add to JSON config file:
 
 ```json
 "pipeline_control": {
-  "skip_video": false,
-  "skip_metrics": false,
-  "skip_clustering": false
+  "process_video": true,
+  "process_metrics": true,
+  "process_clusters": true
 },
-"clustering": {
+"cluster_processing": {
   "k_values": [2, 3, 4, 5, 6, 8, 10, 12],
   "normalization": "rank",
   "metrics_to_exclude": [],
@@ -586,7 +587,7 @@ Clustering runs as Step 3 after metrics processing:
 2. Step 2: Metrics processing → derived metrics + MIDI
 3. Step 3: Clustering → cluster assignments + quality metrics
 
-Skip clustering with `"skip_clustering": true` in config.
+Disable clustering with `"process_clusters": false` in config.
 
 ---
 
@@ -648,12 +649,13 @@ python run_video_processing.py my_video.json
 }
 ```
 
-### Skip Video Processing (Regenerate MIDI)
+### Regenerate MIDI and Clusters (Skip Video)
 ```json
 {
   "pipeline_control": {
-    "skip_video": true,
-    "skip_metrics": false
+    "process_video": false,
+    "process_metrics": true,
+    "process_clusters": true
   }
 }
 ```

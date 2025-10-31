@@ -68,8 +68,8 @@ Key config parameters:
 - `timing.beats_per_minute` - Tempo (default: 64)
 - `video_processing.optical_flow.preset` - Motion detection preset (default: "default")
 - `metrics_processing.filter_periods` - [17, 65, 257] - Smoothing filters
-- `clustering.k_values` - [2, 3, 4, 5, 6, 8, 10, 12] - Cluster counts to try
-- `pipeline_control.skip_video` / `skip_metrics` / `skip_clustering` - Skip stages
+- `cluster_processing.k_values` - [2, 3, 4, 5, 6, 8, 10, 12] - Cluster counts to try
+- `pipeline_control.process_video` / `process_metrics` / `process_clusters` - Enable/disable stages
 
 ### Performance Optimizations
 

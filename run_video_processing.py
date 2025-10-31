@@ -167,16 +167,16 @@ def main():
     cc_number = metrics_config.get('cc_number', 1)
 
     # Pipeline control
-    skip_video = pipeline_config.get('skip_video', False)
-    skip_metrics = pipeline_config.get('skip_metrics', False)
-    skip_clustering = pipeline_config.get('skip_clustering', False)
+    process_video = pipeline_config.get('process_video', True)
+    process_metrics = pipeline_config.get('process_metrics', True)
+    process_clusters = pipeline_config.get('process_clusters', True)
 
     # Clustering parameters
-    clustering_config = config.get('clustering', {})
-    k_values = clustering_config.get('k_values', [2, 3, 4, 5, 6, 8, 10, 12])
-    clustering_normalization = clustering_config.get('normalization', 'rank')
-    metrics_to_exclude = clustering_config.get('metrics_to_exclude', [])
-    clustering_random_state = clustering_config.get('random_state', 42)
+    cluster_processing_config = config.get('cluster_processing', {})
+    k_values = cluster_processing_config.get('k_values', [2, 3, 4, 5, 6, 8, 10, 12])
+    clustering_normalization = cluster_processing_config.get('normalization', 'rank')
+    metrics_to_exclude = cluster_processing_config.get('metrics_to_exclude', [])
+    clustering_random_state = cluster_processing_config.get('random_state', 42)
 
     # Print configuration summary
     print(f"Starting video processing pipeline:")
@@ -213,7 +213,7 @@ def main():
     success = True
 
     # Step 1: Run process_video.py
-    if not skip_video:
+    if process_video:
         print("=" * 50)
         print("STEP 1: Running process_video.py")
         print("=" * 50)
@@ -240,7 +240,7 @@ def main():
         print()
 
     # Step 2: Run process_metrics.py
-    if not skip_metrics and success:
+    if process_metrics and success:
         print("=" * 50)
         print("STEP 2: Running process_metrics.py")
         print("=" * 50)
@@ -263,7 +263,7 @@ def main():
         print()
 
     # Step 3: Run clustering analysis
-    if not skip_clustering and success:
+    if process_clusters and success:
         print("=" * 50)
         print("STEP 3: Running cluster analysis")
         print("=" * 50)
