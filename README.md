@@ -37,21 +37,26 @@ This repository contains a comprehensive video processing pipeline that extracts
 
 ## Architecture Overview
 
-The pipeline consists of three main Python scripts:
+The pipeline consists of four main Python scripts:
 
 1. **`run_video_processing.py`** - Main orchestrator (entry point)
 2. **`process_video.py`** - Video analysis module (extracts visual metrics)
 3. **`process_metrics.py`** - Data processing module (transforms to MIDI)
+4. **`cluster_primary.py`** - Clustering module (groups similar frames)
 
 ### Processing Flow
 
 ```
 Video File (data/input/)
     ↓
-process_video.py → CSV + Config (data/output/)
+Step 1: process_video.py → CSV + Config (data/output/)
     ↓
-process_metrics.py → MIDI + Excel + Plots (data/output/)
+Step 2: process_metrics.py → MIDI + Excel + Plots (data/output/)
+    ↓
+Step 3: cluster_primary.py → Cluster assignments + Quality metrics (data/output/)
 ```
+
+Each step can be skipped via configuration (`skip_video`, `skip_metrics`, `skip_clustering`).
 
 ---
 
@@ -217,12 +222,23 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 |-----------|------|---------|-------------|
 | `skip_video` | bool | `false` | Skip video analysis (use existing CSV) |
 | `skip_metrics` | bool | `false` | Skip metrics processing |
+| `skip_clustering` | bool | `false` | Skip clustering analysis |
 
 **Example - Reprocess metrics only**:
 ```json
 "pipeline_control": {
   "skip_video": true,
-  "skip_metrics": false
+  "skip_metrics": false,
+  "skip_clustering": false
+}
+```
+
+**Example - Run clustering only**:
+```json
+"pipeline_control": {
+  "skip_video": true,
+  "skip_metrics": true,
+  "skip_clustering": false
 }
 ```
 
@@ -440,6 +456,140 @@ Created in `data/output/{video_name}_{preset}/`:
 
 ---
 
+## Frame Clustering (cluster_primary.py)
+
+### Overview
+
+Clusters video frames based on primary metrics using K-Means and Gaussian Mixture Models (GMM). This helps identify groups of similar frames for analysis and understanding video structure.
+
+### Key Features
+
+- **K-Means clustering** - Fast, deterministic baseline algorithm
+- **GMM clustering** - Better for elliptical clusters, provides BIC/AIC model selection
+- **Rank normalization** - Robust, scale-free (default)
+- **Z-score option** - Available for alternative normalization
+- **Quality metrics** - Silhouette, Calinski-Harabasz, Davies-Bouldin, BIC/AIC
+- **Exemplar frames** - Identifies representative frames per cluster
+- **Automatic cleaning** - Drops constant columns (std = 0)
+
+### Clustering Methods
+
+#### K-Means
+- Uses Euclidean distance in normalized feature space
+- Deterministic with fixed random_state
+- Fast and scalable
+- Good baseline for spherical clusters
+
+#### Gaussian Mixture Model (GMM)
+- Full covariance modeling
+- Better for elliptical/complex cluster shapes
+- Provides BIC/AIC for model selection
+- Soft cluster assignments available
+
+### Quality Metrics
+
+**Silhouette Score** (range: -1 to 1, higher is better)
+- Measures how similar frames are to their own cluster vs other clusters
+- Values near 1: well-separated clusters
+- Values near 0: overlapping clusters
+- Values near -1: frames may be in wrong cluster
+
+**Calinski-Harabasz Score** (higher is better)
+- Ratio of between-cluster to within-cluster variance
+- Higher values indicate better-defined clusters
+
+**Davies-Bouldin Score** (lower is better)
+- Average similarity between each cluster and its most similar cluster
+- Lower values indicate better separation
+
+**BIC/AIC** (GMM only, lower is better)
+- Bayesian/Akaike Information Criterion
+- Balances model fit with complexity
+- Helps select optimal number of clusters
+
+### Configuration
+
+Add to JSON config file:
+
+```json
+"pipeline_control": {
+  "skip_video": false,
+  "skip_metrics": false,
+  "skip_clustering": false
+},
+"clustering": {
+  "k_values": [2, 3, 4, 5, 6, 8, 10, 12],
+  "normalization": "rank",
+  "metrics_to_exclude": [],
+  "random_state": 42
+}
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `k_values` | array | `[2,3,4,5,6,8,10,12]` | Number of clusters to try |
+| `normalization` | string | `"rank"` | `"rank"` or `"zscore"` |
+| `metrics_to_exclude` | array | `[]` | Metrics to exclude from clustering |
+| `random_state` | int | `42` | Random seed for reproducibility |
+
+### Output Files
+
+Created in `data/output/{video_name}_{preset}/`:
+
+- **`*_clusters.csv`** - Cluster assignments for each frame
+  - Columns: `kmeans_k2`, `kmeans_k3`, ..., `gmm_k2`, `gmm_k3`, ...
+- **`*_cluster_scores.json`** - Quality metrics for each k and algorithm
+- **`*_cluster_exemplars.json`** - Representative frames per cluster
+
+### Standalone Usage
+
+Can also be run independently:
+
+```bash
+# Basic usage
+python cluster_primary.py data/output/N29_*/N29_*_basic.csv
+
+# Custom k values
+python cluster_primary.py data/output/N29_*/N29_*_basic.csv --k-values 2 3 4 5
+
+# Z-score normalization
+python cluster_primary.py data/output/N29_*/N29_*_basic.csv --normalization zscore
+
+# Exclude specific metrics
+python cluster_primary.py data/output/N29_*/N29_*_basic.csv --exclude czd crc cmv
+```
+
+### Interpreting Results
+
+**Choosing K:**
+1. Look at silhouette scores (higher is better)
+2. Check BIC values for GMM (lower is better)
+3. Examine cluster sizes for balance
+4. Consider domain knowledge
+
+**Example interpretation:**
+- K=2: Often highest silhouette, divides video into major sections
+- K=4: BIC minimum may suggest natural groupings
+- Larger K: More granular scene divisions
+
+**Using exemplars:**
+- Representative frames closest to cluster centers
+- Useful for understanding what each cluster represents
+- Can be used for visualization or manual inspection
+
+### Integration with Pipeline
+
+Clustering runs as Step 3 after metrics processing:
+1. Step 1: Video analysis → primary metrics CSV
+2. Step 2: Metrics processing → derived metrics + MIDI
+3. Step 3: Clustering → cluster assignments + quality metrics
+
+Skip clustering with `"skip_clustering": true` in config.
+
+---
+
 ## Directory Structure
 
 ```
@@ -447,6 +597,7 @@ project/
 ├── run_video_processing.py           # Main entry point
 ├── process_video.py                  # Video analysis module
 ├── process_metrics.py                # Metrics processing module
+├── cluster_primary.py                # Clustering module
 ├── default_config.json               # Configuration template
 ├── example_config.json               # Example configuration
 ├── requirements.txt                  # Python dependencies
@@ -463,6 +614,9 @@ project/
 │       └── {video_name}_{preset}/
 │           ├── {video_name}_{preset}_basic.csv
 │           ├── {video_name}_{preset}_config.json
+│           ├── {video_name}_{preset}_clusters.csv
+│           ├── {video_name}_{preset}_cluster_scores.json
+│           ├── {video_name}_{preset}_cluster_exemplars.json
 │           ├── {video_name}_derived.xlsx
 │           ├── {video_name}_plots.pdf
 │           └── *.mid                 # MIDI files

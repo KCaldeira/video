@@ -23,6 +23,7 @@ import argparse
 # Import the processing functions directly
 from process_video import process_video_to_csv
 from process_metrics import process_metrics_to_midi
+from cluster_primary import cluster_primary_metrics
 
 def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
     """
@@ -168,6 +169,14 @@ def main():
     # Pipeline control
     skip_video = pipeline_config.get('skip_video', False)
     skip_metrics = pipeline_config.get('skip_metrics', False)
+    skip_clustering = pipeline_config.get('skip_clustering', False)
+
+    # Clustering parameters
+    clustering_config = config.get('clustering', {})
+    k_values = clustering_config.get('k_values', [2, 3, 4, 5, 6, 8, 10, 12])
+    clustering_normalization = clustering_config.get('normalization', 'rank')
+    metrics_to_exclude = clustering_config.get('metrics_to_exclude', [])
+    clustering_random_state = clustering_config.get('random_state', 42)
 
     # Print configuration summary
     print(f"Starting video processing pipeline:")
@@ -251,6 +260,28 @@ def main():
             print("Failed to run process_metrics.py")
         else:
             print("process_metrics.py completed successfully")
+        print()
+
+    # Step 3: Run clustering analysis
+    if not skip_clustering and success:
+        print("=" * 50)
+        print("STEP 3: Running cluster analysis")
+        print("=" * 50)
+
+        # Build path to CSV file
+        csv_path = f"data/output/{subdir_name}_{farneback_preset}/{subdir_name}_{farneback_preset}_basic.csv"
+
+        if not os.path.exists(csv_path):
+            print(f"Warning: CSV file not found at {csv_path}, skipping clustering")
+        else:
+            cluster_primary_metrics(
+                csv_path,
+                k_values=k_values,
+                normalization=clustering_normalization,
+                metrics_to_exclude=metrics_to_exclude,
+                random_state=clustering_random_state
+            )
+            print("Cluster analysis completed successfully")
         print()
 
     if success:

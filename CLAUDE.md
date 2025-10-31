@@ -51,6 +51,11 @@ The processing uses separate dictionaries for each transformation stage:
 python run_video_processing.py config.json
 ```
 
+### Pipeline Stages
+1. **Video Analysis** (process_video.py) - Extract primary metrics
+2. **Metrics Processing** (process_metrics.py) - Derive metrics, generate MIDI
+3. **Clustering** (cluster_primary.py) - Group similar frames
+
 ### Directory Structure
 - Videos: `data/input/`
 - Outputs: `data/output/{video_name}_{preset}/`
@@ -63,7 +68,8 @@ Key config parameters:
 - `timing.beats_per_minute` - Tempo (default: 64)
 - `video_processing.optical_flow.preset` - Motion detection preset (default: "default")
 - `metrics_processing.filter_periods` - [17, 65, 257] - Smoothing filters
-- `pipeline_control.skip_video` / `skip_metrics` - Skip stages
+- `clustering.k_values` - [2, 3, 4, 5, 6, 8, 10, 12] - Cluster counts to try
+- `pipeline_control.skip_video` / `skip_metrics` / `skip_clustering` - Skip stages
 
 ### Performance Optimizations
 
