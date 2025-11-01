@@ -23,7 +23,7 @@ import argparse
 # Import the processing functions directly
 from process_video import process_video_to_csv
 from process_metrics import process_metrics_to_midi
-from cluster_primary import cluster_primary_metrics
+from process_clusters import cluster_primary_metrics
 
 def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
     """
@@ -177,6 +177,7 @@ def main():
     clustering_normalization = cluster_processing_config.get('normalization', 'rank')
     metrics_to_exclude = cluster_processing_config.get('metrics_to_exclude', [])
     clustering_random_state = cluster_processing_config.get('random_state', 42)
+    boxcar_periods = cluster_processing_config.get('boxcar_periods', None)
 
     # Print configuration summary
     print(f"Starting video processing pipeline:")
@@ -279,7 +280,11 @@ def main():
                 k_values=k_values,
                 normalization=clustering_normalization,
                 metrics_to_exclude=metrics_to_exclude,
-                random_state=clustering_random_state
+                random_state=clustering_random_state,
+                boxcar_periods=boxcar_periods,
+                beats_per_minute=beats_per_minute,
+                frames_per_second=frames_per_second,
+                ticks_per_beat=ticks_per_beat
             )
             print("Cluster analysis completed successfully")
         print()

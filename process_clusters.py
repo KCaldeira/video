@@ -11,15 +11,16 @@ Philosophy:
 - Scientific code: Clear, simple, reproducible
 
 Usage:
-    python cluster_primary.py <csv_file> [options]
+    python process_clusters.py <csv_file> [options]
 
 Example:
-    python cluster_primary.py data/output/N29_3M2pM6dispA7_default/N29_3M2pM6dispA7_default_basic.csv
+    python process_clusters.py data/output/N29_3M2pM6dispA7_default/N29_3M2pM6dispA7_default_basic.csv
 
 Output:
-    - clusters_primary.csv: Cluster assignments for each frame
+    - clusters.csv: Cluster assignments for each frame
     - cluster_scores.json: Quality metrics (silhouette, BIC, etc.)
     - cluster_exemplars.json: Representative frames per cluster
+    - MIDI files: One per k_value with tracks for each boxcar period
 """
 
 import numpy as np
@@ -31,6 +32,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
 import argparse
 import os
+import mido
 
 
 def load_and_prepare_data(csv_path, metrics_to_exclude=None):
@@ -299,10 +301,178 @@ def find_exemplars(data, labels_dict, df, n_exemplars=3):
     return exemplars
 
 
-def save_results(df, kmeans_results, gmm_results, kmeans_scores, gmm_scores,
-                kmeans_exemplars, gmm_exemplars, output_dir, base_name):
+def apply_boxcar_filter(assignments, width):
     """
-    Save clustering results to CSV and JSON files.
+    Apply boxcar filter to cluster assignments, returning most common cluster ID in window.
+
+    Parameters:
+    - assignments: numpy array of cluster IDs
+    - width: odd integer, width of boxcar filter
+
+    Returns:
+    - smoothed: numpy array of smoothed cluster IDs
+    """
+    n = len(assignments)
+    smoothed = np.zeros(n, dtype=int)
+    half_width = width // 2
+
+    for i in range(n):
+        # Determine window bounds (truncate at edges)
+        start = max(0, i - half_width)
+        end = min(n, i + half_width + 1)
+
+        # Get window and find mode (most common value)
+        window = assignments[start:end]
+        values, counts = np.unique(window, return_counts=True)
+        mode_idx = np.argmax(counts)
+        smoothed[i] = values[mode_idx]
+
+    return smoothed
+
+
+def apply_boxcar_to_clusters(cluster_df, boxcar_periods):
+    """
+    Apply boxcar filtering to all cluster assignment columns.
+
+    Parameters:
+    - cluster_df: DataFrame with cluster assignments
+    - boxcar_periods: list of boxcar widths (odd integers)
+
+    Returns:
+    - cluster_df: DataFrame with added boxcar-filtered columns
+    """
+    # Get all cluster assignment columns (those starting with 'kmeans_' or 'gmm_')
+    cluster_cols = [col for col in cluster_df.columns if col.startswith(('kmeans_', 'gmm_'))]
+
+    print(f"\nApplying boxcar filtering with periods: {boxcar_periods}")
+
+    for col in cluster_cols:
+        assignments = cluster_df[col].values
+
+        for period in boxcar_periods:
+            # Apply boxcar filter
+            smoothed = apply_boxcar_filter(assignments, period)
+
+            # Add column with naming convention: {original}_b{period:03d}
+            new_col = f"{col}_b{period:03d}"
+            cluster_df[new_col] = smoothed
+
+            # Count changes
+            n_changes = np.sum(smoothed != assignments)
+            print(f"  {col} -> {new_col}: {n_changes}/{len(assignments)} assignments changed")
+
+    return cluster_df
+
+
+def generate_cluster_midi(cluster_df, output_dir, base_name,
+                         beats_per_minute=64, frames_per_second=30, ticks_per_beat=480):
+    """
+    Generate MIDI files from cluster assignments.
+
+    Creates one MIDI file per k_value, with each boxcar period as a separate track.
+
+    Parameters:
+    - cluster_df: DataFrame with cluster assignments
+    - output_dir: directory to save MIDI files
+    - base_name: base filename for outputs
+    - beats_per_minute: tempo for MIDI timing
+    - frames_per_second: video frame rate
+    - ticks_per_beat: MIDI resolution
+    """
+    print(f"\nGenerating MIDI files from cluster assignments")
+
+    # Calculate ticks per frame
+    ticks_per_frame = ticks_per_beat * beats_per_minute / (60 * frames_per_second)
+
+    # Get frame counts (assuming index contains frame numbers)
+    frame_count_list = cluster_df.index.tolist()
+
+    # Find all cluster assignment columns
+    cluster_cols = [col for col in cluster_df.columns
+                   if col.startswith(('kmeans_', 'gmm_'))]
+
+    # Group columns by algorithm and k_value
+    # Format: kmeans_k2, kmeans_k2_b017, gmm_k3, gmm_k3_b065, etc.
+    grouped_cols = {}
+
+    for col in cluster_cols:
+        # Parse column name to extract algorithm, k_value, and boxcar period
+        parts = col.split('_')
+        algorithm = parts[0]  # 'kmeans' or 'gmm'
+        k_part = parts[1]     # 'k2', 'k3', etc.
+
+        # Create base key (algorithm + k_value)
+        base_key = f"{algorithm}_{k_part}"
+
+        # Determine boxcar period
+        if len(parts) > 2 and parts[2].startswith('b'):
+            boxcar_period = parts[2]  # e.g., 'b017', 'b065'
+        else:
+            boxcar_period = 'b001'  # Original (unfiltered) assignments
+
+        # Group by base_key
+        if base_key not in grouped_cols:
+            grouped_cols[base_key] = {}
+
+        grouped_cols[base_key][boxcar_period] = col
+
+    # Generate one MIDI file per k_value
+    for base_key, tracks_dict in sorted(grouped_cols.items()):
+        midi_file = mido.MidiFile()
+
+        # Sort tracks by boxcar period to ensure consistent ordering
+        sorted_periods = sorted(tracks_dict.keys())
+
+        for boxcar_period in sorted_periods:
+            col_name = tracks_dict[boxcar_period]
+
+            # Get cluster assignments
+            cluster_assignments = cluster_df[col_name].values
+
+            # Calculate scaling factor: midi_value = round(127.0 / max_cluster) * cluster
+            max_cluster = cluster_assignments.max()
+            if max_cluster == 0:
+                scale_factor = 127.0
+            else:
+                scale_factor = 127.0 / max_cluster
+
+            # Create MIDI track
+            midi_track = mido.MidiTrack()
+            midi_file.tracks.append(midi_track)
+
+            # Set track name
+            track_name = f"{col_name}"
+            midi_track.append(mido.MetaMessage('track_name', name=track_name, time=0))
+
+            # Add MIDI events for each frame
+            for i, cluster_id in enumerate(cluster_assignments):
+                # Scale cluster ID to MIDI range
+                midi_value = int(round(scale_factor * cluster_id))
+                # Ensure value is in valid MIDI range [0, 127]
+                midi_value = max(0, min(127, midi_value))
+
+                # Calculate time delta
+                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+
+                # Add control change message (using CC 1 by default)
+                midi_track.append(
+                    mido.Message('control_change',
+                               control=1,
+                               value=midi_value,
+                               channel=7,
+                               time=time_tick))
+
+        # Save MIDI file
+        midi_filename = os.path.join(output_dir, f"{base_name}_{base_key}.mid")
+        midi_file.save(midi_filename)
+        print(f"  Saved {midi_filename} with {len(midi_file.tracks)} tracks")
+
+
+def save_results(df, kmeans_results, gmm_results, kmeans_scores, gmm_scores,
+                kmeans_exemplars, gmm_exemplars, output_dir, base_name, boxcar_periods=None,
+                beats_per_minute=64, frames_per_second=30, ticks_per_beat=480):
+    """
+    Save clustering results to CSV, JSON, and MIDI files.
 
     Parameters:
     - df: original dataframe
@@ -314,6 +484,10 @@ def save_results(df, kmeans_results, gmm_results, kmeans_scores, gmm_scores,
     - gmm_exemplars: GMM exemplars
     - output_dir: directory to save outputs
     - base_name: base filename (e.g., "N29_3M2pM6dispA7_default")
+    - boxcar_periods: list of boxcar filter periods (optional)
+    - beats_per_minute: tempo for MIDI timing (default: 64)
+    - frames_per_second: video frame rate (default: 30)
+    - ticks_per_beat: MIDI resolution (default: 480)
     """
     # Create output dataframe with cluster assignments
     cluster_df = df[['frame_count']].copy() if 'frame_count' in df.columns else pd.DataFrame(index=df.index)
@@ -325,6 +499,10 @@ def save_results(df, kmeans_results, gmm_results, kmeans_scores, gmm_scores,
     # Add GMM cluster assignments
     for k, result in gmm_results.items():
         cluster_df[f'gmm_k{k}'] = result['labels']
+
+    # Apply boxcar filtering if requested
+    if boxcar_periods:
+        cluster_df = apply_boxcar_to_clusters(cluster_df, boxcar_periods)
 
     # Save cluster assignments CSV
     cluster_csv_path = os.path.join(output_dir, f"{base_name}_clusters.csv")
@@ -351,9 +529,16 @@ def save_results(df, kmeans_results, gmm_results, kmeans_scores, gmm_scores,
         json.dump(exemplars, f, indent=2)
     print(f"Saved exemplars to: {exemplars_json_path}")
 
+    # Generate MIDI files from cluster assignments
+    generate_cluster_midi(cluster_df, output_dir, base_name,
+                         beats_per_minute=beats_per_minute,
+                         frames_per_second=frames_per_second,
+                         ticks_per_beat=ticks_per_beat)
+
 
 def cluster_primary_metrics(csv_path, k_values=None, normalization='rank',
-                           metrics_to_exclude=None, random_state=42):
+                           metrics_to_exclude=None, random_state=42, boxcar_periods=None,
+                           beats_per_minute=64, frames_per_second=30, ticks_per_beat=480):
     """
     Main entry point for clustering primary metrics.
 
@@ -363,6 +548,10 @@ def cluster_primary_metrics(csv_path, k_values=None, normalization='rank',
     - normalization: 'rank' or 'zscore' (default: 'rank')
     - metrics_to_exclude: List of metric names to exclude
     - random_state: Random seed for reproducibility
+    - boxcar_periods: List of boxcar filter widths (default: None)
+    - beats_per_minute: tempo for MIDI timing (default: 64)
+    - frames_per_second: video frame rate (default: 30)
+    - ticks_per_beat: MIDI resolution (default: 480)
     """
     if k_values is None:
         k_values = [2, 3, 4, 5, 6, 8, 10, 12]
@@ -374,6 +563,8 @@ def cluster_primary_metrics(csv_path, k_values=None, normalization='rank',
     print(f"K values: {k_values}")
     print(f"Normalization: {normalization}")
     print(f"Random state: {random_state}")
+    if boxcar_periods:
+        print(f"Boxcar periods: {boxcar_periods}")
     print()
 
     # Load and prepare data
@@ -406,7 +597,8 @@ def cluster_primary_metrics(csv_path, k_values=None, normalization='rank',
     base_name = os.path.basename(csv_path).replace('_basic.csv', '')
 
     save_results(df, kmeans_results, gmm_results, kmeans_scores, gmm_scores,
-                kmeans_exemplars, gmm_exemplars, output_dir, base_name)
+                kmeans_exemplars, gmm_exemplars, output_dir, base_name, boxcar_periods,
+                beats_per_minute, frames_per_second, ticks_per_beat)
 
     print(f"\n{'='*60}")
     print(f"CLUSTERING COMPLETE")
@@ -420,9 +612,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python cluster_primary.py data/output/N29_*/N29_*_basic.csv
-  python cluster_primary.py data/output/N29_*/N29_*_basic.csv --k-values 2 3 4 5
-  python cluster_primary.py data/output/N29_*/N29_*_basic.csv --normalization zscore
+  python process_clusters.py data/output/N29_*/N29_*_basic.csv
+  python process_clusters.py data/output/N29_*/N29_*_basic.csv --k-values 2 3 4 5
+  python process_clusters.py data/output/N29_*/N29_*_basic.csv --normalization zscore
         """
     )
 
@@ -435,6 +627,14 @@ Examples:
                        help='Metric names to exclude from clustering')
     parser.add_argument('--random-state', type=int, default=42,
                        help='Random seed for reproducibility (default: 42)')
+    parser.add_argument('--boxcar-periods', nargs='+', type=int, default=None,
+                       help='Boxcar filter periods (odd integers, e.g., 1 17 65 257)')
+    parser.add_argument('--beats-per-minute', type=float, default=64,
+                       help='Tempo for MIDI timing (default: 64)')
+    parser.add_argument('--frames-per-second', type=float, default=30,
+                       help='Video frame rate (default: 30)')
+    parser.add_argument('--ticks-per-beat', type=int, default=480,
+                       help='MIDI resolution (default: 480)')
 
     args = parser.parse_args()
 
@@ -443,7 +643,11 @@ Examples:
         k_values=args.k_values,
         normalization=args.normalization,
         metrics_to_exclude=args.exclude,
-        random_state=args.random_state
+        random_state=args.random_state,
+        boxcar_periods=args.boxcar_periods,
+        beats_per_minute=args.beats_per_minute,
+        frames_per_second=args.frames_per_second,
+        ticks_per_beat=args.ticks_per_beat
     )
 
 
