@@ -165,6 +165,8 @@ def compute_beat_tempos_from_zoom(
     # --- Build MIDI tempo map ---
     # Create MIDI file with tempo changes and notes at each beat
     midi_file = mido.MidiFile(ticks_per_beat=division)
+
+    # Track 1: Tempo map with notes
     track = mido.MidiTrack()
     midi_file.tracks.append(track)
 
@@ -193,6 +195,43 @@ def compute_beat_tempos_from_zoom(
 
         # Note-off one quarter note later
         track.append(mido.Message('note_off', note=60, velocity=0, time=division))
+
+    # Track 2: CC 1 - Normal (min tempo → 0, max tempo → 127)
+    cc_track_normal = mido.MidiTrack()
+    midi_file.tracks.append(cc_track_normal)
+    cc_track_normal.append(mido.MetaMessage('track_name', name='CC1 Normal', time=0))
+
+    # Scale tempo to CC range 0-127
+    tempo_min = tempo_bpm_midi.min()
+    tempo_max = tempo_bpm_midi.max()
+    tempo_range = tempo_max - tempo_min
+
+    # First CC event
+    cc_value = int(np.round((tempo_bpm_midi[0] - tempo_min) / tempo_range * 127))
+    cc_value = np.clip(cc_value, 0, 127)
+    cc_track_normal.append(mido.Message('control_change', control=1, value=cc_value, time=0))
+
+    # Subsequent CC events at each beat
+    for t in tempo_bpm_midi[1:]:
+        cc_value = int(np.round((t - tempo_min) / tempo_range * 127))
+        cc_value = np.clip(cc_value, 0, 127)
+        cc_track_normal.append(mido.Message('control_change', control=1, value=cc_value, time=division))
+
+    # Track 3: CC 1 - Inverted (min tempo → 127, max tempo → 0)
+    cc_track_inverted = mido.MidiTrack()
+    midi_file.tracks.append(cc_track_inverted)
+    cc_track_inverted.append(mido.MetaMessage('track_name', name='CC1 Inverted', time=0))
+
+    # First CC event (inverted)
+    cc_value = int(np.round((tempo_max - tempo_bpm_midi[0]) / tempo_range * 127))
+    cc_value = np.clip(cc_value, 0, 127)
+    cc_track_inverted.append(mido.Message('control_change', control=1, value=cc_value, time=0))
+
+    # Subsequent CC events at each beat (inverted)
+    for t in tempo_bpm_midi[1:]:
+        cc_value = int(np.round((tempo_max - t) / tempo_range * 127))
+        cc_value = np.clip(cc_value, 0, 127)
+        cc_track_inverted.append(mido.Message('control_change', control=1, value=cc_value, time=division))
 
     # Save MIDI file
     midi_file.save(midi_out_path)
