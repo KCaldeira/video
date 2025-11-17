@@ -1,32 +1,37 @@
 import pandas as pd
 import numpy as np
-import struct
+import mido
 
 def compute_beat_tempos_from_zoom(
     csv_path,
-    bars,
+    tempo_slowest=32.0,
+    tempo_fastest=132.0,
+    zoom_cutoff_fraction=0.1,
     fps=30.0,
-    half_width_seconds=4.0,
+    smooth_beats=10,
     division=480,
     csv_out_path="beat_tempos.csv",
     midi_out_path="tempo_map.mid",
 ):
     """
-    From a zoom-vs-frame CSV, build a tempo map with one tempo value per beat.
+    From a zoom-vs-frame CSV, build a tempo map with tempo proportional to zoom rate.
 
     Algorithm:
       1. Load frame_count_list and Gray_czd (zoom rate)
-      2. Apply triangular filter to zoom rate (half-width = half_width_seconds)
-      3. Compute cumulative sum of filtered zoom
-      4. Place beats where cumulative zoom reaches evenly-spaced milestones:
-         beat k occurs when cumsum(zoom) = k × total_cumsum / num_beats
-      5. Calculate tempo from time between consecutive beats
+      2. Clip zoom to percentile range based on zoom_cutoff_fraction
+      3. Map zoom percentiles to tempo range [tempo_slowest, tempo_fastest]
+      4. Generate beats with unsmoothed tempo
+      5. Smooth tempo in beat-space (triangular average over ±smooth_beats)
+      6. Regenerate beat times with smoothed tempo
+      7. Generate MIDI file with tempo changes
 
     Inputs:
       - csv_path: CSV with frame_count_list and Gray_czd columns
-      - bars: number of 4/4 bars (so num_beats = bars × 4)
+      - tempo_slowest: minimum tempo in BPM (default 32.0)
+      - tempo_fastest: maximum tempo in BPM (default 132.0)
+      - zoom_cutoff_fraction: fraction to clip at both ends (default 0.1 = 10%)
       - fps: video frame rate (default 30.0)
-      - half_width_seconds: triangular filter half-width in seconds
+      - smooth_beats: half-width in beats for triangular smoothing (default 10)
 
     Outputs:
       - CSV with beat-level tempo info
@@ -38,46 +43,109 @@ def compute_beat_tempos_from_zoom(
     frames = df["frame_count_list"].to_numpy()
     zoom = df["Gray_czd"].to_numpy()
 
-    # --- Triangular smoothing ---
-    # Half-width in frames (e.g., 4 seconds × 30 fps = 120 frames)
-    half_width_frames = int(round(half_width_seconds * fps))
-    offsets = np.arange(-half_width_frames, half_width_frames + 1)
-    kernel = (half_width_frames + 1 - np.abs(offsets)).astype(float)
-    kernel /= kernel.sum()
+    # --- Clip zoom to percentile range ---
+    percentile_low = zoom_cutoff_fraction * 100
+    percentile_high = (1.0 - zoom_cutoff_fraction) * 100
+    zoom_low = np.percentile(zoom, percentile_low)
+    zoom_high = np.percentile(zoom, percentile_high)
 
-    zoom_smooth = np.convolve(zoom, kernel, mode="same")
+    zoom_clipped = np.clip(zoom, zoom_low, zoom_high)
 
-    # --- Cumulative zoom ---
-    cumsum_zoom = np.cumsum(zoom_smooth)
-    total_cumsum = cumsum_zoom[-1]
+    print(f"Original zoom stats: min={zoom.min():.4f}, max={zoom.max():.4f}, mean={zoom.mean():.4f}")
+    print(f"Clipping to {percentile_low:.0f}th-{percentile_high:.0f}th percentiles: [{zoom_low:.4f}, {zoom_high:.4f}]")
+    print(f"Clipped zoom stats: min={zoom_clipped.min():.4f}, max={zoom_clipped.max():.4f}, mean={zoom_clipped.mean():.4f}")
 
-    # --- Place beats at evenly-spaced cumulative zoom milestones ---
-    n_beats = 4 * bars
-    # Beat k should be at cumulative zoom = k × total_cumsum / n_beats
-    # For k = 1, 2, 3, ..., n_beats
-    zoom_milestones = np.arange(1, n_beats + 1) * total_cumsum / n_beats
+    # --- Map zoom to tempo (no smoothing yet) ---
+    # Map percentile values to tempo range
+    # zoom_low (Xth percentile) → tempo_slowest
+    # zoom_high (Yth percentile) → tempo_fastest
+    tempo_at_frames = tempo_slowest + (zoom_clipped - zoom_low) / (zoom_high - zoom_low) * (tempo_fastest - tempo_slowest)
 
-    # Find frame indices where cumsum_zoom crosses each milestone
-    beat_frames = np.searchsorted(cumsum_zoom, zoom_milestones)
+    # Debug output
+    print(f"Tempo range (unsmoothed): {tempo_at_frames.min():.1f} - {tempo_at_frames.max():.1f} BPM")
+    print(f"Number of sampled frames: {len(frames)}")
 
-    # Convert frame indices to times (in seconds)
-    beat_times = beat_frames / fps
+    # --- Interpolate tempo to all video frames ---
+    # Create a continuous tempo function for all frames in the video
+    video_duration = frames[-1] / fps
+    all_frame_nums = np.arange(0, frames[-1] + 1)
+    tempo_continuous = np.interp(all_frame_nums, frames, tempo_at_frames)
 
-    # --- Calculate tempo from beat spacing ---
-    # Time between consecutive beats
-    beat_durations = np.diff(beat_times, prepend=0)
-    # First beat duration is from time 0 to first beat
+    # --- Walk through time and place beats ---
+    beat_times = []
+    beat_frames_list = []
+    beat_tempos = []
 
-    # Tempo for CSV: represents the tempo of each beat (retrospective)
-    # Tempo in BPM = 60 / duration_in_seconds
-    tempo_bpm_csv = 60.0 / beat_durations
-    tempo_bpm_csv = np.where(beat_durations > 0, tempo_bpm_csv, 120.0)
+    # First beat at time 0
+    beat_times.append(0.0)
+    beat_frames_list.append(0)
+    beat_tempos.append(tempo_continuous[0])
 
-    # Tempo for MIDI: controls time until NEXT beat (prospective)
-    # Duration from beat k to beat k+1
-    beat_durations_forward = np.diff(beat_times, append=beat_times[-1])
-    tempo_bpm_midi = 60.0 / beat_durations_forward
-    tempo_bpm_midi = np.where(beat_durations_forward > 0, tempo_bpm_midi, 120.0)
+    current_time = 0.0
+    current_frame = 0
+    beat_accumulator = 0.0  # Fraction of a beat accumulated
+
+    dt = 1.0 / fps  # Time per frame
+
+    for frame_num in all_frame_nums:
+        tempo_now = tempo_continuous[frame_num]
+        beats_per_second = tempo_now / 60.0
+        beats_this_frame = beats_per_second * dt
+        beat_accumulator += beats_this_frame
+
+        # Check if we've accumulated a full beat
+        if beat_accumulator >= 1.0:
+            # Record the beat
+            beat_times.append(current_time)
+            beat_frames_list.append(frame_num)
+            beat_tempos.append(tempo_now)
+            beat_accumulator -= 1.0
+
+        current_time += dt
+
+    # Convert to numpy arrays
+    beat_times = np.array(beat_times)
+    beat_frames_array = np.array(beat_frames_list)
+    tempo_bpm_unsmoothed = np.array(beat_tempos)
+
+    n_beats = len(beat_times)
+    n_bars = n_beats / 4.0
+
+    print(f"Total video duration: {video_duration:.2f} seconds")
+    print(f"Total beats generated: {n_beats}")
+    print(f"Total bars (at 4/4): {n_bars:.1f}")
+
+    # --- Smooth tempo in beat-space ---
+    # IMPORTANT: Must smooth beat duration (seconds per beat), not tempo (beats per minute)
+    # to preserve the mean tempo correctly (harmonic mean issue)
+
+    # Convert tempo to beat duration (seconds per beat)
+    beat_duration_unsmoothed = 60.0 / tempo_bpm_unsmoothed
+
+    # Apply triangular smoothing over ±smooth_beats with edge reflection
+    # Create triangular kernel
+    kernel_size = 2 * smooth_beats + 1
+    offsets = np.arange(-smooth_beats, smooth_beats + 1)
+    kernel = np.maximum(0, smooth_beats + 1 - np.abs(offsets))
+    kernel = kernel / kernel.sum()
+
+    # Pad edges by reflection to preserve mean
+    pad_width = smooth_beats
+    duration_padded = np.pad(beat_duration_unsmoothed, pad_width, mode='reflect')
+
+    # Apply convolution to beat durations
+    beat_duration_smoothed = np.convolve(duration_padded, kernel, mode='valid')
+
+    # Convert back to tempo
+    tempo_bpm_midi = 60.0 / beat_duration_smoothed
+
+    print(f"Average tempo (unsmoothed): {tempo_bpm_unsmoothed.mean():.1f} BPM, range: {tempo_bpm_unsmoothed.min():.1f}-{tempo_bpm_unsmoothed.max():.1f}")
+    print(f"Average tempo (smoothed over ±{smooth_beats} beats): {tempo_bpm_midi.mean():.1f} BPM, range: {tempo_bpm_midi.min():.1f}-{tempo_bpm_midi.max():.1f}")
+
+    # Verify mean preservation
+    mean_duration_unsmoothed = beat_duration_unsmoothed.mean()
+    mean_duration_smoothed = beat_duration_smoothed.mean()
+    print(f"Mean beat duration: unsmoothed={mean_duration_unsmoothed:.3f}s, smoothed={mean_duration_smoothed:.3f}s")
 
     # --- Build CSV ---
     bars_arr = (np.arange(n_beats) // 4) + 1
@@ -88,67 +156,46 @@ def compute_beat_tempos_from_zoom(
         "bar": bars_arr,
         "beat_in_bar": beat_in_bar,
         "time_sec": beat_times,
-        "frame": beat_frames,
-        "tempo_bpm": tempo_bpm_csv,
+        "frame": beat_frames_array,
+        "tempo_bpm": tempo_bpm_midi,
     })
 
     beat_df.to_csv(csv_out_path, index=False)
 
     # --- Build MIDI tempo map ---
-    # Standard MIDI: header + 1 track with tempo meta events at each beat.
-    def write_varlen(value: int) -> bytes:
-        """Encode a MIDI variable-length quantity."""
-        buffer = value & 0x7F
-        bytes_out = []
-        while True:
-            bytes_out.insert(0, buffer & 0x7F)
-            value >>= 7
-            if value > 0:
-                buffer = value & 0x7F | 0x80
-            else:
-                break
-        # Set continuation bits for all but last byte
-        for i in range(len(bytes_out) - 1):
-            bytes_out[i] |= 0x80
-        return bytes(bytearray(bytes_out))
+    # Create MIDI file with tempo changes and notes at each beat
+    midi_file = mido.MidiFile(ticks_per_beat=division)
+    track = mido.MidiTrack()
+    midi_file.tracks.append(track)
 
-    track_events = bytearray()
+    # Add track name
+    track.append(mido.MetaMessage('track_name', name='Tempo Map', time=0))
 
-    # First tempo event at delta-time = 0
+    # First tempo event at time 0
     # This tempo controls the duration until beat 1
     first_tempo = tempo_bpm_midi[0]
-    mpq = int(round(60_000_000 / first_tempo))  # microseconds per quarter
-    track_events += write_varlen(0)
-    track_events += bytes([0xFF, 0x51, 0x03,
-                           (mpq >> 16) & 0xFF,
-                           (mpq >> 8) & 0xFF,
-                           mpq & 0xFF])
+    track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(first_tempo), time=0))
+
+    # Add a note-on event for middle C at the start
+    track.append(mido.Message('note_on', note=60, velocity=64, time=0))
+
+    # Add a note-off event one quarter note later
+    track.append(mido.Message('note_off', note=60, velocity=0, time=division))
 
     # Subsequent tempo events: one per beat, delta = one quarter note
     # Tempo at beat k controls duration from beat k to beat k+1
     for t in tempo_bpm_midi[1:]:
-        mpq = int(round(60_000_000 / t))
-        # One quarter-note later, in ticks
-        track_events += write_varlen(division)
-        track_events += bytes([0xFF, 0x51, 0x03,
-                               (mpq >> 16) & 0xFF,
-                               (mpq >> 8) & 0xFF,
-                               mpq & 0xFF])
+        # Tempo change at delta-time = 0 (simultaneous with note-off from previous beat)
+        track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(t), time=0))
 
-    # End-of-track meta event
-    track_events += write_varlen(0)
-    track_events += bytes([0xFF, 0x2F, 0x00])
+        # Note-on for middle C
+        track.append(mido.Message('note_on', note=60, velocity=64, time=0))
 
-    # Track chunk
-    track_chunk = b"MTrk" + struct.pack(">I", len(track_events)) + track_events
+        # Note-off one quarter note later
+        track.append(mido.Message('note_off', note=60, velocity=0, time=division))
 
-    # Header chunk: format 1, 1 track, 'division' ticks per quarter
-    header_chunk = struct.pack(">4sIHHH", b"MThd", 6, 1, 1, division)
-
-    midi_data = header_chunk + track_chunk
-
-    with open(midi_out_path, "wb") as f:
-        f.write(midi_data)
+    # Save MIDI file
+    midi_file.save(midi_out_path)
 
     # Total video duration
     T_total = beat_times[-1]
@@ -159,24 +206,30 @@ def compute_beat_tempos_from_zoom(
 if __name__ == "__main__":
     import os
 
-    # Define paths
+    # Define paths and parameters
     base_dir = os.path.expanduser("~/video/data/output/N30_T7a_default")
     csv_path = os.path.join(base_dir, "N30_T7a_default_basic.csv")
-    csv_out_path = os.path.join(base_dir, "beat_tempos_408bars.csv")
-    midi_out_path = os.path.join(base_dir, "tempo_map_408bars.mid")
+
+    tempo_slowest = 16.0
+    tempo_fastest = 132.0
+    zoom_cutoff_fraction = 0.2
+    smooth_beats = 10
+
+    csv_out_path = os.path.join(base_dir, f"beat_tempos_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.csv")
+    midi_out_path = os.path.join(base_dir, f"tempo_map_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.mid")
 
     beat_df, csv_path_out, midi_path_out, T_total = compute_beat_tempos_from_zoom(
         csv_path=csv_path,
-        bars=408,
+        tempo_slowest=tempo_slowest,
+        tempo_fastest=tempo_fastest,
+        zoom_cutoff_fraction=zoom_cutoff_fraction,
         fps=30.0,
-        half_width_seconds=4.0,
+        smooth_beats=smooth_beats,
         division=480,
         csv_out_path=csv_out_path,
         midi_out_path=midi_out_path,
     )
 
     print(f"Total duration (s): {T_total:.2f}")
-    print(f"Number of beats: {len(beat_df)}")
-    print(f"Tempo range: {beat_df['tempo_bpm'].min():.1f} - {beat_df['tempo_bpm'].max():.1f} BPM")
     print(f"CSV written to: {csv_path_out}")
     print(f"MIDI tempo map written to: {midi_path_out}")
