@@ -132,10 +132,15 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
 
     # Create output prefix with farneback preset
     output_prefix = f"{prefix}_{farneback_preset}"
-    
+
     if not os.path.exists(f"data/output/{output_prefix}"):
         os.makedirs(f"data/output/{output_prefix}")
-    
+
+    # Create metrics_midi subdirectory for MIDI files
+    midi_output_dir = f"data/output/{output_prefix}/metrics_midi"
+    if not os.path.exists(midi_output_dir):
+        os.makedirs(midi_output_dir)
+
     # Use original prefix for file names (without farneback preset)
     file_prefix = prefix
     
@@ -282,7 +287,7 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                         
                         # Only save MIDI file if it contains tracks
                         if midi_file.tracks:
-                            file_name = f"data/output/{output_prefix}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
+                            file_name = f"{midi_output_dir}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
                             midi_file.save(file_name)
 
     # now write everything for this metric and postprocessing in a single midi file
@@ -332,8 +337,8 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                             value=midi_value,
                             channel=7,
                             time=time_tick))
-                    
-        midi_file.save("data/output/" + output_prefix + "/" + base_suffix + ".mid")
+
+        midi_file.save(f"{midi_output_dir}/{base_suffix}.mid")
 
     # write out the master xlsx
     print(f"Writing out master xlsx")

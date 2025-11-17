@@ -301,9 +301,9 @@ def find_exemplars(data, labels_dict, df, n_exemplars=3):
     return exemplars
 
 
-def apply_boxcar_filter(assignments, width):
+def apply_boxcar_filter_single_pass(assignments, width):
     """
-    Apply boxcar filter to cluster assignments, returning most common cluster ID in window.
+    Apply a single pass of boxcar filter to cluster assignments.
 
     Parameters:
     - assignments: numpy array of cluster IDs
@@ -330,9 +330,44 @@ def apply_boxcar_filter(assignments, width):
     return smoothed
 
 
+def apply_boxcar_filter(assignments, width, max_iterations=100):
+    """
+    Apply boxcar filter iteratively until no changes occur or max iterations reached.
+
+    This eliminates flickering by repeatedly smoothing until convergence.
+
+    Parameters:
+    - assignments: numpy array of cluster IDs
+    - width: odd integer, width of boxcar filter
+    - max_iterations: maximum number of iterations (default: 100)
+
+    Returns:
+    - smoothed: numpy array of smoothed cluster IDs
+    - iterations: number of iterations performed
+    """
+    current = assignments.copy()
+
+    for iteration in range(max_iterations):
+        smoothed = apply_boxcar_filter_single_pass(current, width)
+
+        # Check if anything changed
+        n_changes = np.sum(smoothed != current)
+
+        if n_changes == 0:
+            # Converged - no more changes
+            return smoothed, iteration + 1
+
+        current = smoothed
+
+    # Reached max iterations without convergence
+    return current, max_iterations
+
+
 def apply_boxcar_to_clusters(cluster_df, boxcar_periods):
     """
-    Apply boxcar filtering to all cluster assignment columns.
+    Apply iterative boxcar filtering to all cluster assignment columns.
+
+    Applies the filter repeatedly until convergence (no more changes).
 
     Parameters:
     - cluster_df: DataFrame with cluster assignments
@@ -344,14 +379,14 @@ def apply_boxcar_to_clusters(cluster_df, boxcar_periods):
     # Get all cluster assignment columns (those starting with 'kmeans_' or 'gmm_')
     cluster_cols = [col for col in cluster_df.columns if col.startswith(('kmeans_', 'gmm_'))]
 
-    print(f"\nApplying boxcar filtering with periods: {boxcar_periods}")
+    print(f"\nApplying iterative boxcar filtering with periods: {boxcar_periods}")
 
     for col in cluster_cols:
         assignments = cluster_df[col].values
 
         for period in boxcar_periods:
-            # Apply boxcar filter
-            smoothed = apply_boxcar_filter(assignments, period)
+            # Apply iterative boxcar filter
+            smoothed, iterations = apply_boxcar_filter(assignments, period)
 
             # Add column with naming convention: {original}_b{period:03d}
             new_col = f"{col}_b{period:03d}"
@@ -359,7 +394,7 @@ def apply_boxcar_to_clusters(cluster_df, boxcar_periods):
 
             # Count changes
             n_changes = np.sum(smoothed != assignments)
-            print(f"  {col} -> {new_col}: {n_changes}/{len(assignments)} assignments changed")
+            print(f"  {col} -> {new_col}: {n_changes}/{len(assignments)} assignments changed ({iterations} iterations)")
 
     return cluster_df
 
@@ -529,8 +564,13 @@ def save_results(df, kmeans_results, gmm_results, kmeans_scores, gmm_scores,
         json.dump(exemplars, f, indent=2)
     print(f"Saved exemplars to: {exemplars_json_path}")
 
+    # Create clusters_midi subdirectory for MIDI files
+    midi_output_dir = os.path.join(output_dir, "clusters_midi")
+    if not os.path.exists(midi_output_dir):
+        os.makedirs(midi_output_dir)
+
     # Generate MIDI files from cluster assignments
-    generate_cluster_midi(cluster_df, output_dir, base_name,
+    generate_cluster_midi(cluster_df, midi_output_dir, base_name,
                          beats_per_minute=beats_per_minute,
                          frames_per_second=frames_per_second,
                          ticks_per_beat=ticks_per_beat)
