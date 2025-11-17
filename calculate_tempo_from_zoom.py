@@ -210,8 +210,8 @@ if __name__ == "__main__":
     base_dir = os.path.expanduser("~/video/data/output/N30_T7a_default")
     csv_path = os.path.join(base_dir, "N30_T7a_default_basic.csv")
 
-    tempo_slowest = 16.0
-    tempo_fastest = 132.0
+    tempo_slowest = 32.0
+    tempo_fastest = 116.0
     zoom_cutoff_fraction = 0.2
     smooth_beats = 16 # 4 bars half-width
 
