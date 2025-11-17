@@ -213,7 +213,7 @@ if __name__ == "__main__":
     tempo_slowest = 16.0
     tempo_fastest = 132.0
     zoom_cutoff_fraction = 0.2
-    smooth_beats = 10
+    smooth_beats = 16 # 4 bars half-width
 
     csv_out_path = os.path.join(base_dir, f"beat_tempos_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.csv")
     midi_out_path = os.path.join(base_dir, f"tempo_map_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.mid")
