@@ -1,9 +1,34 @@
 import pandas as pd
 import numpy as np
 import mido
+import struct
+
+def read_kfs_to_dataframe(filepath):
+    """
+    Read a KFS binary file and return a DataFrame with x (frame) and y (speed) columns.
+
+    KFS file format:
+      - First 4 bytes: number of points (int32)
+      - Then for each point: 2 floats (float32) = 8 bytes representing (x, y)
+    """
+    with open(filepath, 'rb') as f:
+        # Read the number of points (4 bytes)
+        nb_points_data = f.read(4)
+        nb_points = struct.unpack('<i', nb_points_data)[0]
+
+        # Read each point (2 floats = 8 bytes per point)
+        points = []
+        for _ in range(nb_points):
+            point_data = f.read(8)
+            x, y = struct.unpack('<ff', point_data)
+            points.append((x, y))
+
+        # Convert list of tuples to DataFrame
+        df = pd.DataFrame(points, columns=['x', 'y'])
+        return df
 
 def compute_beat_tempos_from_zoom(
-    csv_path,
+    input_path,
     tempo_slowest=32.0,
     tempo_fastest=132.0,
     zoom_cutoff_fraction=0.1,
@@ -12,26 +37,28 @@ def compute_beat_tempos_from_zoom(
     division=480,
     csv_out_path="beat_tempos.csv",
     midi_out_path="tempo_map.mid",
+    use_kfs=True,
 ):
     """
-    From a zoom-vs-frame CSV, build a tempo map with tempo proportional to zoom rate.
+    Build a tempo map with tempo proportional to speed/zoom rate from KFS or CSV file.
 
     Algorithm:
-      1. Load frame_count_list and Gray_czd (zoom rate)
-      2. Clip zoom to percentile range based on zoom_cutoff_fraction
-      3. Map zoom percentiles to tempo range [tempo_slowest, tempo_fastest]
+      1. Load frame and speed/zoom data (from KFS or CSV)
+      2. Clip speed/zoom to percentile range based on zoom_cutoff_fraction
+      3. Map speed/zoom percentiles to tempo range [tempo_slowest, tempo_fastest]
       4. Generate beats with unsmoothed tempo
       5. Smooth tempo in beat-space (triangular average over ±smooth_beats)
       6. Regenerate beat times with smoothed tempo
       7. Generate MIDI file with tempo changes
 
     Inputs:
-      - csv_path: CSV with frame_count_list and Gray_czd columns
+      - input_path: KFS file with speed data OR CSV with frame_count_list and Gray_czd columns
       - tempo_slowest: minimum tempo in BPM (default 32.0)
       - tempo_fastest: maximum tempo in BPM (default 132.0)
       - zoom_cutoff_fraction: fraction to clip at both ends (default 0.1 = 10%)
       - fps: video frame rate (default 30.0)
       - smooth_beats: half-width in beats for triangular smoothing (default 10)
+      - use_kfs: if True, read KFS file; if False, read CSV file
 
     Outputs:
       - CSV with beat-level tempo info
@@ -39,9 +66,18 @@ def compute_beat_tempos_from_zoom(
     """
 
     # --- Load data ---
-    df = pd.read_csv(csv_path)
-    frames = df["frame_count_list"].to_numpy()
-    zoom = df["Gray_czd"].to_numpy()
+    if use_kfs:
+        # Read KFS file
+        df = read_kfs_to_dataframe(input_path)
+        frames = df["x"].to_numpy()
+        zoom = df["y"].to_numpy()
+        print(f"Loaded KFS file: {len(frames)} keyframes")
+    else:
+        # Read CSV file
+        df = pd.read_csv(input_path)
+        frames = df["frame_count_list"].to_numpy()
+        zoom = df["Gray_czd"].to_numpy()
+        print(f"Loaded CSV file: {len(frames)} frames")
 
     # --- Clip zoom to percentile range ---
     percentile_low = zoom_cutoff_fraction * 100
@@ -67,8 +103,10 @@ def compute_beat_tempos_from_zoom(
 
     # --- Interpolate tempo to all video frames ---
     # Create a continuous tempo function for all frames in the video
-    video_duration = frames[-1] / fps
-    all_frame_nums = np.arange(0, frames[-1] + 1)
+    # Round the last frame number to integer (KFS files may have float frame numbers)
+    last_frame = int(np.round(frames[-1]))
+    video_duration = last_frame / fps
+    all_frame_nums = np.arange(0, last_frame + 1)
     tempo_continuous = np.interp(all_frame_nums, frames, tempo_at_frames)
 
     # --- Walk through time and place beats ---
@@ -246,19 +284,22 @@ if __name__ == "__main__":
     import os
 
     # Define paths and parameters
-    base_dir = os.path.expanduser("~/video/data/output/N30_T7a_default")
-    csv_path = os.path.join(base_dir, "N30_T7a_default_basic.csv")
+    input_dir = os.path.expanduser("~/video/data/input")
+    output_dir = os.path.expanduser("~/video/data/output/N30_T7a_default")
+
+    # Use KFS file as input
+    kfs_path = os.path.join(input_dir, "N30_T7a_speed.kfs")
 
     tempo_slowest = 32.0
     tempo_fastest = 116.0
     zoom_cutoff_fraction = 0.2
     smooth_beats = 16 # 4 bars half-width
 
-    csv_out_path = os.path.join(base_dir, f"beat_tempos_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.csv")
-    midi_out_path = os.path.join(base_dir, f"tempo_map_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.mid")
+    csv_out_path = os.path.join(output_dir, f"beat_tempos_kfs_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.csv")
+    midi_out_path = os.path.join(output_dir, f"tempo_map_kfs_{tempo_slowest:.0f}_{tempo_fastest:.0f}_{smooth_beats:.0f}_{zoom_cutoff_fraction:.2f}.mid")
 
     beat_df, csv_path_out, midi_path_out, T_total = compute_beat_tempos_from_zoom(
-        csv_path=csv_path,
+        input_path=kfs_path,
         tempo_slowest=tempo_slowest,
         tempo_fastest=tempo_fastest,
         zoom_cutoff_fraction=zoom_cutoff_fraction,
@@ -267,6 +308,7 @@ if __name__ == "__main__":
         division=480,
         csv_out_path=csv_out_path,
         midi_out_path=midi_out_path,
+        use_kfs=True,
     )
 
     print(f"Total duration (s): {T_total:.2f}")
