@@ -404,7 +404,9 @@ def generate_cluster_midi(cluster_df, output_dir, base_name,
     """
     Generate MIDI files from cluster assignments.
 
-    Creates one MIDI file per k_value, with each boxcar period as a separate track.
+    Creates one MIDI file per k_value, with N tracks per boxcar period (one per cluster).
+    Each track outputs binary values: 127 if the beat belongs to that cluster, 0 otherwise.
+    Track naming: {col_name}_c{cluster_num} (e.g., kmeans_k4_b017_c0, kmeans_k4_b017_c1, ...).
 
     Parameters:
     - cluster_df: DataFrame with cluster assignments
@@ -455,6 +457,9 @@ def generate_cluster_midi(cluster_df, output_dir, base_name,
     for base_key, tracks_dict in sorted(grouped_cols.items()):
         midi_file = mido.MidiFile()
 
+        # Extract k value from base_key (e.g., "kmeans_k4" -> 4)
+        k_value = int(base_key.split('_k')[1])
+
         # Sort tracks by boxcar period to ensure consistent ordering
         sorted_periods = sorted(tracks_dict.keys())
 
@@ -464,38 +469,31 @@ def generate_cluster_midi(cluster_df, output_dir, base_name,
             # Get cluster assignments
             cluster_assignments = cluster_df[col_name].values
 
-            # Calculate scaling factor: midi_value = round(127.0 / max_cluster) * cluster
-            max_cluster = cluster_assignments.max()
-            if max_cluster == 0:
-                scale_factor = 127.0
-            else:
-                scale_factor = 127.0 / max_cluster
+            # Create one track per cluster (binary: 127 if in cluster, 0 otherwise)
+            for cluster_num in range(k_value):
+                # Create MIDI track for this cluster
+                midi_track = mido.MidiTrack()
+                midi_file.tracks.append(midi_track)
 
-            # Create MIDI track
-            midi_track = mido.MidiTrack()
-            midi_file.tracks.append(midi_track)
+                # Set track name: e.g., kmeans_k4_b017_c0
+                track_name = f"{col_name}_c{cluster_num}"
+                midi_track.append(mido.MetaMessage('track_name', name=track_name, time=0))
 
-            # Set track name
-            track_name = f"{col_name}"
-            midi_track.append(mido.MetaMessage('track_name', name=track_name, time=0))
+                # Add MIDI events for each frame
+                for i, cluster_id in enumerate(cluster_assignments):
+                    # Binary output: 127 if this beat is in this cluster, 0 otherwise
+                    midi_value = 127 if cluster_id == cluster_num else 0
 
-            # Add MIDI events for each frame
-            for i, cluster_id in enumerate(cluster_assignments):
-                # Scale cluster ID to MIDI range
-                midi_value = int(round(scale_factor * cluster_id))
-                # Ensure value is in valid MIDI range [0, 127]
-                midi_value = max(0, min(127, midi_value))
+                    # Calculate time delta
+                    time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
 
-                # Calculate time delta
-                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-
-                # Add control change message (using CC 1 by default)
-                midi_track.append(
-                    mido.Message('control_change',
-                               control=1,
-                               value=midi_value,
-                               channel=7,
-                               time=time_tick))
+                    # Add control change message (using CC 1 by default)
+                    midi_track.append(
+                        mido.Message('control_change',
+                                   control=1,
+                                   value=midi_value,
+                                   channel=7,
+                                   time=time_tick))
 
         # Save MIDI file
         midi_filename = os.path.join(output_dir, f"{base_name}_{base_key}.mid")
