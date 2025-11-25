@@ -35,12 +35,13 @@ def compute_beat_tempos_from_zoom(
     csv_out_path="beat_tempos.csv",
     midi_out_path="tempo_map.mid",
     use_kfs=True,
+    use_y_values=False,
 ):
     """
     Build a tempo map with beats evenly spaced in log(zoom depth).
 
     Algorithm:
-      1. Load frame and speed/zoom data (from KFS or CSV)
+      1. Load frame and speed/zoom data (from KFS, CSV, or y_values.py)
       2. Calculate target_beats from video duration and mean_tempo_bpm
       3. Compute cumulative zoom depth (integral of zoom over time)
       4. Create evenly spaced points in log(zoom depth)
@@ -49,11 +50,12 @@ def compute_beat_tempos_from_zoom(
       7. Generate MIDI file with tempo changes
 
     Inputs:
-      - input_path: KFS file with speed data OR CSV with frame_count_list and Gray_czd columns
+      - input_path: KFS file OR CSV file OR path to y_values.py
       - mean_tempo_bpm: desired average tempo in BPM (default 64.0)
       - fps: video frame rate (default 30.0)
       - division: MIDI ticks per beat (default 480)
-      - use_kfs: if True, read KFS file; if False, read CSV file
+      - use_kfs: if True, read KFS file; if False, read CSV file (ignored if use_y_values=True)
+      - use_y_values: if True, read y_values.py file with inverse zoom rates
 
     Outputs:
       - CSV with beat-level tempo info
@@ -61,7 +63,25 @@ def compute_beat_tempos_from_zoom(
     """
 
     # --- Load data ---
-    if use_kfs:
+    if use_y_values:
+        # Read y_values.py file
+        import sys
+        import os
+        # Add the directory containing y_values.py to the path
+        sys.path.insert(0, os.path.dirname(input_path))
+        # Import the module
+        module_name = os.path.basename(input_path).replace('.py', '')
+        y_values_module = __import__(module_name)
+        y_values = np.array(y_values_module.y_values)
+
+        # Calculate zoom as 1/y_values (since y_values contains inverse zoom rates)
+        zoom = 1.0 / y_values
+
+        # Frames are sequential: 0, 1, 2, ..., len(y_values)-1
+        frames = np.arange(len(y_values))
+
+        print(f"Loaded y_values.py file: {len(frames)} frames")
+    elif use_kfs:
         # Read KFS file
         df = read_kfs_to_dataframe(input_path)
         frames = df["x"].to_numpy()
@@ -85,17 +105,18 @@ def compute_beat_tempos_from_zoom(
     target_beats = int(video_duration * mean_tempo_bpm / 60.0)
     print(f"Target beats (from {mean_tempo_bpm:.1f} BPM): {target_beats}")
 
-    # --- Compute cumulative zoom depth (integral of zoom over time) ---
-    # Use trapezoidal integration
-    cumulative_zoom_depth = np.zeros_like(time)
-    for i in range(1, len(time)):
-        dt = time[i] - time[i-1]
-        avg_zoom = (zoom[i] + zoom[i-1]) / 2.0
-        cumulative_zoom_depth[i] = cumulative_zoom_depth[i-1] + avg_zoom * dt
-
-    # Handle edge case: if cumulative zoom depth starts at 0, add small offset
-    if cumulative_zoom_depth[0] == 0:
-        cumulative_zoom_depth = cumulative_zoom_depth + 1e-10
+    # --- Compute cumulative zoom depth ---
+    # Start at 1.0 (1x zoom, no enlargement yet)
+    if use_y_values:
+        # For y_values mode: cumulative sum of zoom (1/y_values), starting at 1x
+        cumulative_zoom_depth = 1.0 + np.cumsum(zoom)
+    else:
+        # For KFS/CSV mode: integral of zoom over time using trapezoidal integration
+        cumulative_zoom_depth = np.ones_like(time)
+        for i in range(1, len(time)):
+            dt = time[i] - time[i-1]
+            avg_zoom = (zoom[i] + zoom[i-1]) / 2.0
+            cumulative_zoom_depth[i] = cumulative_zoom_depth[i-1] + avg_zoom * dt
 
     print(f"Cumulative zoom depth range: {cumulative_zoom_depth.min():.4f} to {cumulative_zoom_depth.max():.4f}")
 
@@ -109,12 +130,41 @@ def compute_beat_tempos_from_zoom(
     log_zoom_beats = np.linspace(log_zoom_min, log_zoom_max, target_beats)
 
     # --- Interpolate to find time at each beat ---
-    beat_times = np.interp(log_zoom_beats, log_zoom_depth, time)
+    beat_times_raw = np.interp(log_zoom_beats, log_zoom_depth, time)
 
-    # --- Calculate tempo from time differences ---
-    # tempo_at_beat_N = 60 / (time[N+1] - time[N])
-    # For the last beat, use the tempo from the previous beat
+    # --- Filter beats to ensure tempo is in valid MIDI range ---
+    # MIDI tempo is stored as microseconds per beat (max 0xffffff = 16,777,215)
+    # This gives minimum BPM of 60,000,000 / 16,777,215 ≈ 3.58
+    MIN_TEMPO_BPM = 3.58
+    MAX_TEMPO_BPM = 300.0
+
+    filtered_beat_times = [beat_times_raw[0]]  # Always include first beat
+    current_idx = 0
+
+    while current_idx < len(beat_times_raw) - 1:
+        # Try to find next beat that gives valid tempo
+        found_valid = False
+        for next_idx in range(current_idx + 1, len(beat_times_raw)):
+            beat_duration = beat_times_raw[next_idx] - beat_times_raw[current_idx]
+            tempo = 60.0 / beat_duration
+
+            if MIN_TEMPO_BPM <= tempo <= MAX_TEMPO_BPM:
+                # Found valid tempo, add this beat
+                filtered_beat_times.append(beat_times_raw[next_idx])
+                current_idx = next_idx
+                found_valid = True
+                break
+
+        if not found_valid:
+            # No valid tempo found in remaining beats, stop here
+            print(f"Stopping at beat {len(filtered_beat_times)} - no valid tempo found for remaining beats")
+            break
+
+    # Convert to numpy array
+    beat_times = np.array(filtered_beat_times)
     n_beats = len(beat_times)
+
+    # --- Calculate tempo from filtered beat times ---
     tempo_bpm_midi = np.zeros(n_beats)
 
     for i in range(n_beats - 1):
@@ -122,7 +172,10 @@ def compute_beat_tempos_from_zoom(
         tempo_bpm_midi[i] = 60.0 / beat_duration
 
     # Last beat uses same tempo as second-to-last
-    tempo_bpm_midi[-1] = tempo_bpm_midi[-2]
+    if n_beats > 1:
+        tempo_bpm_midi[-1] = tempo_bpm_midi[-2]
+    else:
+        tempo_bpm_midi[-1] = mean_tempo_bpm
 
     n_bars = n_beats / 4.0
     print(f"Total beats generated: {n_beats}")
@@ -233,24 +286,24 @@ if __name__ == "__main__":
 
     # Define paths and parameters
     input_dir = os.path.expanduser("~/video/data/input")
-    output_dir = os.path.expanduser("~/video/data/output/N30_T7a_default")
+    output_dir = os.path.expanduser("~/video/data/output")
 
-    # Use KFS file as input
-    kfs_path = os.path.join(input_dir, "N30_T7a_speed.kfs")
+    # Use y_values.py file as input
+    y_values_path = os.path.join(input_dir, "y_values.py")
 
-    target_beats = 500
+    mean_tempo_bpm = 96.0
 
-    csv_out_path = os.path.join(output_dir, f"beat_tempos_kfs_{target_beats}.csv")
-    midi_out_path = os.path.join(output_dir, f"tempo_map_kfs_{target_beats}.mid")
+    csv_out_path = os.path.join(output_dir, f"beat_tempos_yvalues_{mean_tempo_bpm:.0f}bpm.csv")
+    midi_out_path = os.path.join(output_dir, f"tempo_map_yvalues_{mean_tempo_bpm:.0f}bpm.mid")
 
     beat_df, csv_path_out, midi_path_out, T_total = compute_beat_tempos_from_zoom(
-        input_path=kfs_path,
-        target_beats=target_beats,
+        input_path=y_values_path,
+        mean_tempo_bpm=mean_tempo_bpm,
         fps=30.0,
         division=480,
         csv_out_path=csv_out_path,
         midi_out_path=midi_out_path,
-        use_kfs=True,
+        use_y_values=True,
     )
 
     print(f"Total duration (s): {T_total:.2f}")
