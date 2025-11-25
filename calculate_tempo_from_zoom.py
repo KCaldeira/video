@@ -106,13 +106,15 @@ def compute_beat_tempos_from_zoom(
     print(f"Target beats (from {mean_tempo_bpm:.1f} BPM): {target_beats}")
 
     # --- Compute cumulative zoom depth ---
-    # Start at 1.0 (1x zoom, no enlargement yet)
     if use_y_values:
-        # For y_values mode: cumulative sum of zoom (1/y_values), starting at 1x
-        cumulative_zoom_depth = 1.0 + np.cumsum(zoom)
+        # For y_values mode: cumulative sum of zoom (1/y_values), starting at 0.0
+        cumulative_zoom_depth = np.concatenate([[0.0], np.cumsum(zoom)])
+        # Need to adjust time and frames arrays to match (prepend 0.0 and 0)
+        time = np.concatenate([[0.0], time])
+        frames = np.concatenate([[0], frames])
     else:
         # For KFS/CSV mode: integral of zoom over time using trapezoidal integration
-        cumulative_zoom_depth = np.ones_like(time)
+        cumulative_zoom_depth = np.zeros_like(time)
         for i in range(1, len(time)):
             dt = time[i] - time[i-1]
             avg_zoom = (zoom[i] + zoom[i-1]) / 2.0
@@ -120,17 +122,13 @@ def compute_beat_tempos_from_zoom(
 
     print(f"Cumulative zoom depth range: {cumulative_zoom_depth.min():.4f} to {cumulative_zoom_depth.max():.4f}")
 
-    # --- Take log of zoom depth ---
-    log_zoom_depth = np.log(cumulative_zoom_depth)
-    print(f"Log zoom depth range: {log_zoom_depth.min():.4f} to {log_zoom_depth.max():.4f}")
-
-    # --- Create evenly spaced points in log(zoom depth) ---
-    log_zoom_min = log_zoom_depth.min()
-    log_zoom_max = log_zoom_depth.max()
-    log_zoom_beats = np.linspace(log_zoom_min, log_zoom_max, target_beats)
+    # --- Create evenly spaced points in cumulative zoom depth ---
+    zoom_depth_min = cumulative_zoom_depth.min()
+    zoom_depth_max = cumulative_zoom_depth.max()
+    zoom_depth_beats = np.linspace(zoom_depth_min, zoom_depth_max, target_beats)
 
     # --- Interpolate to find time at each beat ---
-    beat_times_raw = np.interp(log_zoom_beats, log_zoom_depth, time)
+    beat_times_raw = np.interp(zoom_depth_beats, cumulative_zoom_depth, time)
 
     # --- Filter beats to ensure tempo is in valid MIDI range ---
     # MIDI tempo is stored as microseconds per beat (max 0xffffff = 16,777,215)
