@@ -29,7 +29,7 @@ def read_kfs_to_dataframe(filepath):
 
 def compute_beat_tempos_from_zoom(
     input_path,
-    target_beats=500,
+    mean_tempo_bpm=64.0,
     fps=30.0,
     division=480,
     csv_out_path="beat_tempos.csv",
@@ -41,15 +41,16 @@ def compute_beat_tempos_from_zoom(
 
     Algorithm:
       1. Load frame and speed/zoom data (from KFS or CSV)
-      2. Compute cumulative zoom depth (integral of zoom over time)
-      3. Create evenly spaced points in log(zoom depth)
-      4. Interpolate to find time at each beat
-      5. Calculate tempo from time differences between consecutive beats
-      6. Generate MIDI file with tempo changes
+      2. Calculate target_beats from video duration and mean_tempo_bpm
+      3. Compute cumulative zoom depth (integral of zoom over time)
+      4. Create evenly spaced points in log(zoom depth)
+      5. Interpolate to find time at each beat
+      6. Calculate tempo from time differences between consecutive beats
+      7. Generate MIDI file with tempo changes
 
     Inputs:
       - input_path: KFS file with speed data OR CSV with frame_count_list and Gray_czd columns
-      - target_beats: desired number of beats (default 500)
+      - mean_tempo_bpm: desired average tempo in BPM (default 64.0)
       - fps: video frame rate (default 30.0)
       - division: MIDI ticks per beat (default 480)
       - use_kfs: if True, read KFS file; if False, read CSV file
@@ -79,6 +80,10 @@ def compute_beat_tempos_from_zoom(
     time = frames / fps
     video_duration = time[-1]
     print(f"Total video duration: {video_duration:.2f} seconds")
+
+    # --- Calculate target beats from mean tempo ---
+    target_beats = int(video_duration * mean_tempo_bpm / 60.0)
+    print(f"Target beats (from {mean_tempo_bpm:.1f} BPM): {target_beats}")
 
     # --- Compute cumulative zoom depth (integral of zoom over time) ---
     # Use trapezoidal integration
