@@ -74,8 +74,8 @@ def compute_beat_tempos_from_zoom(
         y_values_module = __import__(module_name)
         y_values = np.array(y_values_module.y_values)
 
-        # Calculate zoom as 1/y_values (since y_values contains inverse zoom rates)
-        zoom = 1.0 / y_values
+        # Calculate zoom as log2/y_values (since y_values contains inverse zoom rates)
+        log_zoom = np.log(2) / y_values
 
         # Frames are sequential: 0, 1, 2, ..., len(y_values)-1
         frames = np.arange(len(y_values))
@@ -85,16 +85,16 @@ def compute_beat_tempos_from_zoom(
         # Read KFS file
         df = read_kfs_to_dataframe(input_path)
         frames = df["x"].to_numpy()
-        zoom = df["y"].to_numpy()
+        log_zoom = df["y"].to_numpy()
         print(f"Loaded KFS file: {len(frames)} keyframes")
     else:
         # Read CSV file
         df = pd.read_csv(input_path)
         frames = df["frame_count_list"].to_numpy()
-        zoom = df["Gray_czd"].to_numpy()
+        log_zoom = df["Gray_czd"].to_numpy()
         print(f"Loaded CSV file: {len(frames)} frames")
 
-    print(f"Zoom stats: min={zoom.min():.4f}, max={zoom.max():.4f}, mean={zoom.mean():.4f}")
+    print(f"Zoom stats: min={log_zoom.min():.4f}, max={log_zoom.max():.4f}, mean={log_zoom.mean():.4f}")
 
     # --- Convert frames to time ---
     time = frames / fps
@@ -108,27 +108,27 @@ def compute_beat_tempos_from_zoom(
     # --- Compute cumulative zoom depth ---
     if use_y_values:
         # For y_values mode: cumulative sum of zoom (1/y_values), starting at 0.0
-        cumulative_zoom_depth = np.concatenate([[0.0], np.cumsum(zoom)])
+        cumulative_log_zoom_depth = np.concatenate([[0.0], np.cumsum(log_zoom)])
         # Need to adjust time and frames arrays to match (prepend 0.0 and 0)
         time = np.concatenate([[0.0], time])
         frames = np.concatenate([[0], frames])
     else:
         # For KFS/CSV mode: integral of zoom over time using trapezoidal integration
-        cumulative_zoom_depth = np.zeros_like(time)
+        cumulative_log_zoom_depth = np.zeros_like(time)
         for i in range(1, len(time)):
             dt = time[i] - time[i-1]
-            avg_zoom = (zoom[i] + zoom[i-1]) / 2.0
-            cumulative_zoom_depth[i] = cumulative_zoom_depth[i-1] + avg_zoom * dt
+            avg_zoom = (log_zoom[i] + log_zoom[i-1]) / 2.0
+            cumulative_log_zoom_depth[i] = cumulative_log_zoom_depth[i-1] + avg_zoom * dt
 
-    print(f"Cumulative zoom depth range: {cumulative_zoom_depth.min():.4f} to {cumulative_zoom_depth.max():.4f}")
+    print(f"Cumulative zoom depth range: {cumulative_log_zoom_depth.min():.4f} to {cumulative_log_zoom_depth.max():.4f}")
 
     # --- Create evenly spaced points in cumulative zoom depth ---
-    zoom_depth_min = cumulative_zoom_depth.min()
-    zoom_depth_max = cumulative_zoom_depth.max()
-    zoom_depth_beats = np.linspace(zoom_depth_min, zoom_depth_max, target_beats)
+    zoom_depth_min = cumulative_log_zoom_depth.min()
+    zoom_depth_max = cumulative_log_zoom_depth.max()
+    log_zoom_depth_beats = np.linspace(zoom_depth_min, zoom_depth_max, target_beats)
 
     # --- Interpolate to find time at each beat ---
-    beat_times_raw = np.interp(zoom_depth_beats, cumulative_zoom_depth, time)
+    beat_times_raw = np.interp(log_zoom_depth_beats, cumulative_log_zoom_depth, time)
 
     # --- Filter beats to ensure tempo is in valid MIDI range ---
     # MIDI tempo is stored as microseconds per beat (max 0xffffff = 16,777,215)
@@ -190,7 +190,8 @@ def compute_beat_tempos_from_zoom(
 
     beat_df = pd.DataFrame({
         "beat_index": np.arange(1, n_beats + 1),
-        "bar": bars_arr,
+        "bar": bars_arr, 
+        
         "beat_in_bar": beat_in_bar,
         "time_sec": beat_times,
         "frame": beat_frames_array,
