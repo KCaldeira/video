@@ -330,6 +330,13 @@ def compute_beat_tempos_from_zoom(
     # Add track name
     track.append(mido.MetaMessage('track_name', name='Tempo Map', time=0))
 
+    # Add time signature (4/4) - required by most DAWs
+    track.append(mido.MetaMessage('time_signature', numerator=4, denominator=4,
+                                 clocks_per_click=24, notated_32nd_notes_per_beat=8, time=0))
+
+    # Add key signature (C major) - optional but recommended
+    track.append(mido.MetaMessage('key_signature', key='C', time=0))
+
     # First tempo event at time 0
     # This tempo controls the duration until beat 1
     first_tempo = tempo_bpm_midi[0]
@@ -407,8 +414,6 @@ def compute_beat_tempos_from_inverse(
     cc_subsample=30,
     csv_out_path="beat_tempos_inverse.csv",
     midi_out_path="tempo_map_inverse.mid",
-    csv_smooth_out_path=None,
-    midi_smooth_out_path=None,
 ):
     """
     Build a tempo map where tempo is inversely proportional to y_values.
@@ -445,12 +450,18 @@ def compute_beat_tempos_from_inverse(
     import sys
     import os
 
-    # Add the directory containing y_values.py to the path
-    sys.path.insert(0, os.path.dirname(input_path))
-    # Import the module
-    module_name = os.path.basename(input_path).replace('.py', '')
-    y_values_module = __import__(module_name)
-    y_values = np.array(y_values_module.y_values)
+    # Load y_values by executing the file directly
+    namespace = {}
+    with open(input_path, 'r') as f:
+        exec(f.read(), namespace)
+
+    # Handle different variable names (y_values or s)
+    if 'y_values' in namespace:
+        y_values = np.array(namespace['y_values'])
+    elif 's' in namespace:
+        y_values = np.array(namespace['s'])
+    else:
+        raise ValueError(f"Could not find 'y_values' or 's' in {input_path}")
 
     print(f"Loaded y_values.py file: {len(y_values)} frames")
     print(f"Y-values stats: min={y_values.min():.4f}, max={y_values.max():.4f}, mean={y_values.mean():.4f}")
@@ -525,38 +536,69 @@ def compute_beat_tempos_from_inverse(
     midi_file.tracks.append(track_tempo)
     track_tempo.append(mido.MetaMessage('track_name', name='Tempo Map', time=0))
 
-    # Add frame-level tempo changes
-    track_tempo.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_bpm[0]), time=0))
+    # Add time signature (4/4) - required by most DAWs
+    track_tempo.append(mido.MetaMessage('time_signature', numerator=4, denominator=4,
+                                       clocks_per_click=24, notated_32nd_notes_per_beat=8, time=0))
 
-    beat_idx = 0
-    pending_note_off_ticks = 0  # Track ticks owed from previous note-off
+    # Add key signature (C major) - optional but recommended
+    track_tempo.append(mido.MetaMessage('key_signature', key='C', time=0))
 
-    for i in range(1, n_frames):
-        # Calculate delta ticks from previous frame
-        delta_ticks = calculate_midi_delta_ticks(tempo_bpm[i-1], fps, division)
+    # Build list of all events with absolute tick positions
+    # This ensures proper synchronization between tempo changes and notes
+    events = []  # List of (abs_tick, event_type, event_msg)
 
-        # Subtract any ticks we already advanced from previous note-off
-        if pending_note_off_ticks > 0:
-            if delta_ticks >= pending_note_off_ticks:
-                delta_ticks -= pending_note_off_ticks
-                pending_note_off_ticks = 0
-            else:
-                # Not enough ticks in this frame to account for debt
-                pending_note_off_ticks -= delta_ticks
-                delta_ticks = 0
+    # Add initial tempo change at tick 0
+    events.append((0, 'tempo', mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_bpm[0]), time=0)))
 
-        # Only add tempo change if we have positive delta_ticks or this is the last frame before a beat
-        if delta_ticks > 0 or (beat_idx < len(beat_frames) and beat_frames[beat_idx] == i):
-            track_tempo.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_bpm[i]), time=delta_ticks))
+    # Calculate how many frames the CC tracks cover
+    # CC tracks iterate through windows and sum ticks for each window
+    num_windows = len(range(0, n_frames, cc_subsample))
+    max_frame_covered = 0
+    for i in range(1, num_windows):
+        for j in range(cc_subsample):
+            frame_idx = (i-1) * cc_subsample + j
+            if frame_idx < n_frames:
+                max_frame_covered = max(max_frame_covered, frame_idx)
 
-            # Check if we should add a note at this frame (if beat occurs here)
-            if beat_idx < len(beat_frames) and beat_frames[beat_idx] == i:
-                # Add note-on and note-off
-                track_tempo.append(mido.Message('note_on', note=60, velocity=64, time=0))
-                track_tempo.append(mido.Message('note_off', note=60, velocity=0, time=division))
-                beat_idx += 1
-                # Track that we've advanced the timeline by division ticks
-                pending_note_off_ticks = division
+    # Add tempo changes at EVERY frame up to max_frame_covered for detailed tempo map
+    accumulated_ticks = 0
+    for i in range(1, max_frame_covered + 1):
+        # Calculate ticks from previous frame
+        accumulated_ticks += calculate_midi_delta_ticks(tempo_bpm[i-1], fps, division)
+
+        # Add tempo change at this frame
+        events.append((accumulated_ticks, 'tempo',
+            mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_bpm[i]), time=0)))
+
+    # Maximum track length is the accumulated ticks
+    max_track_ticks = accumulated_ticks
+
+    # Add beat notes at their actual beat positions
+    for beat_frame in beat_frames:
+        # Calculate ticks to this beat
+        ticks_to_beat = 0
+        for j in range(beat_frame):
+            ticks_to_beat += calculate_midi_delta_ticks(tempo_bpm[j], fps, division)
+
+        events.append((ticks_to_beat, 'note_on',
+            mido.Message('note_on', note=60, velocity=64, time=0)))
+
+        # Add note_off, clamping to track length if necessary
+        note_off_tick = min(ticks_to_beat + division, max_track_ticks)
+        events.append((note_off_tick, 'note_off',
+            mido.Message('note_off', note=60, velocity=0, time=0)))
+
+    # Sort events by absolute tick position
+    # Priority: tempo changes first, then note_on, then note_off
+    events.sort(key=lambda x: (x[0], 0 if x[1] == 'tempo' else 1 if x[1] == 'note_on' else 2))
+
+    # Convert absolute ticks to delta ticks and add to track
+    last_tick = 0
+    for abs_tick, event_type, msg in events:
+        delta = abs_tick - last_tick
+        msg.time = delta
+        track_tempo.append(msg)
+        last_tick = abs_tick
 
     # Track 2: CC1 Normal (sub-sampled)
     cc_track_normal = mido.MidiTrack()
@@ -567,9 +609,9 @@ def compute_beat_tempos_from_inverse(
     tempo_subsampled_indices = range(0, n_frames, cc_subsample)
     tempo_subsampled = tempo_bpm[tempo_subsampled_indices]
 
-    # Scale to CC range 0-127
-    tempo_min = tempo_bpm.min()
-    tempo_max = tempo_bpm.max()
+    # Find min and max for scaling
+    tempo_min = np.min(tempo_bpm)
+    tempo_max = np.max(tempo_bpm)
     tempo_range = tempo_max - tempo_min
 
     if tempo_range > 0:
@@ -617,43 +659,33 @@ def compute_beat_tempos_from_inverse(
 
         cc_track_inverted.append(mido.Message('control_change', control=1, value=cc_values_inverted[i], time=delta_ticks))
 
-    # Calculate squared distance values for additional CC tracks
-    target_tempo = mean_tempo_bpm
+    # Calculate binary tempo threshold vectors for additional CC tracks
+    # Create binary vectors based on tempo thresholds
+    binary_fast = (tempo_bpm > 150).astype(float)     # Fast: tempo > 150
+    binary_medium = ((tempo_bpm >= 100) & (tempo_bpm <= 150)).astype(float)  # Medium: 100 <= tempo <= 150
+    binary_slow = (tempo_bpm < 100).astype(float)     # Slow: tempo < 100
 
-    # Distance squared to target, 2*target, and 0.5*target
-    dist_sq_target = (tempo_subsampled - target_tempo) ** 2
-    dist_sq_double = (tempo_subsampled - 2 * target_tempo) ** 2
-    dist_sq_half = (tempo_subsampled - 0.5 * target_tempo) ** 2
+    # Apply 60-frame (2 second) boxcar smoothing
+    boxcar_window = 30
+    from scipy.ndimage import uniform_filter1d
 
-    # Find min and max values for scaling
-    min_dist_sq_target = dist_sq_target.min()
-    max_dist_sq_target = dist_sq_target.max()
-    min_dist_sq_double = dist_sq_double.min()
-    max_dist_sq_double = dist_sq_double.max()
-    min_dist_sq_half = dist_sq_half.min()
-    max_dist_sq_half = dist_sq_half.max()
+    # Smooth the binary vectors
+    smooth_fast = uniform_filter1d(binary_fast, size=boxcar_window, mode='nearest')
+    smooth_medium = uniform_filter1d(binary_medium, size=boxcar_window, mode='nearest')
+    smooth_slow = uniform_filter1d(binary_slow, size=boxcar_window, mode='nearest')
 
-    # Scale to 0-127 using both min and max
-    range_target = max_dist_sq_target - min_dist_sq_target
-    range_double = max_dist_sq_double - min_dist_sq_double
-    range_half = max_dist_sq_half - min_dist_sq_half
+    # Sub-sample to match CC track resolution
+    smooth_fast_subsampled = smooth_fast[tempo_subsampled_indices]
+    smooth_medium_subsampled = smooth_medium[tempo_subsampled_indices]
+    smooth_slow_subsampled = smooth_slow[tempo_subsampled_indices]
 
-    if range_target > 0:
-        cc_fast = 127- ((dist_sq_target - min_dist_sq_target) / range_target * 127).astype(int)
-    else:
-        cc_fast = np.zeros(len(tempo_subsampled), dtype=int)
+    # Scale smoothed values to 0-127 range
+    cc_fast = (smooth_fast_subsampled * 127).astype(int)
+    cc_medium = (smooth_medium_subsampled * 127).astype(int)
+    cc_slow = (smooth_slow_subsampled * 127).astype(int)
+
     cc_fast = np.clip(cc_fast, 0, 127)
-
-    if range_double > 0:
-        cc_medium = 127 - ((dist_sq_double - min_dist_sq_double) / range_double * 127).astype(int)
-    else:
-        cc_medium = np.zeros(len(tempo_subsampled), dtype=int)
     cc_medium = np.clip(cc_medium, 0, 127)
-
-    if range_half > 0:
-        cc_slow = 127 - ((dist_sq_half - min_dist_sq_half) / range_half * 127).astype(int)
-    else:
-        cc_slow = np.zeros(len(tempo_subsampled), dtype=int)
     cc_slow = np.clip(cc_slow, 0, 127)
 
     # Inverted versions
@@ -661,7 +693,7 @@ def compute_beat_tempos_from_inverse(
     cc_medium_inv = 127 - cc_medium
     cc_slow_inv = 127 - cc_slow
 
-    # Track 4: CC1 Fast (distance to target squared)
+    # Track 4: CC1 Fast (tempo > 150 BPM, smoothed)
     cc_track_fast = mido.MidiTrack()
     midi_file.tracks.append(cc_track_fast)
     cc_track_fast.append(mido.MetaMessage('track_name', name='CC1 Fast', time=0))
@@ -674,7 +706,7 @@ def compute_beat_tempos_from_inverse(
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
         cc_track_fast.append(mido.Message('control_change', control=1, value=cc_fast[i], time=delta_ticks))
 
-    # Track 5: CC1 Medium (distance to 2*target squared)
+    # Track 5: CC1 Medium (100 <= tempo <= 150 BPM, smoothed)
     cc_track_medium = mido.MidiTrack()
     midi_file.tracks.append(cc_track_medium)
     cc_track_medium.append(mido.MetaMessage('track_name', name='CC1 Medium', time=0))
@@ -687,7 +719,7 @@ def compute_beat_tempos_from_inverse(
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
         cc_track_medium.append(mido.Message('control_change', control=1, value=cc_medium[i], time=delta_ticks))
 
-    # Track 6: CC1 Slow (distance to 0.5*target squared)
+    # Track 6: CC1 Slow (tempo < 100 BPM, smoothed)
     cc_track_slow = mido.MidiTrack()
     midi_file.tracks.append(cc_track_slow)
     cc_track_slow.append(mido.MetaMessage('track_name', name='CC1 Slow', time=0))
@@ -743,297 +775,6 @@ def compute_beat_tempos_from_inverse(
     midi_file.save(midi_out_path)
     print(f"MIDI written to: {midi_out_path}")
 
-    # --- Generate smoothed/averaged tempo outputs ---
-    if csv_smooth_out_path or midi_smooth_out_path:
-        print("\n--- Generating smoothed tempo outputs ---")
-
-        # Calculate averaged tempo for each window
-        # Average frames [n, n+cc_subsample-1] and assign to all frames in that window
-        tempo_averaged = np.zeros(n_frames)
-        for i in range(0, n_frames, cc_subsample):
-            window_end = min(i + cc_subsample, n_frames)
-            avg_tempo = np.mean(tempo_bpm[i:window_end])
-            tempo_averaged[i:window_end] = avg_tempo  # Assign to all frames in window
-
-        print(f"Averaged tempo range: {tempo_averaged.min():.1f} - {tempo_averaged.max():.1f} BPM")
-        print(f"Averaged tempo mean: {tempo_averaged.mean():.1f} BPM")
-
-        # Accumulate beats with averaged tempo to find beat positions
-        beat_accumulator_smooth = 0.0
-        beat_frames_smooth = []
-
-        for i in range(n_frames):
-            # Beats in this frame with averaged tempo
-            beats_this_frame = tempo_averaged[i] / (fps * 60)
-            beat_accumulator_smooth += beats_this_frame
-
-            # Emit beats when accumulator crosses integer thresholds
-            while beat_accumulator_smooth >= 1.0:
-                beat_frames_smooth.append(i)
-                beat_accumulator_smooth -= 1.0
-
-        n_beats_smooth = len(beat_frames_smooth)
-        print(f"Total beats (smoothed): {n_beats_smooth}")
-        print(f"Total bars (smoothed, at 4/4): {n_beats_smooth / 4.0:.1f}")
-
-        # Generate smoothed CSV if requested - only cc_subsample frames
-        if csv_smooth_out_path:
-            frame_data_smooth = []
-            for i in range(0, n_frames, cc_subsample):
-                time_sec = i / fps
-                minutes = int(time_sec // 60)
-                seconds = time_sec % 60
-                time_str = f"{minutes}:{seconds:05.2f}"
-
-                frame_data_smooth.append({
-                    'frame': i,
-                    'time': time_str,
-                    'tempo_bpm': tempo_averaged[i]
-                })
-
-            frame_df_smooth = pd.DataFrame(frame_data_smooth)
-            frame_df_smooth.to_csv(csv_smooth_out_path, index=False)
-            print(f"Smoothed CSV written to: {csv_smooth_out_path}")
-
-        # Generate smoothed MIDI if requested
-        if midi_smooth_out_path:
-            midi_file_smooth = mido.MidiFile(ticks_per_beat=division)
-
-            # Track 1: Tempo map with notes at beats (averaged tempo)
-            # Only emit tempo changes at window boundaries (every cc_subsample frames)
-            track_tempo_smooth = mido.MidiTrack()
-            midi_file_smooth.tracks.append(track_tempo_smooth)
-            track_tempo_smooth.append(mido.MetaMessage('track_name', name='Tempo Map Smoothed', time=0))
-
-            # Add first tempo change at time 0
-            track_tempo_smooth.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_averaged[0]), time=0))
-
-            # Build list of events with absolute tick positions
-            events = []  # List of (abs_tick, event_type, event_msg)
-
-            # Add tempo changes at window boundaries (every cc_subsample frames)
-            accumulated_ticks = 0
-            for idx, window_frame in enumerate(range(0, n_frames, cc_subsample)):
-                if idx > 0:
-                    # Calculate ticks to this window boundary
-                    start_frame = (idx - 1) * cc_subsample
-                    end_frame = min(idx * cc_subsample, n_frames)
-                    for j in range(start_frame, end_frame):
-                        accumulated_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-
-                events.append((accumulated_ticks, 'tempo',
-                    mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(tempo_averaged[window_frame]), time=0)))
-
-            # Add beat notes at their actual beat positions
-            for beat_frame in beat_frames_smooth:
-                # Calculate ticks to this beat
-                ticks_to_beat = 0
-                for j in range(beat_frame):
-                    ticks_to_beat += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-
-                events.append((ticks_to_beat, 'note_on',
-                    mido.Message('note_on', note=60, velocity=64, time=0)))
-                events.append((ticks_to_beat + division, 'note_off',
-                    mido.Message('note_off', note=60, velocity=0, time=0)))
-
-            # Sort events by absolute tick position
-            events.sort(key=lambda x: (x[0], 0 if x[1] == 'tempo' else 1 if x[1] == 'note_on' else 2))
-
-            # Convert absolute ticks to delta ticks and add to track
-            last_tick = 0
-            for abs_tick, event_type, msg in events:
-                delta = abs_tick - last_tick
-                msg.time = delta
-                track_tempo_smooth.append(msg)
-                last_tick = abs_tick
-
-            # Track 2: CC1 Normal (using averaged values)
-            cc_track_normal_smooth = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_normal_smooth)
-            cc_track_normal_smooth.append(mido.MetaMessage('track_name', name='CC1 Normal', time=0))
-
-            # Get tempo at each window
-            tempo_windows = []
-            for i in range(0, n_frames, cc_subsample):
-                tempo_windows.append(tempo_averaged[i])
-
-            # Scale to CC range 0-127
-            tempo_win_min = min(tempo_windows)
-            tempo_win_max = max(tempo_windows)
-            tempo_win_range = tempo_win_max - tempo_win_min
-
-            if tempo_win_range > 0:
-                cc_values_smooth = [int(((t - tempo_win_min) / tempo_win_range * 127)) for t in tempo_windows]
-            else:
-                cc_values_smooth = [64] * len(tempo_windows)
-            cc_values_smooth = [np.clip(v, 0, 127) for v in cc_values_smooth]
-
-            # Add first CC event
-            cc_track_normal_smooth.append(mido.Message('control_change', control=1, value=cc_values_smooth[0], time=0))
-
-            # Add subsequent CC events
-            for idx in range(1, len(cc_values_smooth)):
-                # Calculate delta ticks for cc_subsample frames
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-
-                cc_track_normal_smooth.append(mido.Message('control_change', control=1, value=cc_values_smooth[idx], time=delta_ticks))
-
-            # Track 3: CC1 Inverted (using averaged values)
-            cc_track_inverted_smooth = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_inverted_smooth)
-            cc_track_inverted_smooth.append(mido.MetaMessage('track_name', name='CC1 Inverted', time=0))
-
-            if tempo_win_range > 0:
-                cc_values_inv_smooth = [int(((tempo_win_max - t) / tempo_win_range * 127)) for t in tempo_windows]
-            else:
-                cc_values_inv_smooth = [64] * len(tempo_windows)
-            cc_values_inv_smooth = [np.clip(v, 0, 127) for v in cc_values_inv_smooth]
-
-            # Add first CC event
-            cc_track_inverted_smooth.append(mido.Message('control_change', control=1, value=cc_values_inv_smooth[0], time=0))
-
-            # Add subsequent CC events
-            for idx in range(1, len(cc_values_inv_smooth)):
-                # Calculate delta ticks for cc_subsample frames
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-
-                cc_track_inverted_smooth.append(mido.Message('control_change', control=1, value=cc_values_inv_smooth[idx], time=delta_ticks))
-
-            # Calculate squared distance values for additional CC tracks (smoothed)
-            tempo_windows_arr = np.array(tempo_windows)
-
-            # Distance squared to target, 2*target, and 0.5*target
-            dist_sq_target_smooth = (tempo_windows_arr - target_tempo) ** 2
-            dist_sq_double_smooth = (tempo_windows_arr - 2 * target_tempo) ** 2
-            dist_sq_half_smooth = (tempo_windows_arr - 0.5 * target_tempo) ** 2
-
-            # Find min and max values for scaling
-            min_dist_sq_target_s = dist_sq_target_smooth.min()
-            max_dist_sq_target_s = dist_sq_target_smooth.max()
-            min_dist_sq_double_s = dist_sq_double_smooth.min()
-            max_dist_sq_double_s = dist_sq_double_smooth.max()
-            min_dist_sq_half_s = dist_sq_half_smooth.min()
-            max_dist_sq_half_s = dist_sq_half_smooth.max()
-
-            # Scale to 0-127 using both min and max
-            range_target_s = max_dist_sq_target_s - min_dist_sq_target_s
-            range_double_s = max_dist_sq_double_s - min_dist_sq_double_s
-            range_half_s = max_dist_sq_half_s - min_dist_sq_half_s
-
-            if range_target_s > 0:
-                cc_fast_s = ((dist_sq_target_smooth - min_dist_sq_target_s) / range_target_s * 127).astype(int)
-            else:
-                cc_fast_s = np.zeros(len(tempo_windows), dtype=int)
-            cc_fast_s = np.clip(cc_fast_s, 0, 127)
-
-            if range_double_s > 0:
-                cc_medium_s = ((dist_sq_double_smooth - min_dist_sq_double_s) / range_double_s * 127).astype(int)
-            else:
-                cc_medium_s = np.zeros(len(tempo_windows), dtype=int)
-            cc_medium_s = np.clip(cc_medium_s, 0, 127)
-
-            if range_half_s > 0:
-                cc_slow_s = ((dist_sq_half_smooth - min_dist_sq_half_s) / range_half_s * 127).astype(int)
-            else:
-                cc_slow_s = np.zeros(len(tempo_windows), dtype=int)
-            cc_slow_s = np.clip(cc_slow_s, 0, 127)
-
-            # Inverted versions
-            cc_fast_inv_s = 127 - cc_fast_s
-            cc_medium_inv_s = 127 - cc_medium_s
-            cc_slow_inv_s = 127 - cc_slow_s
-
-            # Track 4: CC1 Fast (distance to target squared)
-            cc_track_fast_s = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_fast_s)
-            cc_track_fast_s.append(mido.MetaMessage('track_name', name='CC1 Fast', time=0))
-            cc_track_fast_s.append(mido.Message('control_change', control=1, value=cc_fast_s[0], time=0))
-            for idx in range(1, len(cc_fast_s)):
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-                cc_track_fast_s.append(mido.Message('control_change', control=1, value=cc_fast_s[idx], time=delta_ticks))
-
-            # Track 5: CC1 Medium (distance to 2*target squared)
-            cc_track_medium_s = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_medium_s)
-            cc_track_medium_s.append(mido.MetaMessage('track_name', name='CC1 Medium', time=0))
-            cc_track_medium_s.append(mido.Message('control_change', control=1, value=cc_medium_s[0], time=0))
-            for idx in range(1, len(cc_medium_s)):
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-                cc_track_medium_s.append(mido.Message('control_change', control=1, value=cc_medium_s[idx], time=delta_ticks))
-
-            # Track 6: CC1 Slow (distance to 0.5*target squared)
-            cc_track_slow_s = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_slow_s)
-            cc_track_slow_s.append(mido.MetaMessage('track_name', name='CC1 Slow', time=0))
-            cc_track_slow_s.append(mido.Message('control_change', control=1, value=cc_slow_s[0], time=0))
-            for idx in range(1, len(cc_slow_s)):
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-                cc_track_slow_s.append(mido.Message('control_change', control=1, value=cc_slow_s[idx], time=delta_ticks))
-
-            # Track 7: CC1 Fast Inverted
-            cc_track_fast_inv_s = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_fast_inv_s)
-            cc_track_fast_inv_s.append(mido.MetaMessage('track_name', name='CC1 Fast-Inv', time=0))
-            cc_track_fast_inv_s.append(mido.Message('control_change', control=1, value=cc_fast_inv_s[0], time=0))
-            for idx in range(1, len(cc_fast_inv_s)):
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-                cc_track_fast_inv_s.append(mido.Message('control_change', control=1, value=cc_fast_inv_s[idx], time=delta_ticks))
-
-            # Track 8: CC1 Medium Inverted
-            cc_track_medium_inv_s = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_medium_inv_s)
-            cc_track_medium_inv_s.append(mido.MetaMessage('track_name', name='CC1 Medium-Inv', time=0))
-            cc_track_medium_inv_s.append(mido.Message('control_change', control=1, value=cc_medium_inv_s[0], time=0))
-            for idx in range(1, len(cc_medium_inv_s)):
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-                cc_track_medium_inv_s.append(mido.Message('control_change', control=1, value=cc_medium_inv_s[idx], time=delta_ticks))
-
-            # Track 9: CC1 Slow Inverted
-            cc_track_slow_inv_s = mido.MidiTrack()
-            midi_file_smooth.tracks.append(cc_track_slow_inv_s)
-            cc_track_slow_inv_s.append(mido.MetaMessage('track_name', name='CC1 Slow-Inv', time=0))
-            cc_track_slow_inv_s.append(mido.Message('control_change', control=1, value=cc_slow_inv_s[0], time=0))
-            for idx in range(1, len(cc_slow_inv_s)):
-                delta_ticks = 0
-                start_frame = (idx - 1) * cc_subsample
-                end_frame = min(idx * cc_subsample, n_frames)
-                for j in range(start_frame, end_frame):
-                    delta_ticks += calculate_midi_delta_ticks(tempo_averaged[j], fps, division)
-                cc_track_slow_inv_s.append(mido.Message('control_change', control=1, value=cc_slow_inv_s[idx], time=delta_ticks))
-
-            # Save smoothed MIDI file
-            midi_file_smooth.save(midi_smooth_out_path)
-            print(f"Smoothed MIDI written to: {midi_smooth_out_path}")
-
-    # Total video duration
     T_total = video_duration
 
     return frame_df, csv_out_path, midi_out_path, T_total
@@ -1047,14 +788,12 @@ if __name__ == "__main__":
     output_dir = os.path.expanduser("~/video/data/output")
 
     # Use y_values.py file as input
-    y_values_path = os.path.join(input_dir, "y_values.py")
+    y_values_path = os.path.join(input_dir, "N30_T7a_speed.py")
 
     mean_tempo_bpm = 96.0
 
     csv_out_path = os.path.join(output_dir, f"beat_tempos_inverse_{mean_tempo_bpm:.0f}bpm.csv")
     midi_out_path = os.path.join(output_dir, f"tempo_map_inverse_{mean_tempo_bpm:.0f}bpm.mid")
-    csv_smooth_out_path = os.path.join(output_dir, f"beat_tempos_inverse_smooth_{mean_tempo_bpm:.0f}bpm.csv")
-    midi_smooth_out_path = os.path.join(output_dir, f"tempo_map_inverse_smooth_{mean_tempo_bpm:.0f}bpm.mid")
 
     beat_df, csv_path_out, midi_path_out, T_total = compute_beat_tempos_from_inverse(
         input_path=y_values_path,
@@ -1064,8 +803,6 @@ if __name__ == "__main__":
         cc_subsample=30,
         csv_out_path=csv_out_path,
         midi_out_path=midi_out_path,
-        csv_smooth_out_path=csv_smooth_out_path,
-        midi_smooth_out_path=midi_smooth_out_path,
     )
 
     print(f"Total duration (s): {T_total:.2f}")
