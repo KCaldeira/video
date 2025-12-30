@@ -68,9 +68,13 @@ See `IMPLEMENTATION.md` for a detailed proposal on integrating these two workflo
 
 2. **Edit parameters** in `calculate_tempo_from_inverse.py`:
    ```python
-   # At bottom of file (lines 804-823)
+   # At bottom of file (around lines 875-910)
    y_values_path = "data/input/N32_speed.py"
    mean_tempo_bpm = 108.0
+
+   # Choose mode:
+   use_log_scale = False  # False=LINEAR (inverse), True=LOG (symmetric)
+   scaling_param = 0.1    # LINEAR: 0.1=10% blend; LOG: 20.0=±20 BPM per octave
    ```
 
 3. **Run tempo mapping**:
@@ -81,6 +85,11 @@ See `IMPLEMENTATION.md` for a detailed proposal on integrating these two workflo
 4. **Find outputs** in `data/output/`:
    - `beat_tempos_inverse_108bpm.csv` - Frame-level tempo data
    - `tempo_map_inverse_108bpm.mid` - MIDI with tempo changes and CC tracks
+
+**Example Configurations**:
+- **Constant tempo** (no zoom influence): `scaling_param = 0.0`
+- **Linear 10% blend**: `use_log_scale = False, scaling_param = 0.1`
+- **Log ±20 BPM per doubling**: `use_log_scale = True, scaling_param = 20.0`
 
 ---
 
@@ -108,25 +117,54 @@ python run_video_processing.py <config_file.json>
 
 ### 2. `calculate_tempo_from_inverse.py` - Variable Tempo Mapping
 
-Generates variable tempo maps where tempo is inversely proportional to zoom/speed data.
+Generates variable tempo maps where tempo is controlled by zoom/speed data. Supports two modes:
 
 **Usage**:
 ```bash
-# Edit the main section at bottom of file to configure paths
+# Edit the main section at bottom of file to configure paths and mode
 python calculate_tempo_from_inverse.py
 ```
 
 **What it does**:
 - Reads zoom/speed values from Python files (e.g., `N32_speed.py`)
-- Calculates frame-level tempo inversely proportional to zoom rate
-- Applies window extension to keep tempos in valid MIDI range (3.58-300 BPM)
+- Calculates frame-level tempo based on zoom rate (linear or log mode)
 - Generates tempo map CSV with per-frame tempo data
 - Creates MIDI file with:
   - Frame-by-frame tempo changes
   - Beat notes at variable intervals
-  - Multiple CC1 tracks (Normal, Inverted, Fast/Medium/Slow variants)
+  - Multiple CC1 tracks representing zoom depth (Normal, Inverted, Deep/Medium/Shallow variants)
 
-**Algorithm**: Tempo = mean_tempo + fraction × ((k / zoom_rate) - mean_tempo)
+**Two Modes Available**:
+
+1. **LINEAR Mode** (`use_log_scale=False`, default):
+   - Tempo inversely proportional to zoom rate
+   - **Algorithm**: `tempo = mean_tempo + scaling_param × ((k / zoom_rate) - mean_tempo)`
+   - **`scaling_param`**: Blend fraction (0-1), e.g., 0.1 = 10% zoom influence
+   - **Behavior**: Doubling zoom rate → tempo halves; Halving → tempo doubles
+   - **Use case**: Traditional inverse relationship
+
+2. **LOG Mode** (`use_log_scale=True`):
+   - Tempo varies symmetrically with log of zoom rate
+   - **Algorithm**: `tempo = mean_tempo + tempo_change_per_octave × (log₂(zoom) - mean(log₂(zoom)))`
+   - **`scaling_param`**: BPM change per octave, e.g., 20.0 = ±20 BPM per doubling/halving
+   - **Behavior**: Doubling or halving zoom rate → ±same BPM change (symmetric)
+   - **Use case**: Perceptually uniform zoom scaling
+   - **Guarantee**: Average tempo exactly equals `mean_tempo_bpm` (no rescaling needed)
+
+**Key Feature - Independent CC Tracks**:
+- **IMPORTANT**: CC tracks represent zoom depth directly, NOT tempo
+- This means you can set `scaling_param=0` for constant tempo while still getting zoom variation in CC tracks
+- **LINEAR mode**: CC values based on `1/zoom_rate` (zoom depth)
+- **LOG mode**: CC values based on `log₂(zoom_rate)` (log zoom depth)
+- Tracks include: Normal, Inverted, Deep/Medium/Shallow zoom (based on percentiles)
+
+**Example Use Case**:
+```python
+# Constant 108 BPM tempo, but CC tracks still show zoom variation
+mean_tempo_bpm = 108.0
+scaling_param = 0.0  # No tempo variation
+use_log_scale = False  # or True, doesn't matter for constant tempo
+```
 
 ### 3. `speed_to_midi_cc.py` - Simple Speed-to-MIDI Converter
 

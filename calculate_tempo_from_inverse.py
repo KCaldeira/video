@@ -27,7 +27,7 @@ def read_kfs_to_dataframe(filepath):
         df = pd.DataFrame(points, columns=['x', 'y'])
         return df
 
-def calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm, fract=0.1, min_tempo=3.58, max_tempo=300):
+def calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm, scaling_param=0.1, min_tempo=3.58, max_tempo=300):
     """
     Calculate tempo for each frame, extending windows where needed to stay in range.
 
@@ -49,7 +49,7 @@ def calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm, frac
     - k: Proportionality constant used to compute scaled tempo (k / y)
     - fps: Frames per second
     - mean_tempo_bpm: Baseline tempo to blend toward
-    - fract: Fraction of the scaled tempo deviation applied (0-1)
+    - scaling_param: Fraction of the scaled tempo deviation applied (0-1)
     - min_tempo, max_tempo: Valid MIDI tempo range
 
     Returns:
@@ -68,7 +68,7 @@ def calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm, frac
         else:
             single_tempo_scaled = k / y_values[i]
         # Blend with mean tempo so only a fraction of zoom rate affects tempo
-        single_tempo = mean_tempo_bpm + fract * (single_tempo_scaled - mean_tempo_bpm)
+        single_tempo = mean_tempo_bpm + scaling_param * (single_tempo_scaled - mean_tempo_bpm)
 
         # Check if in range
         if min_tempo <= single_tempo <= max_tempo:
@@ -95,7 +95,7 @@ def calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm, frac
 
                 avg_tempo_scaled = k * inverse_sum / window_size
                 # Blend window-averaged scaled tempo with mean
-                avg_tempo = mean_tempo_bpm + fract * (avg_tempo_scaled - mean_tempo_bpm)
+                avg_tempo = mean_tempo_bpm + scaling_param * (avg_tempo_scaled - mean_tempo_bpm)
 
                 # Check if in range
                 if min_tempo <= avg_tempo <= max_tempo:
@@ -116,7 +116,7 @@ def calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm, frac
 
                 if inverse_sum > 0:
                     avg_tempo_scaled = k * inverse_sum / remaining
-                    avg_tempo = mean_tempo_bpm + fract * (avg_tempo_scaled - mean_tempo_bpm)
+                    avg_tempo = mean_tempo_bpm + scaling_param * (avg_tempo_scaled - mean_tempo_bpm)
                     clamped_tempo = np.clip(avg_tempo, min_tempo, max_tempo)
                 else:
                     clamped_tempo = min_tempo  # Default to minimum
@@ -349,7 +349,7 @@ def compute_beat_tempos_from_zoom(
     first_tempo = tempo_bpm_midi[0]
     track.append(mido.MetaMessage('set_tempo', tempo=mido.bpm2tempo(first_tempo), time=0))
 
-    # Add a note-on event for middle C at the start
+    # Add a note-on event for middle C at the start\
     track.append(mido.Message('note_on', note=60, velocity=64, time=0))
 
     # Add a note-off event one quarter note later
@@ -418,35 +418,49 @@ def compute_beat_tempos_from_inverse(
     mean_tempo_bpm=64.0,
     fps=30.0,
     division=480,
-    fract=0.1,
+    scaling_param=0.1,
     cc_subsample=30,
     csv_out_path="beat_tempos_inverse.csv",
     midi_out_path="tempo_map_inverse.mid",
+    use_log_scale=False,
 ):
     """
-    Build a tempo map where tempo is inversely proportional to y_values.
+    Build a tempo map where tempo is controlled by zoom/speed data (y_values).
 
-    Algorithm:
+    Algorithm (LINEAR mode - use_log_scale=False):
       1. Load y_values from file
       2. Calculate proportionality constant k to achieve target beats
-    3. Calculate frame-level tempo = mean_tempo_bpm + fract * ((k / y_value[i]) - mean_tempo_bpm)
+      3. Calculate frame-level tempo = mean_tempo_bpm + scaling_param * ((k / y_value[i]) - mean_tempo_bpm)
       4. Apply window extension to keep all tempos in MIDI-valid range
       5. Accumulate beats across frames
       6. Generate CSV with beat-level data
-      7. Generate MIDI file with:
-         - Frame-level tempo changes
-         - Beat notes
-         - Sub-sampled CC tracks
+      7. Generate MIDI file with tempo changes, beats, and CC tracks
+
+    Algorithm (LOG mode - use_log_scale=True):
+      1. Load y_values from file
+      2. Calculate log2(zoom_rate) where zoom_rate = 1/y_values
+      3. Calculate tempo = mean_tempo_bpm + tempo_change_per_octave * (log_zoom - mean(log_zoom))
+         where tempo_change_per_octave = scaling_param (reinterpreted)
+      4. Clamp to valid MIDI range
+      5. Accumulate beats across frames
+      6. Generate CSV and MIDI as above
 
     Parameters:
       - input_path: Path to y_values.py file
       - mean_tempo_bpm: Desired average tempo in BPM
       - fps: Video frame rate
-    - division: MIDI ticks per beat
-    - fract: Fraction of zoom-derived tempo deviation to apply (0-1)
+      - division: MIDI ticks per beat
+      - scaling_param: **DUAL PURPOSE PARAMETER**
+                       LINEAR mode: Blend fraction (0-1) controlling zoom influence
+                                   0.0 = constant tempo, 1.0 = full zoom effect
+                                   Example: 0.1 = 10% of zoom-derived tempo variation
+                       LOG mode: BPM change per octave (doubling/halving of zoom)
+                                Example: 20.0 = tempo changes by ±20 BPM per doubling/halving
       - cc_subsample: CC track sub-sampling interval (frames)
       - csv_out_path: Output CSV path
       - midi_out_path: Output MIDI path
+      - use_log_scale: If True, use LOG mode (symmetric doubling/halving)
+                       If False, use LINEAR mode (inverse proportional, default)
 
     Returns:
       - beat_df: DataFrame with beat-level data
@@ -480,30 +494,69 @@ def compute_beat_tempos_from_inverse(
     video_duration = n_frames / fps
     print(f"Total video duration: {video_duration:.2f} seconds")
 
-    # --- Calculate target beats and proportionality constant k ---
+    # --- Calculate target beats ---
     target_beats = int(video_duration * mean_tempo_bpm / 60.0)
     print(f"Target beats (from {mean_tempo_bpm:.1f} BPM): {target_beats}")
 
-    # Compute inverse_sum = sum(1/y_values) skipping zeros
-    inverse_sum = 0.0
-    for y in y_values:
-        if y != 0:
-            inverse_sum += 1.0 / y
+    # --- Calculate tempo based on mode ---
+    if use_log_scale:
+        # LOG SCALE MODE
+        # In this mode, scaling_param represents BPM change per octave (doubling/halving)
+        print("=" * 50)
+        print("LOG SCALE MODE: Symmetric doubling/halving")
+        print(f"Tempo change per octave: {scaling_param:.2f} BPM")
+        print("=" * 50)
 
-    # Recalculate k to hit target beats AFTER blending:
-    # Sum over frames of blended tempo = n*mean + fract*(k*S - n*mean)
-    # Total beats = (sum_tempo) / (fps*60) = target_beats
-    # Solve: k = (target_beats*fps*60 - n_frames*mean_tempo_bpm*(1 - fract)) / (fract * S)
-    if inverse_sum == 0 or fract == 0:
-        # Fallback: if no inverse info or no blending, use mean directly
-        k = mean_tempo_bpm
-        print("Warning: inverse_sum==0 or fract==0, using mean tempo fallback for k")
+        # Calculate zoom rate and log transform
+        zoom_rate = 1.0 / (y_values + 1e-10)  # Avoid division by zero
+        log_zoom = np.log2(zoom_rate + 1e-10)  # Avoid log(0)
+
+        # Use mean for zero-sum property
+        reference_log_zoom = np.mean(log_zoom)
+
+        print(f"Log zoom stats: min={log_zoom.min():.4f}, max={log_zoom.max():.4f}, mean={reference_log_zoom:.4f}")
+
+        # Calculate tempo: mean_tempo + change_per_octave * deviation_from_mean
+        tempo_change_per_octave = scaling_param
+        tempo_bpm = mean_tempo_bpm + tempo_change_per_octave * (log_zoom - reference_log_zoom)
+
+        # Clamp to valid MIDI range
+        tempo_bpm = np.clip(tempo_bpm, 3.58, 300.0)
+
+        # Store log_zoom for CC tracks
+        zoom_data_for_cc = log_zoom
+
     else:
-        k = (target_beats * fps * 60 - n_frames * mean_tempo_bpm * (1.0 - fract)) / (fract * inverse_sum)
-    print(f"Proportionality constant k (blended): {k:.4f}")
+        # LINEAR SCALE MODE (existing behavior)
+        # In this mode, scaling_param is a blend fraction (0-1) controlling zoom influence
+        print("=" * 50)
+        print("LINEAR SCALE MODE: Inverse proportional")
+        print(f"Blend fraction: {scaling_param:.2f}")
+        print("=" * 50)
 
-    # --- Calculate frame-level tempo with window extension ---
-    tempo_bpm = calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm=mean_tempo_bpm, fract=fract)
+        # Compute inverse_sum = sum(1/y_values) skipping zeros
+        inverse_sum = 0.0
+        for y in y_values:
+            if y != 0:
+                inverse_sum += 1.0 / y
+
+        # Recalculate k to hit target beats AFTER blending:
+        # Sum over frames of blended tempo = n*mean + scaling_param*(k*S - n*mean)
+        # Total beats = (sum_tempo) / (fps*60) = target_beats
+        # Solve: k = (target_beats*fps*60 - n_frames*mean_tempo_bpm*(1 - scaling_param)) / (scaling_param * S)
+        if inverse_sum == 0 or scaling_param == 0:
+            # Fallback: if no inverse info or no blending, use mean directly
+            k = mean_tempo_bpm
+            print("Warning: inverse_sum==0 or scaling_param==0, using mean tempo fallback for k")
+        else:
+            k = (target_beats * fps * 60 - n_frames * mean_tempo_bpm * (1.0 - scaling_param)) / (scaling_param * inverse_sum)
+        print(f"Proportionality constant k (blended): {k:.4f}")
+
+        # --- Calculate frame-level tempo with window extension ---
+        tempo_bpm = calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm=mean_tempo_bpm, scaling_param=scaling_param)
+
+        # Store inverse y_values for CC tracks
+        zoom_data_for_cc = 1.0 / (y_values + 1e-10)
 
     print(f"Tempo range: {tempo_bpm.min():.1f} - {tempo_bpm.max():.1f} BPM")
     print(f"Average tempo: {tempo_bpm.mean():.1f} BPM")
@@ -618,23 +671,31 @@ def compute_beat_tempos_from_inverse(
         last_tick = abs_tick
 
     # Track 2: CC1 Normal (sub-sampled)
+    # CC tracks represent zoom data (zoom_data_for_cc):
+    #   - Linear mode: 1/y_values (inverse zoom rate)
+    #   - Log mode: log2(zoom_rate)
     cc_track_normal = mido.MidiTrack()
     midi_file.tracks.append(cc_track_normal)
-    cc_track_normal.append(mido.MetaMessage('track_name', name='CC1 Normal', time=0))
 
-    # Sub-sample tempo values
+    if use_log_scale:
+        cc_track_normal.append(mido.MetaMessage('track_name', name='CC1 Normal (Log Zoom)', time=0))
+    else:
+        cc_track_normal.append(mido.MetaMessage('track_name', name='CC1 Normal (Zoom Depth)', time=0))
+
+    # Use zoom_data_for_cc which was set earlier based on mode
+    # Sub-sample zoom data values (not tempo)
     tempo_subsampled_indices = range(0, n_frames, cc_subsample)
-    tempo_subsampled = tempo_bpm[tempo_subsampled_indices]
+    zoom_data_subsampled = zoom_data_for_cc[tempo_subsampled_indices]
 
     # Find min and max for scaling
-    tempo_min = np.min(tempo_bpm)
-    tempo_max = np.max(tempo_bpm)
-    tempo_range = tempo_max - tempo_min
+    zoom_data_min = np.min(zoom_data_for_cc)
+    zoom_data_max = np.max(zoom_data_for_cc)
+    zoom_data_range = zoom_data_max - zoom_data_min
 
-    if tempo_range > 0:
-        cc_values_normal = ((tempo_subsampled - tempo_min) / tempo_range * 127).astype(int)
+    if zoom_data_range > 0:
+        cc_values_normal = ((zoom_data_subsampled - zoom_data_min) / zoom_data_range * 127).astype(int)
     else:
-        cc_values_normal = np.full(len(tempo_subsampled), 64, dtype=int)
+        cc_values_normal = np.full(len(zoom_data_subsampled), 64, dtype=int)
     cc_values_normal = np.clip(cc_values_normal, 0, 127)
 
     # Add first CC event
@@ -654,12 +715,16 @@ def compute_beat_tempos_from_inverse(
     # Track 3: CC1 Inverted (sub-sampled)
     cc_track_inverted = mido.MidiTrack()
     midi_file.tracks.append(cc_track_inverted)
-    cc_track_inverted.append(mido.MetaMessage('track_name', name='CC1 Inverted', time=0))
 
-    if tempo_range > 0:
-        cc_values_inverted = ((tempo_max - tempo_subsampled) / tempo_range * 127).astype(int)
+    if use_log_scale:
+        cc_track_inverted.append(mido.MetaMessage('track_name', name='CC1 Inverted (Log Zoom)', time=0))
     else:
-        cc_values_inverted = np.full(len(tempo_subsampled), 64, dtype=int)
+        cc_track_inverted.append(mido.MetaMessage('track_name', name='CC1 Inverted (Zoom Depth)', time=0))
+
+    if zoom_data_range > 0:
+        cc_values_inverted = ((zoom_data_max - zoom_data_subsampled) / zoom_data_range * 127).astype(int)
+    else:
+        cc_values_inverted = np.full(len(zoom_data_subsampled), 64, dtype=int)
     cc_values_inverted = np.clip(cc_values_inverted, 0, 127)
 
     # Add first CC event
@@ -676,57 +741,61 @@ def compute_beat_tempos_from_inverse(
 
         cc_track_inverted.append(mido.Message('control_change', control=1, value=cc_values_inverted[i], time=delta_ticks))
 
-    # Calculate binary tempo threshold vectors for additional CC tracks
-    # Create binary vectors based on tempo thresholds
-    binary_fast = (tempo_bpm > 150).astype(float)     # Fast: tempo > 150
-    binary_medium = ((tempo_bpm >= 100) & (tempo_bpm <= 150)).astype(float)  # Medium: 100 <= tempo <= 150
-    binary_slow = (tempo_bpm < 100).astype(float)     # Slow: tempo < 100
+    # Calculate binary zoom depth threshold vectors for additional CC tracks
+    # Create binary vectors based on zoom_data_for_cc thresholds
+    # Thresholds are based on zoom data percentiles
+    zoom_data_33 = np.percentile(zoom_data_for_cc, 33.33)  # 33rd percentile
+    zoom_data_67 = np.percentile(zoom_data_for_cc, 66.67)  # 67th percentile
+
+    binary_deep = (zoom_data_for_cc > zoom_data_67).astype(float)     # Deep zoom: top 33%
+    binary_medium = ((zoom_data_for_cc >= zoom_data_33) & (zoom_data_for_cc <= zoom_data_67)).astype(float)  # Medium: middle 33%
+    binary_shallow = (zoom_data_for_cc < zoom_data_33).astype(float)  # Shallow zoom: bottom 33%
 
     # Apply 60-frame (2 second) boxcar smoothing
     boxcar_window = 30
     from scipy.ndimage import uniform_filter1d
 
     # Smooth the binary vectors
-    smooth_fast = uniform_filter1d(binary_fast, size=boxcar_window, mode='nearest')
+    smooth_deep = uniform_filter1d(binary_deep, size=boxcar_window, mode='nearest')
     smooth_medium = uniform_filter1d(binary_medium, size=boxcar_window, mode='nearest')
-    smooth_slow = uniform_filter1d(binary_slow, size=boxcar_window, mode='nearest')
+    smooth_shallow = uniform_filter1d(binary_shallow, size=boxcar_window, mode='nearest')
 
     # Sub-sample to match CC track resolution
-    smooth_fast_subsampled = smooth_fast[tempo_subsampled_indices]
+    smooth_deep_subsampled = smooth_deep[tempo_subsampled_indices]
     smooth_medium_subsampled = smooth_medium[tempo_subsampled_indices]
-    smooth_slow_subsampled = smooth_slow[tempo_subsampled_indices]
+    smooth_shallow_subsampled = smooth_shallow[tempo_subsampled_indices]
 
     # Scale smoothed values to 0-127 range
-    cc_fast = (smooth_fast_subsampled * 127).astype(int)
+    cc_deep = (smooth_deep_subsampled * 127).astype(int)
     cc_medium = (smooth_medium_subsampled * 127).astype(int)
-    cc_slow = (smooth_slow_subsampled * 127).astype(int)
+    cc_shallow = (smooth_shallow_subsampled * 127).astype(int)
 
-    cc_fast = np.clip(cc_fast, 0, 127)
+    cc_deep = np.clip(cc_deep, 0, 127)
     cc_medium = np.clip(cc_medium, 0, 127)
-    cc_slow = np.clip(cc_slow, 0, 127)
+    cc_shallow = np.clip(cc_shallow, 0, 127)
 
     # Inverted versions
-    cc_fast_inv = 127 - cc_fast
+    cc_deep_inv = 127 - cc_deep
     cc_medium_inv = 127 - cc_medium
-    cc_slow_inv = 127 - cc_slow
+    cc_shallow_inv = 127 - cc_shallow
 
-    # Track 4: CC1 Fast (tempo > 150 BPM, smoothed)
-    cc_track_fast = mido.MidiTrack()
-    midi_file.tracks.append(cc_track_fast)
-    cc_track_fast.append(mido.MetaMessage('track_name', name='CC1 Fast', time=0))
-    cc_track_fast.append(mido.Message('control_change', control=1, value=cc_fast[0], time=0))
-    for i in range(1, len(cc_fast)):
+    # Track 4: CC1 Deep Zoom (top 33% zoom depth, smoothed)
+    cc_track_deep = mido.MidiTrack()
+    midi_file.tracks.append(cc_track_deep)
+    cc_track_deep.append(mido.MetaMessage('track_name', name='CC1 Deep Zoom', time=0))
+    cc_track_deep.append(mido.Message('control_change', control=1, value=cc_deep[0], time=0))
+    for i in range(1, len(cc_deep)):
         delta_ticks = 0
         for j in range(cc_subsample):
             frame_idx = (i-1) * cc_subsample + j
             if frame_idx < n_frames:
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
-        cc_track_fast.append(mido.Message('control_change', control=1, value=cc_fast[i], time=delta_ticks))
+        cc_track_deep.append(mido.Message('control_change', control=1, value=cc_deep[i], time=delta_ticks))
 
-    # Track 5: CC1 Medium (100 <= tempo <= 150 BPM, smoothed)
+    # Track 5: CC1 Medium Zoom (middle 33% zoom depth, smoothed)
     cc_track_medium = mido.MidiTrack()
     midi_file.tracks.append(cc_track_medium)
-    cc_track_medium.append(mido.MetaMessage('track_name', name='CC1 Medium', time=0))
+    cc_track_medium.append(mido.MetaMessage('track_name', name='CC1 Medium Zoom', time=0))
     cc_track_medium.append(mido.Message('control_change', control=1, value=cc_medium[0], time=0))
     for i in range(1, len(cc_medium)):
         delta_ticks = 0
@@ -736,36 +805,36 @@ def compute_beat_tempos_from_inverse(
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
         cc_track_medium.append(mido.Message('control_change', control=1, value=cc_medium[i], time=delta_ticks))
 
-    # Track 6: CC1 Slow (tempo < 100 BPM, smoothed)
-    cc_track_slow = mido.MidiTrack()
-    midi_file.tracks.append(cc_track_slow)
-    cc_track_slow.append(mido.MetaMessage('track_name', name='CC1 Slow', time=0))
-    cc_track_slow.append(mido.Message('control_change', control=1, value=cc_slow[0], time=0))
-    for i in range(1, len(cc_slow)):
+    # Track 6: CC1 Shallow Zoom (bottom 33% zoom depth, smoothed)
+    cc_track_shallow = mido.MidiTrack()
+    midi_file.tracks.append(cc_track_shallow)
+    cc_track_shallow.append(mido.MetaMessage('track_name', name='CC1 Shallow Zoom', time=0))
+    cc_track_shallow.append(mido.Message('control_change', control=1, value=cc_shallow[0], time=0))
+    for i in range(1, len(cc_shallow)):
         delta_ticks = 0
         for j in range(cc_subsample):
             frame_idx = (i-1) * cc_subsample + j
             if frame_idx < n_frames:
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
-        cc_track_slow.append(mido.Message('control_change', control=1, value=cc_slow[i], time=delta_ticks))
+        cc_track_shallow.append(mido.Message('control_change', control=1, value=cc_shallow[i], time=delta_ticks))
 
-    # Track 7: CC1 Fast Inverted
-    cc_track_fast_inv = mido.MidiTrack()
-    midi_file.tracks.append(cc_track_fast_inv)
-    cc_track_fast_inv.append(mido.MetaMessage('track_name', name='CC1 Fast-Inv', time=0))
-    cc_track_fast_inv.append(mido.Message('control_change', control=1, value=cc_fast_inv[0], time=0))
-    for i in range(1, len(cc_fast_inv)):
+    # Track 7: CC1 Deep Zoom Inverted
+    cc_track_deep_inv = mido.MidiTrack()
+    midi_file.tracks.append(cc_track_deep_inv)
+    cc_track_deep_inv.append(mido.MetaMessage('track_name', name='CC1 Deep Zoom-Inv', time=0))
+    cc_track_deep_inv.append(mido.Message('control_change', control=1, value=cc_deep_inv[0], time=0))
+    for i in range(1, len(cc_deep_inv)):
         delta_ticks = 0
         for j in range(cc_subsample):
             frame_idx = (i-1) * cc_subsample + j
             if frame_idx < n_frames:
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
-        cc_track_fast_inv.append(mido.Message('control_change', control=1, value=cc_fast_inv[i], time=delta_ticks))
+        cc_track_deep_inv.append(mido.Message('control_change', control=1, value=cc_deep_inv[i], time=delta_ticks))
 
-    # Track 8: CC1 Medium Inverted
+    # Track 8: CC1 Medium Zoom Inverted
     cc_track_medium_inv = mido.MidiTrack()
     midi_file.tracks.append(cc_track_medium_inv)
-    cc_track_medium_inv.append(mido.MetaMessage('track_name', name='CC1 Medium-Inv', time=0))
+    cc_track_medium_inv.append(mido.MetaMessage('track_name', name='CC1 Medium Zoom-Inv', time=0))
     cc_track_medium_inv.append(mido.Message('control_change', control=1, value=cc_medium_inv[0], time=0))
     for i in range(1, len(cc_medium_inv)):
         delta_ticks = 0
@@ -775,18 +844,18 @@ def compute_beat_tempos_from_inverse(
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
         cc_track_medium_inv.append(mido.Message('control_change', control=1, value=cc_medium_inv[i], time=delta_ticks))
 
-    # Track 9: CC1 Slow Inverted
-    cc_track_slow_inv = mido.MidiTrack()
-    midi_file.tracks.append(cc_track_slow_inv)
-    cc_track_slow_inv.append(mido.MetaMessage('track_name', name='CC1 Slow-Inv', time=0))
-    cc_track_slow_inv.append(mido.Message('control_change', control=1, value=cc_slow_inv[0], time=0))
-    for i in range(1, len(cc_slow_inv)):
+    # Track 9: CC1 Shallow Zoom Inverted
+    cc_track_shallow_inv = mido.MidiTrack()
+    midi_file.tracks.append(cc_track_shallow_inv)
+    cc_track_shallow_inv.append(mido.MetaMessage('track_name', name='CC1 Shallow Zoom-Inv', time=0))
+    cc_track_shallow_inv.append(mido.Message('control_change', control=1, value=cc_shallow_inv[0], time=0))
+    for i in range(1, len(cc_shallow_inv)):
         delta_ticks = 0
         for j in range(cc_subsample):
             frame_idx = (i-1) * cc_subsample + j
             if frame_idx < n_frames:
                 delta_ticks += calculate_midi_delta_ticks(tempo_bpm[frame_idx], fps, division)
-        cc_track_slow_inv.append(mido.Message('control_change', control=1, value=cc_slow_inv[i], time=delta_ticks))
+        cc_track_shallow_inv.append(mido.Message('control_change', control=1, value=cc_shallow_inv[i], time=delta_ticks))
 
     # Save MIDI file
     midi_file.save(midi_out_path)
@@ -809,6 +878,23 @@ if __name__ == "__main__":
 
     mean_tempo_bpm = 108.0
 
+    # ===== DUAL-PURPOSE SCALING PARAMETER =====
+    # scaling_param has different meanings depending on mode:
+    #
+    # LINEAR mode (use_log_scale=False):
+    #   - scaling_param is a blend fraction (0.0 to 1.0)
+    #   - 0.0 = constant tempo (no zoom influence)
+    #   - 1.0 = full zoom-derived tempo variation
+    #   - Example: 0.1 = 10% of zoom-derived tempo variation
+    #
+    # LOG mode (use_log_scale=True):
+    #   - scaling_param is BPM change per octave
+    #   - This is the tempo change when zoom rate doubles or halves
+    #   - Example: 20.0 = tempo changes by ±20 BPM per doubling/halving
+    #
+    use_log_scale = False  # False=LINEAR (inverse), True=LOG (symmetric)
+    scaling_param = 0.1    # See above for interpretation based on mode
+
     csv_out_path = os.path.join(output_dir, f"beat_tempos_inverse_{mean_tempo_bpm:.0f}bpm.csv")
     midi_out_path = os.path.join(output_dir, f"tempo_map_inverse_{mean_tempo_bpm:.0f}bpm.mid")
 
@@ -817,10 +903,11 @@ if __name__ == "__main__":
         mean_tempo_bpm=mean_tempo_bpm,
         fps=30.0,
         division=480,
-        fract=0.1,
+        scaling_param=scaling_param,
         cc_subsample=30,
         csv_out_path=csv_out_path,
         midi_out_path=midi_out_path,
+        use_log_scale=use_log_scale,
     )
 
     print(f"Total duration (s): {T_total:.2f}")
