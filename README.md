@@ -5,8 +5,6 @@ This repository contains tools for video analysis and tempo mapping, providing t
 1. **Visual Metrics Pipeline** (`run_video_processing.py`) - Extracts comprehensive visual metrics from videos and generates MIDI CC tracks
 2. **Tempo Mapping** (`calculate_tempo_from_inverse.py`) - Generates variable tempo maps from zoom/speed data
 
-See `IMPLEMENTATION.md` for a detailed proposal on integrating these two workflows in the future.
-
 ---
 
 ## Table of Contents
@@ -16,7 +14,6 @@ See `IMPLEMENTATION.md` for a detailed proposal on integrating these two workflo
 - [Entry Points](#entry-points)
   - [Visual Metrics Pipeline](#1-run_video_processingpy---visual-metrics-pipeline)
   - [Tempo Mapping](#2-calculate_tempo_from_inversepy---variable-tempo-mapping)
-  - [Speed-to-MIDI Converter](#3-speed_to_midi_ccpy---simple-speed-to-midi-converter)
 - [Architecture: Visual Metrics Pipeline](#architecture-visual-metrics-pipeline)
 - [Configuration](#configuration)
 - [Video Analysis](#video-analysis-process_videopy)
@@ -165,21 +162,6 @@ mean_tempo_bpm = 108.0
 scaling_param = 0.0  # No tempo variation
 use_log_scale = False  # or True, doesn't matter for constant tempo
 ```
-
-### 3. `speed_to_midi_cc.py` - Simple Speed-to-MIDI Converter
-
-Standalone utility to convert speed values to MIDI CC tracks (fixed tempo).
-
-**Usage**:
-```bash
-python speed_to_midi_cc.py data/input/N33_speed.py --tempo 108 --fps 30
-```
-
-**What it does**:
-- Reads speed values from Python files
-- Computes 1/speed (inverse)
-- Scales to CC range 0-127
-- Generates simple MIDI file with normal and inverted CC tracks
 
 ---
 
@@ -895,40 +877,13 @@ See `example_config.json` for a working example with a specific video.
 
 ---
 
-## Future Integration: Tempo-Synchronized Visual Metrics
-
-The `IMPLEMENTATION.md` file contains a detailed proposal for integrating the two workflows:
-- **Phase 1 Goal**: Generate tempo maps directly from video analysis (using `Gray_czd` zoom divergence metric)
-- **Phase 2 Goal**: Support external tempo sources and advanced features
-- **Phase 3 Goal**: Multi-metric tempo synthesis and beat-aligned clustering
-
-**Current Status**: Not yet implemented. The two systems (visual metrics and tempo mapping) currently operate independently.
-
-**Key Benefits of Integration**:
-- Single video file as input
-- Automatic tempo variation based on visual dynamics
-- All MIDI CC tracks synchronized with variable tempo
-- Consistent beat alignment across all outputs
-
-See `IMPLEMENTATION.md` for complete technical specifications and implementation roadmap.
-
----
-
 ## Additional Utilities
-
-### Tempo Calculation Variants
-
-- **`calculate_tempo_from_zoom.py`** - Alternative tempo algorithm based on evenly-spaced beats in log(zoom depth)
-- **`calculate_tempo_from_zoom_simple.py`** - Simplified tempo calculation
-
-These provide different approaches to tempo mapping that may be better suited for specific use cases.
 
 ### Supporting Tools
 
 - **`kfs_to_csv.py`** - Converts KFS binary files to CSV format
 - **`find_extrema.py`** - Finds local maxima/minima in time series data
 - **`create_group_channel.py`** - MIDI channel grouping utility
-- **`circle_test.py`** - Testing utilities for rotational symmetry detection
 
 ---
 
@@ -936,7 +891,6 @@ These provide different approaches to tempo mapping that may be better suited fo
 
 - **`README.md`** (this file) - Main documentation and usage guide
 - **`CLAUDE.md`** - Coding guidelines and architecture principles for AI assistants
-- **`IMPLEMENTATION.md`** - Detailed integration proposal (future work)
 - **`default_config.json`** - Configuration template with all parameters
 - **`example_config.json`** - Working example configuration
 

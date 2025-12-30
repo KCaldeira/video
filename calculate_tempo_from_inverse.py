@@ -893,7 +893,7 @@ if __name__ == "__main__":
     #   - Example: 20.0 = tempo changes by ±20 BPM per doubling/halving
     #
     use_log_scale = False  # False=LINEAR (inverse), True=LOG (symmetric)
-    scaling_param = 0.1    # See above for interpretation based on mode
+    scaling_param = 0.0    # See above for interpretation based on mode
 
     csv_out_path = os.path.join(output_dir, f"beat_tempos_inverse_{mean_tempo_bpm:.0f}bpm.csv")
     midi_out_path = os.path.join(output_dir, f"tempo_map_inverse_{mean_tempo_bpm:.0f}bpm.mid")
