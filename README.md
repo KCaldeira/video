@@ -1,8 +1,33 @@
-# Video Processing Pipeline
+# Video Processing and Tempo Mapping Suite
 
-This repository contains a comprehensive video processing pipeline that extracts visual metrics from video files and converts them into MIDI data for musical applications.
+This repository contains tools for video analysis and tempo mapping, providing two complementary workflows:
 
-## Quick Start
+1. **Visual Metrics Pipeline** (`run_video_processing.py`) - Extracts comprehensive visual metrics from videos and generates MIDI CC tracks
+2. **Tempo Mapping** (`calculate_tempo_from_inverse.py`) - Generates variable tempo maps from zoom/speed data
+
+See `IMPLEMENTATION.md` for a detailed proposal on integrating these two workflows in the future.
+
+---
+
+## Table of Contents
+
+- [Quick Start: Visual Metrics Pipeline](#quick-start-visual-metrics-pipeline)
+- [Quick Start: Tempo Mapping](#quick-start-tempo-mapping)
+- [Entry Points](#entry-points)
+  - [Visual Metrics Pipeline](#1-run_video_processingpy---visual-metrics-pipeline)
+  - [Tempo Mapping](#2-calculate_tempo_from_inversepy---variable-tempo-mapping)
+  - [Speed-to-MIDI Converter](#3-speed_to_midi_ccpy---simple-speed-to-midi-converter)
+- [Architecture: Visual Metrics Pipeline](#architecture-visual-metrics-pipeline)
+- [Configuration](#configuration)
+- [Video Analysis](#video-analysis-process_videopy)
+- [Metrics Processing](#metrics-processing-process_metricspy)
+- [Frame Clustering](#frame-clustering-cluster_primarypy)
+- [Future Integration](#future-integration-tempo-synchronized-visual-metrics)
+- [Additional Utilities](#additional-utilities)
+
+---
+
+## Quick Start: Visual Metrics Pipeline
 
 1. **Install dependencies**:
    ```bash
@@ -35,14 +60,94 @@ This repository contains a comprehensive video processing pipeline that extracts
 
 ---
 
-## Architecture Overview
+## Quick Start: Tempo Mapping
 
-The pipeline consists of four main Python scripts:
+1. **Prepare speed/zoom data**:
+   - Create a Python file with speed values (e.g., `data/input/N32_speed.py`)
+   - File should contain either `y_values = [...]` or `s = [...]`
 
-1. **`run_video_processing.py`** - Main orchestrator (entry point)
-2. **`process_video.py`** - Video analysis module (extracts visual metrics)
-3. **`process_metrics.py`** - Data processing module (transforms to MIDI)
-4. **`cluster_primary.py`** - Clustering module (groups similar frames)
+2. **Edit parameters** in `calculate_tempo_from_inverse.py`:
+   ```python
+   # At bottom of file (lines 804-823)
+   y_values_path = "data/input/N32_speed.py"
+   mean_tempo_bpm = 108.0
+   ```
+
+3. **Run tempo mapping**:
+   ```bash
+   python calculate_tempo_from_inverse.py
+   ```
+
+4. **Find outputs** in `data/output/`:
+   - `beat_tempos_inverse_108bpm.csv` - Frame-level tempo data
+   - `tempo_map_inverse_108bpm.mid` - MIDI with tempo changes and CC tracks
+
+---
+
+## Entry Points
+
+### 1. `run_video_processing.py` - Visual Metrics Pipeline
+
+Main pipeline for comprehensive video analysis with fixed-tempo MIDI generation.
+
+**Usage**:
+```bash
+python run_video_processing.py <config_file.json>
+```
+
+**What it does**:
+- Analyzes video frames for color, motion, symmetry, and other visual metrics
+- Generates 100+ derived metrics with filtering and transformations
+- Creates MIDI CC tracks for each metric (fixed tempo)
+- Optionally performs clustering analysis on frames
+
+**Key modules**:
+- `process_video.py` - Extracts primary visual metrics
+- `process_metrics.py` - Computes derived metrics and generates MIDI
+- `process_clusters.py` - Groups similar frames using K-Means/GMM
+
+### 2. `calculate_tempo_from_inverse.py` - Variable Tempo Mapping
+
+Generates variable tempo maps where tempo is inversely proportional to zoom/speed data.
+
+**Usage**:
+```bash
+# Edit the main section at bottom of file to configure paths
+python calculate_tempo_from_inverse.py
+```
+
+**What it does**:
+- Reads zoom/speed values from Python files (e.g., `N32_speed.py`)
+- Calculates frame-level tempo inversely proportional to zoom rate
+- Applies window extension to keep tempos in valid MIDI range (3.58-300 BPM)
+- Generates tempo map CSV with per-frame tempo data
+- Creates MIDI file with:
+  - Frame-by-frame tempo changes
+  - Beat notes at variable intervals
+  - Multiple CC1 tracks (Normal, Inverted, Fast/Medium/Slow variants)
+
+**Algorithm**: Tempo = mean_tempo + fraction × ((k / zoom_rate) - mean_tempo)
+
+### 3. `speed_to_midi_cc.py` - Simple Speed-to-MIDI Converter
+
+Standalone utility to convert speed values to MIDI CC tracks (fixed tempo).
+
+**Usage**:
+```bash
+python speed_to_midi_cc.py data/input/N33_speed.py --tempo 108 --fps 30
+```
+
+**What it does**:
+- Reads speed values from Python files
+- Computes 1/speed (inverse)
+- Scales to CC range 0-127
+- Generates simple MIDI file with normal and inverted CC tracks
+
+---
+
+## Architecture: Visual Metrics Pipeline
+
+The main pipeline consists of four Python modules:
 
 ### Processing Flow
 
@@ -749,6 +854,53 @@ Keep multiple configuration files for different videos or experiments. Use descr
 See `default_config.json` for a complete template with all parameters and defaults.
 
 See `example_config.json` for a working example with a specific video.
+
+---
+
+## Future Integration: Tempo-Synchronized Visual Metrics
+
+The `IMPLEMENTATION.md` file contains a detailed proposal for integrating the two workflows:
+- **Phase 1 Goal**: Generate tempo maps directly from video analysis (using `Gray_czd` zoom divergence metric)
+- **Phase 2 Goal**: Support external tempo sources and advanced features
+- **Phase 3 Goal**: Multi-metric tempo synthesis and beat-aligned clustering
+
+**Current Status**: Not yet implemented. The two systems (visual metrics and tempo mapping) currently operate independently.
+
+**Key Benefits of Integration**:
+- Single video file as input
+- Automatic tempo variation based on visual dynamics
+- All MIDI CC tracks synchronized with variable tempo
+- Consistent beat alignment across all outputs
+
+See `IMPLEMENTATION.md` for complete technical specifications and implementation roadmap.
+
+---
+
+## Additional Utilities
+
+### Tempo Calculation Variants
+
+- **`calculate_tempo_from_zoom.py`** - Alternative tempo algorithm based on evenly-spaced beats in log(zoom depth)
+- **`calculate_tempo_from_zoom_simple.py`** - Simplified tempo calculation
+
+These provide different approaches to tempo mapping that may be better suited for specific use cases.
+
+### Supporting Tools
+
+- **`kfs_to_csv.py`** - Converts KFS binary files to CSV format
+- **`find_extrema.py`** - Finds local maxima/minima in time series data
+- **`create_group_channel.py`** - MIDI channel grouping utility
+- **`circle_test.py`** - Testing utilities for rotational symmetry detection
+
+---
+
+## Documentation Files
+
+- **`README.md`** (this file) - Main documentation and usage guide
+- **`CLAUDE.md`** - Coding guidelines and architecture principles for AI assistants
+- **`IMPLEMENTATION.md`** - Detailed integration proposal (future work)
+- **`default_config.json`** - Configuration template with all parameters
+- **`example_config.json`** - Working example configuration
 
 ---
 

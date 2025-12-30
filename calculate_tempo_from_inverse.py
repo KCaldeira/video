@@ -27,7 +27,7 @@ def read_kfs_to_dataframe(filepath):
         df = pd.DataFrame(points, columns=['x', 'y'])
         return df
 
-def calculate_tempo_with_window_extension(y_values, k, fps, min_tempo=3.58, max_tempo=300):
+def calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm, fract=0.1, min_tempo=3.58, max_tempo=300):
     """
     Calculate tempo for each frame, extending windows where needed to stay in range.
 
@@ -46,8 +46,10 @@ def calculate_tempo_with_window_extension(y_values, k, fps, min_tempo=3.58, max_
 
     Parameters:
     - y_values: Array of inverse zoom rates
-    - k: Proportionality constant
+    - k: Proportionality constant used to compute scaled tempo (k / y)
     - fps: Frames per second
+    - mean_tempo_bpm: Baseline tempo to blend toward
+    - fract: Fraction of the scaled tempo deviation applied (0-1)
     - min_tempo, max_tempo: Valid MIDI tempo range
 
     Returns:
@@ -62,9 +64,11 @@ def calculate_tempo_with_window_extension(y_values, k, fps, min_tempo=3.58, max_
         # Calculate single-frame tempo
         # Handle division by zero: if y_values[i] is 0 or very small, tempo will be inf or very large
         if y_values[i] == 0:
-            single_tempo = float('inf')  # Out of range, will trigger windowing
+            single_tempo_scaled = float('inf')  # Out of range, will trigger windowing
         else:
-            single_tempo = k / y_values[i]
+            single_tempo_scaled = k / y_values[i]
+        # Blend with mean tempo so only a fraction of zoom rate affects tempo
+        single_tempo = mean_tempo_bpm + fract * (single_tempo_scaled - mean_tempo_bpm)
 
         # Check if in range
         if min_tempo <= single_tempo <= max_tempo:
@@ -80,16 +84,18 @@ def calculate_tempo_with_window_extension(y_values, k, fps, min_tempo=3.58, max_
                 window_size += 1
 
                 # Calculate average tempo over window [i, i+window_size)
-                # avg_tempo = k * sum(1/y_values[i:i+window_size]) / window_size
+                # Compute scaled tempo over the window: k * sum(1/y) / window_size
                 # Handle division by zero in window
                 inverse_sum = 0.0
                 for j in range(i, i + window_size):
                     if y_values[j] != 0:
                         inverse_sum += 1.0 / y_values[j]
                     else:
-                        inverse_sum += float('inf')  # Will make avg_tempo inf
+                        inverse_sum += float('inf')  # Will make avg_tempo_scaled inf
 
-                avg_tempo = k * inverse_sum / window_size
+                avg_tempo_scaled = k * inverse_sum / window_size
+                # Blend window-averaged scaled tempo with mean
+                avg_tempo = mean_tempo_bpm + fract * (avg_tempo_scaled - mean_tempo_bpm)
 
                 # Check if in range
                 if min_tempo <= avg_tempo <= max_tempo:
@@ -109,7 +115,8 @@ def calculate_tempo_with_window_extension(y_values, k, fps, min_tempo=3.58, max_
                     # Skip zeros (they would contribute infinite tempo)
 
                 if inverse_sum > 0:
-                    avg_tempo = k * inverse_sum / remaining
+                    avg_tempo_scaled = k * inverse_sum / remaining
+                    avg_tempo = mean_tempo_bpm + fract * (avg_tempo_scaled - mean_tempo_bpm)
                     clamped_tempo = np.clip(avg_tempo, min_tempo, max_tempo)
                 else:
                     clamped_tempo = min_tempo  # Default to minimum
@@ -411,6 +418,7 @@ def compute_beat_tempos_from_inverse(
     mean_tempo_bpm=64.0,
     fps=30.0,
     division=480,
+    fract=0.1,
     cc_subsample=30,
     csv_out_path="beat_tempos_inverse.csv",
     midi_out_path="tempo_map_inverse.mid",
@@ -421,7 +429,7 @@ def compute_beat_tempos_from_inverse(
     Algorithm:
       1. Load y_values from file
       2. Calculate proportionality constant k to achieve target beats
-      3. Calculate frame-level tempo = k / y_value[i]
+    3. Calculate frame-level tempo = mean_tempo_bpm + fract * ((k / y_value[i]) - mean_tempo_bpm)
       4. Apply window extension to keep all tempos in MIDI-valid range
       5. Accumulate beats across frames
       6. Generate CSV with beat-level data
@@ -434,7 +442,8 @@ def compute_beat_tempos_from_inverse(
       - input_path: Path to y_values.py file
       - mean_tempo_bpm: Desired average tempo in BPM
       - fps: Video frame rate
-      - division: MIDI ticks per beat
+    - division: MIDI ticks per beat
+    - fract: Fraction of zoom-derived tempo deviation to apply (0-1)
       - cc_subsample: CC track sub-sampling interval (frames)
       - csv_out_path: Output CSV path
       - midi_out_path: Output MIDI path
@@ -475,18 +484,26 @@ def compute_beat_tempos_from_inverse(
     target_beats = int(video_duration * mean_tempo_bpm / 60.0)
     print(f"Target beats (from {mean_tempo_bpm:.1f} BPM): {target_beats}")
 
-    # k = (target_beats * fps * 60) / sum(1/y_values)
-    # Handle division by zero: skip zero values
+    # Compute inverse_sum = sum(1/y_values) skipping zeros
     inverse_sum = 0.0
     for y in y_values:
         if y != 0:
             inverse_sum += 1.0 / y
 
-    k = (target_beats * fps * 60) / inverse_sum
-    print(f"Proportionality constant k: {k:.4f}")
+    # Recalculate k to hit target beats AFTER blending:
+    # Sum over frames of blended tempo = n*mean + fract*(k*S - n*mean)
+    # Total beats = (sum_tempo) / (fps*60) = target_beats
+    # Solve: k = (target_beats*fps*60 - n_frames*mean_tempo_bpm*(1 - fract)) / (fract * S)
+    if inverse_sum == 0 or fract == 0:
+        # Fallback: if no inverse info or no blending, use mean directly
+        k = mean_tempo_bpm
+        print("Warning: inverse_sum==0 or fract==0, using mean tempo fallback for k")
+    else:
+        k = (target_beats * fps * 60 - n_frames * mean_tempo_bpm * (1.0 - fract)) / (fract * inverse_sum)
+    print(f"Proportionality constant k (blended): {k:.4f}")
 
     # --- Calculate frame-level tempo with window extension ---
-    tempo_bpm = calculate_tempo_with_window_extension(y_values, k, fps)
+    tempo_bpm = calculate_tempo_with_window_extension(y_values, k, fps, mean_tempo_bpm=mean_tempo_bpm, fract=fract)
 
     print(f"Tempo range: {tempo_bpm.min():.1f} - {tempo_bpm.max():.1f} BPM")
     print(f"Average tempo: {tempo_bpm.mean():.1f} BPM")
@@ -788,9 +805,9 @@ if __name__ == "__main__":
     output_dir = os.path.expanduser("~/video/data/output")
 
     # Use y_values.py file as input
-    y_values_path = os.path.join(input_dir, "N30_T7a_speed.py")
+    y_values_path = os.path.join(input_dir, "N32_speed.py")
 
-    mean_tempo_bpm = 96.0
+    mean_tempo_bpm = 108.0
 
     csv_out_path = os.path.join(output_dir, f"beat_tempos_inverse_{mean_tempo_bpm:.0f}bpm.csv")
     midi_out_path = os.path.join(output_dir, f"tempo_map_inverse_{mean_tempo_bpm:.0f}bpm.mid")
@@ -800,6 +817,7 @@ if __name__ == "__main__":
         mean_tempo_bpm=mean_tempo_bpm,
         fps=30.0,
         division=480,
+        fract=0.1,
         cc_subsample=30,
         csv_out_path=csv_out_path,
         midi_out_path=midi_out_path,
