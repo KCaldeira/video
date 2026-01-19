@@ -892,7 +892,7 @@ if __name__ == "__main__":
     #   - This is the tempo change when zoom rate doubles or halves
     #   - Example: 20.0 = tempo changes by ±20 BPM per doubling/halving
     #
-    use_log_scale = False  # False=LINEAR (inverse), True=LOG (symmetric)
+    use_log_scale = True  # False=LINEAR (inverse), True=LOG (symmetric)
     scaling_param = 0.0    # See above for interpretation based on mode
 
     csv_out_path = os.path.join(output_dir, f"beat_tempos_inverse_{mean_tempo_bpm:.0f}bpm.csv")
