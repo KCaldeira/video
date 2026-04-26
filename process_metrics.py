@@ -252,8 +252,9 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                 for stretch_value in stretch_values_to_process:
                     for stretch_center in stretch_centers_to_process:
                         midi_file = mido.MidiFile()
-                        
-                        # Process both inversion types ("o" and "i") in the same MIDI file
+
+                        # Collect all matching keys across both inversion types, then sort by mean (descending)
+                        matching_keys = []
                         for inversion_type in ["o", "i"]:
                             for key in master_dict:
                                 if  "_" + averaging+"_" not in key:
@@ -265,24 +266,26 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                                     continue
                                 if not key.endswith(f"_{inversion_type}"):
                                     continue
-                                
+                                matching_keys.append(key)
 
+                        matching_keys.sort(key=lambda k: np.mean(master_dict[k]), reverse=True)
 
-                                midi_track = mido.MidiTrack()
-                                midi_file.tracks.append(midi_track)
+                        for key in matching_keys:
+                            midi_track = mido.MidiTrack()
+                            midi_file.tracks.append(midi_track)
 
-                                midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
+                            midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
 
-                                midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
+                            midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
 
-                                for i, midi_value in enumerate(midi_val_base):
-                                    time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
-                                    midi_track.append(
-                                        mido.Message('control_change',
-                                                control=cc_number,
-                                                value=midi_value,
-                                                channel=7,
-                                                time=time_tick))
+                            for i, midi_value in enumerate(midi_val_base):
+                                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                                midi_track.append(
+                                    mido.Message('control_change',
+                                            control=cc_number,
+                                            value=midi_value,
+                                            channel=7,
+                                            time=time_tick))
 
                         
                         # Only save MIDI file if it contains tracks
@@ -320,6 +323,10 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                 key_base_suffix = key_suffix
             if key_base_suffix == base_suffix:
                 suffix_key_list.append(key)
+
+        # Sort tracks by mean value (descending)
+        suffix_key_list.sort(key=lambda k: np.mean(master_dict[k]), reverse=True)
+
         midi_file = mido.MidiFile()
 
         for key in suffix_key_list:
