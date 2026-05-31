@@ -884,6 +884,40 @@ See `example_config.json` for a working example with a specific video.
 - **`kfs_to_csv.py`** - Converts KFS binary files to CSV format
 - **`find_extrema.py`** - Finds local maxima/minima in time series data
 - **`create_group_channel.py`** - MIDI channel grouping utility
+- **`speed_to_cc.py`** - Converts speed data into a fixed-tempo MIDI with CC1 tracks
+
+### `speed_to_cc.py` - Speed Data to MIDI CC Tracks
+
+Standalone CLI utility that reads speed/zoom data and generates a constant-tempo MIDI file with six CC1 tracks derived from the input. Unlike `calculate_tempo_from_inverse.py`, the tempo is fixed (no tempo map), and the CC values are emitted one per video frame at 30 fps.
+
+**Usage**:
+```bash
+python speed_to_cc.py <input_file> <tempo_bpm> [output.mid]
+```
+
+**Arguments**:
+- `input_file` - Path to a `.py`, `.csv`, or `.kfs` file containing speed values
+  - `.py` files must define `y_values = [...]` or `s = [...]`
+  - `.csv` files: any layout; all numeric cells are read in order
+  - `.kfs` files: binary KFS point format (y values extracted)
+- `tempo_bpm` - Tempo in beats per minute (fixed for the whole file)
+- `output.mid` - Optional output path (default: `speed_cc.mid`)
+
+**Output Tracks** (all CC1, control change per frame):
+
+| Track | Description |
+|-------|-------------|
+| `CC1 Speed` | Speed scaled to 0-127 |
+| `CC1 Inverse Speed` | `1/speed` scaled to 0-127 |
+| `CC1 Speed Percentile` | Percentile rank of speed (0-127) |
+| `CC1 Speed Inverted` | `127 - CC1 Speed` |
+| `CC1 Inverse Speed Inverted` | `127 - CC1 Inverse Speed` |
+| `CC1 Speed Percentile Inverted` | `127 - CC1 Speed Percentile` |
+
+**Example**:
+```bash
+python speed_to_cc.py data/input/N32_speed.py 108 data/output/N32_speed_cc.mid
+```
 
 ---
 

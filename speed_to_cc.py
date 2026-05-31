@@ -61,13 +61,24 @@ def scale_to_cc(values):
     return np.clip(scaled, 0, 127)
 
 
-def make_cc_track(name, cc_values, ticks_per_frame):
-    """Create a MIDI track with CC1 messages, one per frame."""
+def make_cc_track(name, cc_values, ticks_per_frame, tempo_us=None):
+    """Create a MIDI track with CC1 messages, one per frame.
+
+    ticks_per_frame is a float; per-event tick positions are accumulated in
+    floating point and rounded only when computing the integer delta for each
+    MIDI message, so cumulative timing does not drift.
+    """
     track = mido.MidiTrack()
     track.append(mido.MetaMessage('track_name', name=name, time=0))
+    if tempo_us is not None:
+        track.append(mido.MetaMessage('set_tempo', tempo=tempo_us, time=0))
     track.append(mido.Message('control_change', control=1, value=int(cc_values[0]), time=0))
+    prev_tick = 0
     for i in range(1, len(cc_values)):
-        track.append(mido.Message('control_change', control=1, value=int(cc_values[i]), time=ticks_per_frame))
+        abs_tick = int(round(i * ticks_per_frame))
+        delta = abs_tick - prev_tick
+        track.append(mido.Message('control_change', control=1, value=int(cc_values[i]), time=delta))
+        prev_tick = abs_tick
     return track
 
 
@@ -80,8 +91,8 @@ def speed_to_cc_midi(input_path, tempo_bpm, output_path):
     print(f"Loaded {n_frames} frames from {input_path}")
     print(f"Speed stats: min={speed.min():.4f}, max={speed.max():.4f}, mean={speed.mean():.4f}")
 
-    # Ticks per frame at constant tempo
-    ticks_per_frame = int(round((tempo_bpm / 60.0) * (1.0 / fps) * division))
+    ticks_per_frame = (tempo_bpm / 60.0) * (1.0 / fps) * division
+    tempo_us = mido.bpm2tempo(tempo_bpm)
 
     # Track 1: proportional to speed
     cc_speed = scale_to_cc(speed)
@@ -101,10 +112,11 @@ def speed_to_cc_midi(input_path, tempo_bpm, output_path):
     cc_inverse_inv = 127 - cc_inverse
     cc_percentile_inv = 127 - cc_percentile
 
-    # Build MIDI file
+    # Build MIDI file. set_tempo lives on the first track so any DAW reading
+    # the file knows the intended tempo without guessing.
     midi_file = mido.MidiFile(ticks_per_beat=division)
 
-    midi_file.tracks.append(make_cc_track('CC1 Speed', cc_speed, ticks_per_frame))
+    midi_file.tracks.append(make_cc_track('CC1 Speed', cc_speed, ticks_per_frame, tempo_us=tempo_us))
     midi_file.tracks.append(make_cc_track('CC1 Inverse Speed', cc_inverse, ticks_per_frame))
     midi_file.tracks.append(make_cc_track('CC1 Speed Percentile', cc_percentile, ticks_per_frame))
     midi_file.tracks.append(make_cc_track('CC1 Speed Inverted', cc_speed_inv, ticks_per_frame))
@@ -112,7 +124,8 @@ def speed_to_cc_midi(input_path, tempo_bpm, output_path):
     midi_file.tracks.append(make_cc_track('CC1 Speed Percentile Inverted', cc_percentile_inv, ticks_per_frame))
 
     midi_file.save(output_path)
-    print(f"MIDI written to {output_path} ({len(midi_file.tracks)} tracks, {n_frames} frames)")
+    print(f"MIDI written to {output_path} ({len(midi_file.tracks)} tracks, {n_frames} frames, "
+          f"tempo {tempo_bpm} BPM, ticks/frame≈{ticks_per_frame:.3f})")
 
 
 if __name__ == "__main__":
