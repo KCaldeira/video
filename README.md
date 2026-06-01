@@ -839,7 +839,7 @@ Python version: 3.10+
 ## Important Notes
 
 ### Performance Optimization
-Computationally expensive metrics (symmetry, error dispersion, dark/light, motion) are computed **only for Gray channel** to improve processing speed. Other color channels receive zero values. This optimization can be reversed by removing Gray channel conditions in `process_video.py`.
+Computationally expensive metrics (symmetry, error dispersion, dark/light, motion, full GMM) are computed **only for Gray channel** to improve processing speed. For other channels, those columns are not emitted at all (rather than emitted as zeros) — non-Gray channels store only `_avg`, `_std`, `gmn`, and `gs1`. This optimization can be reversed by removing the `if color_channel_name == "Gray"` guards in `process_video.py`.
 
 ### Processing Order
 ⚠️ **Critical**: The filtering step must come LAST in the processing pipeline. Applying filtering to raw data produces jagged curves. Filtering must be applied to processed (scaled) data to produce smooth curves. This is a design principle that should not be changed.

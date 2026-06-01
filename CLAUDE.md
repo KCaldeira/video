@@ -73,7 +73,7 @@ Key config parameters:
 
 ### Performance Optimizations
 
-Computationally expensive metrics (symmetry, error dispersion, dark/light, motion) are computed **only for Gray channel** to improve processing speed. Other color channels receive zero values for these metrics. This optimization can be reversed by removing Gray channel conditions if full color analysis is needed.
+Computationally expensive metrics (symmetry, error dispersion, dark/light, motion, full GMM) are computed **only for Gray channel** to improve processing speed. For other channels, those columns are not emitted at all (rather than emitted as zeros) — non-Gray channels store only `_avg`, `_std`, `gmn`, and `gs1`. This optimization can be reversed by removing the `if color_channel_name == "Gray"` guards in `process_video.py` if full color analysis is needed.
 
 ## Documentation
 
