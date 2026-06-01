@@ -231,8 +231,10 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     # now write out everything for this var and averaging period and var or ranking as a single midi file
     print(f"Writing out midi files by var, rank/value, and averaging period")
     ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
+    tempo_us = mido.bpm2tempo(beats_per_minute)
     frame_count_list = csv.index.tolist()
-    
+    frame_origin = frame_count_list[0]
+
     # Create filter suffixes for averaging loop
     filter_suffixes = [f"f{period:03d}" for period in filter_periods]
     
@@ -270,16 +272,21 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
 
                         matching_keys.sort(key=lambda k: np.mean(master_dict[k]), reverse=True)
 
-                        for key in matching_keys:
+                        for ix, key in enumerate(matching_keys):
                             midi_track = mido.MidiTrack()
                             midi_file.tracks.append(midi_track)
 
                             midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
+                            if ix == 0:
+                                midi_track.append(mido.MetaMessage('set_tempo', tempo=tempo_us, time=0))
 
                             midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
 
+                            prev_tick = 0
                             for i, midi_value in enumerate(midi_val_base):
-                                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                                abs_tick = int(round(ticks_per_frame * (frame_count_list[i] - frame_origin)))
+                                time_tick = abs_tick - prev_tick
+                                prev_tick = abs_tick
                                 midi_track.append(
                                     mido.Message('control_change',
                                             control=cc_number,
@@ -296,7 +303,9 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     # now write everything for this metric and postprocessing in a single midi file
     print(f"Writing out midi files by postprocessing methods")
     ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
+    tempo_us = mido.bpm2tempo(beats_per_minute)
     frame_count_list = csv.index.tolist()
+    frame_origin = frame_count_list[0]
 
     # now get a list of all of the unique key endings after the second underscore
     suffix_list = ["_".join(key.split("_")[1:]) for key in master_dict.keys()]
@@ -329,15 +338,20 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
 
         midi_file = mido.MidiFile()
 
-        for key in suffix_key_list:
+        for ix, key in enumerate(suffix_key_list):
             midi_track = mido.MidiTrack()
             midi_file.tracks.append(midi_track)
             midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
+            if ix == 0:
+                midi_track.append(mido.MetaMessage('set_tempo', tempo=tempo_us, time=0))
 
             midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
 
+            prev_tick = 0
             for i, midi_value in enumerate(midi_val_base):
-                time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                abs_tick = int(round(ticks_per_frame * (frame_count_list[i] - frame_origin)))
+                time_tick = abs_tick - prev_tick
+                prev_tick = abs_tick
                 midi_track.append(
                     mido.Message('control_change',
                             control=cc_number,

@@ -420,9 +420,11 @@ def generate_cluster_midi(cluster_df, output_dir, base_name,
 
     # Calculate ticks per frame
     ticks_per_frame = ticks_per_beat * beats_per_minute / (60 * frames_per_second)
+    tempo_us = mido.bpm2tempo(beats_per_minute)
 
     # Get frame counts (assuming index contains frame numbers)
     frame_count_list = cluster_df.index.tolist()
+    frame_origin = frame_count_list[0]
 
     # Find all cluster assignment columns
     cluster_cols = [col for col in cluster_df.columns
@@ -471,23 +473,27 @@ def generate_cluster_midi(cluster_df, output_dir, base_name,
 
             # Create one track per cluster (binary: 127 if in cluster, 0 otherwise)
             for cluster_num in range(k_value):
-                # Create MIDI track for this cluster
+                # set_tempo lives on the first track of the file
+                is_first_track = not midi_file.tracks
                 midi_track = mido.MidiTrack()
                 midi_file.tracks.append(midi_track)
 
                 # Set track name: e.g., kmeans_k4_b017_c0
                 track_name = f"{col_name}_c{cluster_num}"
                 midi_track.append(mido.MetaMessage('track_name', name=track_name, time=0))
+                if is_first_track:
+                    midi_track.append(mido.MetaMessage('set_tempo', tempo=tempo_us, time=0))
 
-                # Add MIDI events for each frame
+                # Add MIDI events for each frame, anchoring absolute tick to first
+                # frame and rounding per event to keep cumulative timing drift-free.
+                prev_tick = 0
                 for i, cluster_id in enumerate(cluster_assignments):
-                    # Binary output: 127 if this beat is in this cluster, 0 otherwise
                     midi_value = 127 if cluster_id == cluster_num else 0
 
-                    # Calculate time delta
-                    time_tick = 0 if i == 0 else int(ticks_per_frame * (frame_count_list[i] - frame_count_list[i - 1]))
+                    abs_tick = int(round(ticks_per_frame * (frame_count_list[i] - frame_origin)))
+                    time_tick = abs_tick - prev_tick
+                    prev_tick = abs_tick
 
-                    # Add control change message (using CC 1 by default)
                     midi_track.append(
                         mido.Message('control_change',
                                    control=1,
