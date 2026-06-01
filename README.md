@@ -444,14 +444,19 @@ Extracts comprehensive visual metrics from video frames using computer vision te
 - **`dcd`** - Dark count (pixels near minimum value)
 - **`dcl`** - Light count (pixels near maximum value)
 
-#### Gaussian Mixture Model Metrics (All Channels)
-- **`gm_n`** - Number of Gaussian components (0-6)
-- **`gm_m1-gm_m6`** - Mean of each component (sorted by weight)
-- **`gm_s1-gm_s6`** - Standard deviation of each component
-- **`gm_a1-gm_a6`** - Amplitude/weight of each component
-- **`gm_bic`** - Bayesian Information Criterion value
+#### Gaussian Mixture Model Metrics
 
-**Gaussian Mixture Model**: Analyzes gray-tone distribution using multi-Gaussian mixture with BIC model selection. Fits models with 1-6 components and selects the best based on BIC scores with penalty factor of 8 to prefer simpler models.
+GMM analyzes the channel's value distribution using a multi-Gaussian mixture with BIC model selection. Fits models with 1–6 components and picks the best by BIC (penalty factor 8 to prefer simpler models). Components are sorted by weight (component 1 is the largest).
+
+**Stored on every channel (R, G, B, Gray, S, V):**
+- **`gmn`** - Number of Gaussian components selected (1-6)
+- **`gs1`** - Standard deviation of component 1 (the largest-weight component)
+
+**Stored on Gray channel only** (full mixture):
+- **`gm1`-`gm6`** - Mean of each component (sorted by weight; 0 if component absent)
+- **`gs1`-`gs6`** - Standard deviation of each component
+- **`ga1`-`ga6`** - Amplitude/weight of each component
+- **`gmb`** - Bayesian Information Criterion of the selected fit
 
 #### Motion Metrics (Gray Channel Only)
 
@@ -467,24 +472,30 @@ Computed using Farneback optical flow algorithm:
 - Analyzes centered region for center-anchored motion
 - Multiple presets available for different video types
 
-#### Color-Specific Metrics (All Channels)
-- **`H000`** - Proximity to red hue (0°)
-- **`H060`** - Proximity to yellow hue (60°)
-- **`H120`** - Proximity to green hue (120°)
-- **`H180`** - Proximity to cyan hue (180°)
-- **`H240`** - Proximity to blue hue (240°)
-- **`H300`** - Proximity to magenta hue (300°)
-- **`Hmon`** - Monochromaticity (color uniformity)
+#### Hue-Distance Metrics
+
+These are pseudo-channels keyed on distance from a target hue. They produce `_std` and `_int` columns directly (no `_avg`, no GMM, no symmetry etc.).
+
+**Per-hue channels** — `H000` (red, 0°), `H060` (yellow), `H120` (green), `H180` (cyan), `H240` (blue), `H300` (magenta):
+- **`_std`** - Negative RMS angular distance from the target hue across the frame. Always ≤ 0; closer to 0 means the frame's hue is closer to the target.
+- **`_int`** - Post-pass derived value: `(180 - H{nnn}_std) × diff_monos`, where `diff_monos = 1 - Hmon_std / max(Hmon_std)` is normalized per video against the most-monochromatic frame. Computed after all frames are processed, so it depends on the whole video's `Hmon_std` distribution.
+
+**Monochromaticity channel** — `Hmon`:
+- **`_std`** - Negative circular standard deviation of hue weighted by saturation (larger = more monochromatic). No `_int` variant is emitted.
 
 ### Color Channels Analyzed
 
-- **R, G, B** - Red, Green, Blue (basic + GMM metrics)
-- **Gray** - Grayscale (ALL metrics computed here)
-- **S, V** - Saturation, Value from HSV (basic + GMM metrics)
-- **H000-H300** - Hue-specific metrics (basic + GMM metrics)
-- **Hmon** - Monochromaticity (basic + GMM metrics)
+Each row of the basic CSV is `{channel}_{metric}` for every (channel, metric) pair listed below.
 
-**Performance Note**: Computationally expensive metrics (symmetry, error dispersion, dark/light, motion) are computed ONLY for Gray channel to improve processing speed. Other channels receive zero values for these metrics.
+| Channel | `_avg` `_std` | Symmetry / error / dark-light / motion | Full GMM | `gmn` + `gs1` only | `_int` |
+|---|---|---|---|---|---|
+| R, G, B | ✓ | — | — | ✓ | — |
+| Gray | ✓ | ✓ | ✓ (gm1-6, gs1-6, ga1-6, gmb) | — | — |
+| S, V | ✓ | — | — | ✓ | — |
+| H000–H300 | only `_std` | — | — | — | ✓ |
+| Hmon | only `_std` | — | — | — | — |
+
+**Performance Note**: Computationally expensive metrics (symmetry, error dispersion, dark/light, motion, full GMM) are computed ONLY for Gray channel to improve processing speed. Other channels skip them entirely (their columns are not emitted, rather than emitted as zeros).
 
 ### Output Files
 
