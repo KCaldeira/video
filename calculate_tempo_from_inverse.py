@@ -867,47 +867,75 @@ def compute_beat_tempos_from_inverse(
 
 
 if __name__ == "__main__":
+    import argparse
     import os
 
-    # Define paths and parameters
-    input_dir = os.path.expanduser("~/video/data/input")
-    output_dir = os.path.expanduser("~/video/data/output")
+    parser = argparse.ArgumentParser(
+        description="Convert a speed/zoom file into a MIDI tempo map (speed drives tempo).",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=(
+            "scaling_param is dual-purpose:\n"
+            "  LINEAR mode (default): blend fraction 0.0-1.0 "
+            "(0.0=constant tempo, 1.0=full speed-driven variation)\n"
+            "  LOG mode (--log-scale): BPM change per octave "
+            "(tempo change when speed doubles/halves)"
+        ),
+    )
 
-    # Use y_values.py file as input
-    y_values_path = os.path.join(input_dir, "N32_speed.py")
+    parser.add_argument(
+        "input_file",
+        help="Input speed file (.py with 's' or 'y_values' list).",
+    )
+    parser.add_argument(
+        "-t", "--mean-tempo", type=float, default=64.0,
+        help="Target average tempo in BPM.",
+    )
+    parser.add_argument(
+        "-o", "--output", default=None,
+        help="Output MIDI tempo-map path (default: <input>_tempo.mid).",
+    )
+    parser.add_argument(
+        "--csv", default=None,
+        help="Output CSV path (default: <input>_tempo.csv).",
+    )
+    parser.add_argument(
+        "-s", "--scaling-param", type=float, default=1.0,
+        help="Strength of speed->tempo effect (see note below).",
+    )
+    parser.add_argument(
+        "--log-scale", action="store_true",
+        help="Use LOG mode (symmetric per-octave scaling) instead of LINEAR (inverse-proportional).",
+    )
+    parser.add_argument(
+        "--fps", type=float, default=30.0,
+        help="Video frame rate.",
+    )
+    parser.add_argument(
+        "--division", type=int, default=480,
+        help="MIDI ticks per beat.",
+    )
+    parser.add_argument(
+        "--cc-subsample", type=int, default=30,
+        help="CC track sub-sampling interval (frames).",
+    )
 
-    mean_tempo_bpm = 108.0
+    args = parser.parse_args()
 
-    # ===== DUAL-PURPOSE SCALING PARAMETER =====
-    # scaling_param has different meanings depending on mode:
-    #
-    # LINEAR mode (use_log_scale=False):
-    #   - scaling_param is a blend fraction (0.0 to 1.0)
-    #   - 0.0 = constant tempo (no zoom influence)
-    #   - 1.0 = full zoom-derived tempo variation
-    #   - Example: 0.1 = 10% of zoom-derived tempo variation
-    #
-    # LOG mode (use_log_scale=True):
-    #   - scaling_param is BPM change per octave
-    #   - This is the tempo change when zoom rate doubles or halves
-    #   - Example: 20.0 = tempo changes by ±20 BPM per doubling/halving
-    #
-    use_log_scale = True  # False=LINEAR (inverse), True=LOG (symmetric)
-    scaling_param = 0.0    # See above for interpretation based on mode
-
-    csv_out_path = os.path.join(output_dir, f"beat_tempos_inverse_{mean_tempo_bpm:.0f}bpm.csv")
-    midi_out_path = os.path.join(output_dir, f"tempo_map_inverse_{mean_tempo_bpm:.0f}bpm.mid")
+    # Derive default output paths from the input filename when not given.
+    input_stem = os.path.splitext(args.input_file)[0]
+    midi_out_path = args.output if args.output is not None else f"{input_stem}_tempo.mid"
+    csv_out_path = args.csv if args.csv is not None else f"{input_stem}_tempo.csv"
 
     beat_df, csv_path_out, midi_path_out, T_total = compute_beat_tempos_from_inverse(
-        input_path=y_values_path,
-        mean_tempo_bpm=mean_tempo_bpm,
-        fps=30.0,
-        division=480,
-        scaling_param=scaling_param,
-        cc_subsample=30,
+        input_path=args.input_file,
+        mean_tempo_bpm=args.mean_tempo,
+        fps=args.fps,
+        division=args.division,
+        scaling_param=args.scaling_param,
+        cc_subsample=args.cc_subsample,
         csv_out_path=csv_out_path,
         midi_out_path=midi_out_path,
-        use_log_scale=use_log_scale,
+        use_log_scale=args.log_scale,
     )
 
     print(f"Total duration (s): {T_total:.2f}")
