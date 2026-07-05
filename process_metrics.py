@@ -128,7 +128,27 @@ def triangular_filter_odd(data, N):
     return filtered
 
 
-def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers, farneback_preset="default"):
+def block_average(data, N):
+    """Piecewise-constant block mean.
+
+    Rows are grouped into consecutive blocks of N (N beats, since one row == one
+    beat), and every row in a block takes that block's mean, producing a
+    stair-step curve. A final partial block uses the mean of its remaining rows.
+    Returns an array the same length as data.
+    """
+    if N < 1:
+        raise ValueError("Block length N must be at least 1.")
+
+    data = np.asarray(data, dtype=float)
+    group = np.arange(len(data)) // N
+    # Mean of each block, then broadcast back to per-row values
+    block_means = np.bincount(group, weights=data) / np.bincount(group)
+    return block_means[group]
+
+
+def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers, block_beats=None, farneback_preset="default"):
+    if block_beats is None:
+        block_beats = []
 
     # Create output prefix with farneback preset
     output_prefix = f"{prefix}_{farneback_preset}"
@@ -194,6 +214,18 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
                         filtered_data = triangular_filter_odd(entry_data, filter_period)
                         filtered_entries[new_key] = scale_data(filtered_data)
 
+                # Block averaging (piecewise-constant over `beats` rows == beats),
+                # merged into filtered_entries so it flows through the same downstream stages
+                for beats in block_beats:
+                    new_key = entry_key + f"_b{beats:03d}"
+                    if beats == 1:
+                        # For block size 1, just copy the data (no averaging)
+                        filtered_entries[new_key] = entry_data
+                    else:
+                        # Apply block averaging and rescale to 0-1
+                        block_data = block_average(entry_data, beats)
+                        filtered_entries[new_key] = scale_data(block_data)
+
             # Apply stretching to filtered data
             stretched_entries = {}
             for entry_key, entry_data in filtered_entries.items():
@@ -235,11 +267,12 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     frame_count_list = csv.index.tolist()
     frame_origin = frame_count_list[0]
 
-    # Create filter suffixes for averaging loop
-    filter_suffixes = [f"f{period:03d}" for period in filter_periods]
-    
+    # Create averaging suffixes for the export loop (triangular filters + block averages)
+    averaging_suffixes = [f"f{period:03d}" for period in filter_periods] + \
+                         [f"b{beats:03d}" for beats in block_beats]
+
     for var in sorted(variables):
-        for averaging in filter_suffixes:
+        for averaging in averaging_suffixes:
             for rank_type in ["v", "r"]:
                 # Create a list of stretch values to process, including the special case
                 stretch_values_to_process = list(stretch_values)
@@ -404,10 +437,10 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
             inversion = parts[-1]
         fields['inversion'] = inversion
         
-        # Extract smoothing period (field 4)
+        # Extract smoothing period (field 4) - triangular filter (f###) or block average (b###)
         smoothing_period = None
         for part in parts[3:]:
-            if part.startswith('f'):
+            if part[:1] in ('f', 'b') and part[1:].isdigit():
                 smoothing_period = part
                 break
         fields['smoothing_period'] = smoothing_period
@@ -533,6 +566,7 @@ def process_metrics_to_midi(prefix, config=None):
     
     # Extract processing parameters from config with defaults
     filter_periods = config.get("filter_periods", [17, 65, 257])
+    block_beats = config.get("block_beats", [])
     stretch_values = config.get("stretch_values", [8])
     stretch_centers = config.get("stretch_centers", [0.33, 0.67])
 
@@ -555,10 +589,54 @@ def process_metrics_to_midi(prefix, config=None):
     csv = add_derived_columns(csv)
     # All transformations are now applied by default (no conditional logic needed)
 
-    post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, 
-                 stretch_values, stretch_centers, farneback_preset)
+    post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods,
+                 stretch_values, stretch_centers, block_beats=block_beats, farneback_preset=farneback_preset)
 
-# This script is designed to be called by run_video_processing.py
-# For standalone usage, use: python run_video_processing.py <video_name>
+def run_metrics_only(config_path):
+    """Run the metrics stage standalone from a pipeline JSON config file.
+
+    Flattens the nested config (timing + metrics_processing + optical_flow preset)
+    into the flat dict process_metrics_to_midi expects, then processes metrics only.
+    The video and clustering stages are not run; the existing basic.csv is reused.
+    """
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+
+    timing = config.get("timing", {})
+    metrics = config.get("metrics_processing", {})
+    video_name = config["video"]["video_name"]
+    farneback_preset = config.get("video_processing", {}).get("optical_flow", {}).get("preset", "default")
+
+    flat_config = {
+        "ticks_per_beat": timing.get("ticks_per_beat", 480),
+        "beats_per_minute": timing.get("beats_per_minute", 100),
+        "frames_per_second": timing.get("frames_per_second", 30),
+        "beats_per_midi_event": timing.get("beats_per_midi_event", 1),
+        "filter_periods": metrics.get("filter_periods", [17, 65, 257]),
+        "block_beats": metrics.get("block_beats", []),
+        "stretch_values": metrics.get("stretch_values", [8]),
+        "stretch_centers": metrics.get("stretch_centers", [0.33, 0.67]),
+        "cc_number": metrics.get("cc_number", 1),
+        "farneback_preset": farneback_preset,
+    }
+
+    print(f"Metrics-only processing for '{video_name}' (preset: {farneback_preset})")
+    print(f"  Filter periods: {flat_config['filter_periods']}")
+    print(f"  Block beats:    {flat_config['block_beats']}")
+    process_metrics_to_midi(video_name, flat_config)
+
+
+# For the full pipeline (video + metrics + clusters), use:
+#   python run_video_processing.py <config_file.json>
+# For metrics-only processing (reuses the existing basic.csv), use:
+#   python process_metrics.py <config_file.json>
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Run the metrics processing stage only, reusing the existing basic.csv."
+    )
+    parser.add_argument("config", help="Path to the pipeline JSON config file (e.g. json/N42.json)")
+    args = parser.parse_args()
+    run_metrics_only(args.config)
 
 

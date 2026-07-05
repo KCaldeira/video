@@ -78,6 +78,7 @@ def run_process_metrics(subdir_name, **kwargs):
         # Create config dictionary with all parameters
         config = {
             'filter_periods': kwargs.get('filter_periods', [17, 65, 257]),
+            'block_beats': kwargs.get('block_beats', []),
             'stretch_values': kwargs.get('stretch_values', [8]),
             'stretch_centers': kwargs.get('stretch_centers', [0.33, 0.67]),
             'cc_number': kwargs.get('cc_number', 1),
@@ -162,6 +163,7 @@ def main():
 
     # Metrics processing parameters
     filter_periods = metrics_config.get('filter_periods', [17, 65, 257])
+    block_beats = metrics_config.get('block_beats', [])
     stretch_values = metrics_config.get('stretch_values', [8])
     stretch_centers = metrics_config.get('stretch_centers', [0.33, 0.67])
     cc_number = metrics_config.get('cc_number', 1)
@@ -190,6 +192,7 @@ def main():
     print(f"  Downscale large: {downscale_large}")
     print(f"  Downscale medium: {downscale_medium}")
     print(f"  Filter periods: {filter_periods}")
+    print(f"  Block beats: {block_beats}")
     print(f"  Stretch values: {stretch_values}")
     print(f"  Stretch centers: {stretch_centers}")
     print(f"  CC number: {cc_number}")
@@ -247,6 +250,7 @@ def main():
         print("=" * 50)
         metrics_params = {
             'filter_periods': filter_periods,
+            'block_beats': block_beats,
             'stretch_values': stretch_values,
             'stretch_centers': stretch_centers,
             'cc_number': cc_number,
