@@ -495,7 +495,7 @@ def process_metrics_to_midi(prefix, config=None):
     
     Args:
         prefix (str): The prefix for input/output files
-        config (dict, optional): Configuration dictionary. If None, will try to load from {prefix}_config.json
+        config (dict, optional): Configuration dictionary. If None, will try to load from json/{prefix}_config.json
     """
     # Extract farneback preset from config for output naming
     farneback_preset = "default"  # default fallback
@@ -507,14 +507,14 @@ def process_metrics_to_midi(prefix, config=None):
     # Try to load config from JSON if it exists and config not provided
     if config is None:
         # First try the original config filename
-        config_filename = f"{prefix}_config.json"
+        config_filename = f"json/{prefix}_config.json"
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as f:
                 config = json.load(f)
         else:
             # Try to find config file with farneback preset suffix
             import glob
-            config_files = glob.glob(f"{prefix}_*_config.json")
+            config_files = glob.glob(f"json/{prefix}_*_config.json")
             if config_files:
                 # Use the first matching config file
                 config_filename = config_files[0]

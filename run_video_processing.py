@@ -8,11 +8,11 @@ Usage:
     python run_video_processing.py --help
 
 Examples:
-    python run_video_processing.py default_config.json
-    python run_video_processing.py my_custom_config.json
-    python run_video_processing.py N29_3M2pM6dispA7_config.json
+    python run_video_processing.py json/default_config.json
+    python run_video_processing.py json/my_custom_config.json
+    python run_video_processing.py json/N29_3M2pM6dispA7_config.json
 
-Note: Configuration is exclusively via JSON files. See default_config.json for template.
+Note: Configuration is exclusively via JSON files. See json/default_config.json for template.
 """
 
 import sys
@@ -114,7 +114,7 @@ def load_config(config_file):
 def main():
     parser = argparse.ArgumentParser(
         description='Run video processing pipeline using JSON configuration',
-        epilog='See default_config.json for a complete configuration template'
+        epilog='See json/default_config.json for a complete configuration template'
     )
     parser.add_argument('config',
                        help='Path to JSON configuration file')

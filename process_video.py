@@ -124,7 +124,7 @@ def print_timing_summary():
     }
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    timing_filename = f"timing_summary_{timestamp}.json"
+    timing_filename = f"data/output/timing_summary_{timestamp}.json"
     with open(timing_filename, 'w') as f:
         json.dump(timing_summary, f, indent=2)
     print(f"\nDetailed timing data saved to: {timing_filename}")
