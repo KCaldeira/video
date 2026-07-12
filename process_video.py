@@ -19,7 +19,6 @@ import os
 import pandas as pd
 import numpy as np
 import re
-from mido import Message, MidiFile, MidiTrack
 from scipy.stats import rankdata
 from scipy.signal import get_window
 from collections import defaultdict
@@ -965,42 +964,34 @@ def export_metrics_to_csv(frame_count_list, metrics, filename):
     df = pd.DataFrame(data)
     df.to_csv(filename, index=False)
 
-def process_video_to_csv(video_path, 
-                           subdir_name, # output prefix 
-                           frames_per_second, 
-                           beats_per_midi_event,
-                           ticks_per_beat, 
-                           beats_per_minute, 
+def process_video_to_csv(video_path,
+                           subdir_name, # output prefix
+                           frames_per_second,
+                           frame_interval,
                            downscale_large,
                            downscale_medium,
                            max_frames=None,
                            farneback_preset='default',
                            **farneback_kwargs):
     """
-    Process every Nth frame, calculate metrics, and generate multiple MIDI files.
-    
+    Process every Nth frame, calculate metrics, and write a frame-indexed CSV.
+
+    This stage is tempo-free: analysis samples are taken every `frame_interval`
+    video frames.  Tempo is applied only later, in the MIDI writing stage.
+
     :param video_path: Path to the video file.
     :param output_prefix: Prefix for output MIDI filenames.
     :param frames_per_second (number of frames per second in video)
-    :param beats_per_midi_event (number of beats between each frame that will per processed)
-    :param ticks_per_beat (number of midi ticks per beat in DAW)
-    :param beats_per_minute (number of beats per minute in DAW)
-    :param cc_number: MIDI CC number (default 7 for volume).
-    :param channel: MIDI channel (0-15).
+    :param frame_interval (number of video frames between analysed frames; may be fractional)
     :param downscale_large: spatial scale for computing metrics
     :param downscale_medium: resolution reduction for computing metrics
     :param max_frames: maximum number of frames to process (None = process all frames)
 
     """
 
-
-
-
-    ticks_per_frame = ticks_per_beat *( beats_per_minute / 60.) / frames_per_second # ticks per second / frames per second
-    # Calculate the frame interval for processing frames
-    seconds_per_analysis_frame = beats_per_midi_event / (beats_per_minute / 60) # beats per frame / beats per second
-    frames_per_analysis_frame_real = seconds_per_analysis_frame * frames_per_second
-    # Take every Nth frame, where frames_per_interval_real is the floating point non-integer version of N
+    # Take every Nth frame, where frame_interval is the floating point (possibly
+    # non-integer) spacing between analysed frames.
+    frames_per_analysis_frame_real = frame_interval
 
     frame_count = 0
     frame_count_list = []
@@ -1107,9 +1098,7 @@ def process_video_to_csv(video_path,
         "video_file": video_path,
         "subdir_name": subdir_name,
         "frames_per_second": frames_per_second,
-        "beats_per_midi_event": beats_per_midi_event,
-        "ticks_per_beat": ticks_per_beat,
-        "beats_per_minute": beats_per_minute,
+        "frame_interval": frame_interval,
         "downscale_large": downscale_large,
         "downscale_medium": downscale_medium,
         "farneback_preset": farneback_preset,

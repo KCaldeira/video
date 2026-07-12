@@ -1,9 +1,9 @@
-# reads in the output of process.py, calculated derived values and puts them out
-# both as a csv file and as midi files.
+# reads in the output of process.py, calculates derived values and writes them
+# out as a frame-indexed CSV (and xlsx/PDF).  MIDI is written separately by
+# write_midi.py; this stage is tempo-free.
 
 import pandas as pd
 import numpy as np
-import mido
 import os
 from scipy.stats import rankdata
 import matplotlib.pyplot as plt
@@ -146,7 +146,7 @@ def block_average(data, N):
     return block_means[group]
 
 
-def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods, stretch_values, stretch_centers, block_beats=None, farneback_preset="default"):
+def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, block_beats=None, farneback_preset="default"):
     if block_beats is None:
         block_beats = []
 
@@ -155,11 +155,6 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
 
     if not os.path.exists(f"data/output/{output_prefix}"):
         os.makedirs(f"data/output/{output_prefix}")
-
-    # Create metrics_midi subdirectory for MIDI files
-    midi_output_dir = f"data/output/{output_prefix}/metrics_midi"
-    if not os.path.exists(midi_output_dir):
-        os.makedirs(midi_output_dir)
 
     # Use original prefix for file names (without farneback preset)
     file_prefix = prefix
@@ -260,139 +255,16 @@ def post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_secon
     for key in master_dict:
         master_dict[key] = np.where(np.isnan(master_dict[key]), 0, master_dict[key])
     
-    # now write out everything for this var and averaging period and var or ranking as a single midi file
-    print(f"Writing out midi files by var, rank/value, and averaging period")
-    ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
-    tempo_us = mido.bpm2tempo(beats_per_minute)
+    # Persist the fully-processed, frame-indexed values.  This stage is
+    # tempo-free; the MIDI stage (write_midi.py) reads this CSV and renders the
+    # .mid files at whatever tempo is configured.
     frame_count_list = csv.index.tolist()
-    frame_origin = frame_count_list[0]
-
-    # Create averaging suffixes for the export loop (triangular filters + block averages)
-    averaging_suffixes = [f"f{period:03d}" for period in filter_periods] + \
-                         [f"b{beats:03d}" for beats in block_beats]
-
-    for var in sorted(variables):
-        for averaging in averaging_suffixes:
-            for rank_type in ["v", "r"]:
-                # Create a list of stretch values to process, including the special case
-                stretch_values_to_process = list(stretch_values)
-                if 1 not in stretch_values_to_process:
-                    stretch_values_to_process.append(1)
-                
-                # Create a list of stretch centers to process, including the special case
-                stretch_centers_to_process = list(stretch_centers)
-                if 0.5 not in stretch_centers_to_process:
-                    stretch_centers_to_process.append(0.5)
-                
-                for stretch_value in stretch_values_to_process:
-                    for stretch_center in stretch_centers_to_process:
-                        midi_file = mido.MidiFile()
-
-                        # Collect all matching keys across both inversion types, then sort by mean (descending)
-                        matching_keys = []
-                        for inversion_type in ["o", "i"]:
-                            for key in master_dict:
-                                if  "_" + averaging+"_" not in key:
-                                    continue
-                                # Check if this key matches the pattern: var_metric_rank_averaging_stretch_inversion
-                                if not key.startswith(f"{var}_"):
-                                    continue
-                                if not f"_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}" in key:
-                                    continue
-                                if not key.endswith(f"_{inversion_type}"):
-                                    continue
-                                matching_keys.append(key)
-
-                        matching_keys.sort(key=lambda k: np.mean(master_dict[k]), reverse=True)
-
-                        for ix, key in enumerate(matching_keys):
-                            midi_track = mido.MidiTrack()
-                            midi_file.tracks.append(midi_track)
-
-                            midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
-                            if ix == 0:
-                                midi_track.append(mido.MetaMessage('set_tempo', tempo=tempo_us, time=0))
-
-                            midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
-
-                            prev_tick = 0
-                            for i, midi_value in enumerate(midi_val_base):
-                                abs_tick = int(round(ticks_per_frame * (frame_count_list[i] - frame_origin)))
-                                time_tick = abs_tick - prev_tick
-                                prev_tick = abs_tick
-                                midi_track.append(
-                                    mido.Message('control_change',
-                                            control=cc_number,
-                                            value=midi_value,
-                                            channel=7,
-                                            time=time_tick))
-
-                        
-                        # Only save MIDI file if it contains tracks
-                        if midi_file.tracks:
-                            file_name = f"{midi_output_dir}/{var}_{rank_type}_{averaging}_s{stretch_value}-{stretch_center}.mid"
-                            midi_file.save(file_name)
-
-    # now write everything for this metric and postprocessing in a single midi file
-    print(f"Writing out midi files by postprocessing methods")
-    ticks_per_frame = ticks_per_beat * beats_per_minute / (60 *frames_per_second)
-    tempo_us = mido.bpm2tempo(beats_per_minute)
-    frame_count_list = csv.index.tolist()
-    frame_origin = frame_count_list[0]
-
-    # now get a list of all of the unique key endings after the second underscore
-    suffix_list = ["_".join(key.split("_")[1:]) for key in master_dict.keys()]
-    # Split on "_s" and keep only the beginning part
-    base_suffix_list = []
-    for suffix in suffix_list:
-        if "_s" in suffix:
-            base_suffix = suffix.split("_s")[0]
-        else:
-            base_suffix = suffix
-        base_suffix_list.append(base_suffix)
-    
-    # Get unique base suffixes
-    unique_base_suffixes = list(set(base_suffix_list))
-    
-    for base_suffix in unique_base_suffixes:
-        # Find all keys that start with this base suffix (before any stretch processing)
-        suffix_key_list = []
-        for key in master_dict.keys():
-            key_suffix = "_".join(key.split("_")[1:])
-            if "_s" in key_suffix:
-                key_base_suffix = key_suffix.split("_s")[0]
-            else:
-                key_base_suffix = key_suffix
-            if key_base_suffix == base_suffix:
-                suffix_key_list.append(key)
-
-        # Sort tracks by mean value (descending)
-        suffix_key_list.sort(key=lambda k: np.mean(master_dict[k]), reverse=True)
-
-        midi_file = mido.MidiFile()
-
-        for ix, key in enumerate(suffix_key_list):
-            midi_track = mido.MidiTrack()
-            midi_file.tracks.append(midi_track)
-            midi_track.append(mido.MetaMessage('track_name', name=key, time=0))
-            if ix == 0:
-                midi_track.append(mido.MetaMessage('set_tempo', tempo=tempo_us, time=0))
-
-            midi_val_base = (np.round(104 * master_dict[key])).astype(int).tolist()
-
-            prev_tick = 0
-            for i, midi_value in enumerate(midi_val_base):
-                abs_tick = int(round(ticks_per_frame * (frame_count_list[i] - frame_origin)))
-                time_tick = abs_tick - prev_tick
-                prev_tick = abs_tick
-                midi_track.append(
-                    mido.Message('control_change',
-                            control=cc_number,
-                            value=midi_value,
-                            channel=7,
-                            time=time_tick))
-
-        midi_file.save(f"{midi_output_dir}/{base_suffix}.mid")
+    print(f"Writing out frame-indexed values CSV")
+    values_df = pd.DataFrame(master_dict)
+    values_df.insert(0, 'frame_count_list', frame_count_list)
+    values_csv_path = f"data/output/{output_prefix}/{output_prefix}_values.csv"
+    values_df.to_csv(values_csv_path, index=False)
+    print(f"Values saved to {values_csv_path}")
 
     # write out the master xlsx
     print(f"Writing out master xlsx")
@@ -557,14 +429,8 @@ def process_metrics_to_midi(prefix, config=None):
             else:
                 config = {}
     
-    # Extract parameters from config with defaults
-    ticks_per_beat = config.get("ticks_per_beat", 480)
-    beats_per_minute = config.get("beats_per_minute", 100)
-    frames_per_second = config.get("frames_per_second", 30)
-    cc_number = config.get("cc_number", 1)
-    beats_per_midi_event = config.get("beats_per_midi_event", 1)
-    
     # Extract processing parameters from config with defaults
+    # (this stage is tempo-free; tempo/cc parameters are used only by write_midi.py)
     filter_periods = config.get("filter_periods", [17, 65, 257])
     block_beats = config.get("block_beats", [])
     stretch_values = config.get("stretch_values", [8])
@@ -589,7 +455,7 @@ def process_metrics_to_midi(prefix, config=None):
     csv = add_derived_columns(csv)
     # All transformations are now applied by default (no conditional logic needed)
 
-    post_process(csv, prefix, ticks_per_beat, beats_per_minute, frames_per_second, cc_number, filter_periods,
+    post_process(csv, prefix, filter_periods,
                  stretch_values, stretch_centers, block_beats=block_beats, farneback_preset=farneback_preset)
 
 def run_metrics_only(config_path):
@@ -608,15 +474,10 @@ def run_metrics_only(config_path):
     farneback_preset = config.get("video_processing", {}).get("optical_flow", {}).get("preset", "default")
 
     flat_config = {
-        "ticks_per_beat": timing.get("ticks_per_beat", 480),
-        "beats_per_minute": timing.get("beats_per_minute", 100),
-        "frames_per_second": timing.get("frames_per_second", 30),
-        "beats_per_midi_event": timing.get("beats_per_midi_event", 1),
         "filter_periods": metrics.get("filter_periods", [17, 65, 257]),
         "block_beats": metrics.get("block_beats", []),
         "stretch_values": metrics.get("stretch_values", [8]),
         "stretch_centers": metrics.get("stretch_centers", [0.33, 0.67]),
-        "cc_number": metrics.get("cc_number", 1),
         "farneback_preset": farneback_preset,
     }
 

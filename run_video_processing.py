@@ -24,13 +24,14 @@ import argparse
 from process_video import process_video_to_csv
 from process_metrics import process_metrics_to_midi
 from process_clusters import cluster_primary_metrics
+from write_midi import write_midi_from_config
 
-def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
+def run_process_video(subdir_name, **kwargs):
     """
     Run process_video_to_csv function directly with the specified parameters.
     """
-    print(f"Running process_video_to_csv with subdir_name={subdir_name}, beats_per_minute={beats_per_minute}")
-    
+    print(f"Running process_video_to_csv with subdir_name={subdir_name}")
+
     try:
         # Call the function directly
         # Look for video file in data/input directory
@@ -53,9 +54,7 @@ def run_process_video(subdir_name, beats_per_minute=64, **kwargs):
             video_file,
             subdir_name,
             kwargs.get("frames_per_second", 30),
-            kwargs.get("beats_per_midi_event", 1),
-            kwargs.get("ticks_per_beat", 480),
-            beats_per_minute,
+            kwargs.get("frame_interval", 30),
             kwargs.get("downscale_large", 100),
             kwargs.get("downscale_medium", 10),
             kwargs.get("max_frames", None),
@@ -75,17 +74,13 @@ def run_process_metrics(subdir_name, **kwargs):
     print(f"Running process_metrics_to_midi with subdir_name={subdir_name}")
     
     try:
-        # Create config dictionary with all parameters
+        # Create config dictionary with all parameters (tempo-free; MIDI is
+        # written separately by write_midi.py)
         config = {
             'filter_periods': kwargs.get('filter_periods', [17, 65, 257]),
             'block_beats': kwargs.get('block_beats', []),
             'stretch_values': kwargs.get('stretch_values', [8]),
             'stretch_centers': kwargs.get('stretch_centers', [0.33, 0.67]),
-            'cc_number': kwargs.get('cc_number', 1),
-            'ticks_per_beat': kwargs.get('ticks_per_beat', 480),
-            'beats_per_minute': kwargs.get('beats_per_minute', 100),
-            'frames_per_second': kwargs.get('frames_per_second', 30),
-            'beats_per_midi_event': kwargs.get('beats_per_midi_event', 1),
             'farneback_preset': kwargs.get('farneback_preset', 'default')
         }
         
@@ -141,16 +136,21 @@ def main():
         print("Error: 'video.video_name' must be set in configuration file")
         return 1
 
-    # Timing parameters
+    # Timing parameters (used only by the MIDI-writing stage)
+    # beats_per_minute may be a number (constant tempo) or a string path to a
+    # MIDI tempo file (variable tempo).
     beats_per_minute = timing_config.get('beats_per_minute', 64)
     frames_per_second = timing_config.get('frames_per_second', 30)
-    beats_per_midi_event = timing_config.get('beats_per_midi_event', 1)
     ticks_per_beat = timing_config.get('ticks_per_beat', 480)
 
     # Video processing parameters
     downscale_large = video_proc_config.get('downscale_large', 100)
     downscale_medium = video_proc_config.get('downscale_medium', 10)
     max_frames = video_config.get('max_frames', None)
+    # Analysis-frame sampling is tempo-free: take one sample every frame_interval
+    # video frames (may be fractional).  Required when process_video runs; fail
+    # fast rather than silently guessing a sampling rate.
+    frame_interval = video_proc_config.get('frame_interval', None)
 
     # Optical flow parameters
     farneback_preset = optical_flow_config.get('preset', 'default')
@@ -172,6 +172,7 @@ def main():
     process_video = pipeline_config.get('process_video', True)
     process_metrics = pipeline_config.get('process_metrics', True)
     process_clusters = pipeline_config.get('process_clusters', True)
+    write_midi = pipeline_config.get('write_midi', True)
 
     # Clustering parameters
     cluster_processing_config = config.get('cluster_processing', {})
@@ -185,9 +186,9 @@ def main():
     print(f"Starting video processing pipeline:")
     print(f"  Configuration file: {args.config}")
     print(f"  Subdir name: {subdir_name}")
-    print(f"  Beats per minute: {beats_per_minute}")
+    print(f"  Beats per minute / tempo file: {beats_per_minute}")
     print(f"  Frames per second: {frames_per_second}")
-    print(f"  Beats per MIDI event: {beats_per_midi_event}")
+    print(f"  Frame interval: {frame_interval}")
     print(f"  Ticks per beat: {ticks_per_beat}")
     print(f"  Downscale large: {downscale_large}")
     print(f"  Downscale medium: {downscale_medium}")
@@ -218,13 +219,17 @@ def main():
 
     # Step 1: Run process_video.py
     if process_video:
+        if frame_interval is None:
+            raise ValueError(
+                "video_processing.frame_interval is required when process_video is enabled. "
+                "For a config migrated from the old schema, set it to "
+                "beats_per_midi_event * 60 * frames_per_second / beats_per_minute.")
         print("=" * 50)
         print("STEP 1: Running process_video.py")
         print("=" * 50)
         video_params = {
             'frames_per_second': frames_per_second,
-            'beats_per_midi_event': beats_per_midi_event,
-            'ticks_per_beat': ticks_per_beat,
+            'frame_interval': frame_interval,
             'downscale_large': downscale_large,
             'downscale_medium': downscale_medium,
             'max_frames': max_frames,
@@ -236,7 +241,7 @@ def main():
             'farneback_poly_n': farneback_poly_n,
             'farneback_poly_sigma': farneback_poly_sigma
         }
-        if not run_process_video(subdir_name, beats_per_minute, **video_params):
+        if not run_process_video(subdir_name, **video_params):
             success = False
             print("Failed to run process_video.py")
         else:
@@ -253,11 +258,6 @@ def main():
             'block_beats': block_beats,
             'stretch_values': stretch_values,
             'stretch_centers': stretch_centers,
-            'cc_number': cc_number,
-            'ticks_per_beat': ticks_per_beat,
-            'beats_per_minute': beats_per_minute,
-            'frames_per_second': frames_per_second,
-            'beats_per_midi_event': beats_per_midi_event,
             'farneback_preset': farneback_preset
         }
         if not run_process_metrics(subdir_name, **metrics_params):
@@ -285,12 +285,18 @@ def main():
                 normalization=clustering_normalization,
                 metrics_to_exclude=metrics_to_exclude,
                 random_state=clustering_random_state,
-                boxcar_periods=boxcar_periods,
-                beats_per_minute=beats_per_minute,
-                frames_per_second=frames_per_second,
-                ticks_per_beat=ticks_per_beat
+                boxcar_periods=boxcar_periods
             )
             print("Cluster analysis completed successfully")
+        print()
+
+    # Step 4: Write MIDI files (the only tempo-aware stage)
+    if write_midi and success:
+        print("=" * 50)
+        print("STEP 4: Writing MIDI files")
+        print("=" * 50)
+        write_midi_from_config(config)
+        print("MIDI writing completed successfully")
         print()
 
     if success:

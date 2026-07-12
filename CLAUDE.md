@@ -22,6 +22,10 @@ This file provides coding guidance to Claude Code when working with code in this
 - **Avoid if-then complexity**: Keep control flow simple and obvious
 - **Consistent Naming**: Use `_f{period:03d}` format for all filter periods (including `_f001` for unfiltered)
 
+## Output Location
+
+**By default, all output files must be written to `./data/output/` or a subdirectory thereof.** This applies to generated data, MIDI files, plots, one-off scripts' outputs, and any other artifacts. Do not write outputs to the repository root or other locations unless the user explicitly requests a different path.
+
 ## Critical Processing Order
 
 **WARNING**: The filtering step must come LAST in the processing pipeline. This is a recurring issue that has been fixed multiple times.
