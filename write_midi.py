@@ -207,12 +207,15 @@ def write_midi_from_config(config):
     frames_per_second = timing.get("frames_per_second", 30)
     ticks_per_beat = timing.get("ticks_per_beat", 480)
 
+    # video_name may contain a subdirectory (e.g. "N44/N44_testgi2"): the full
+    # path names the output directory, but file names use only the basename.
     output_prefix = f"{video_name}_{preset}"
     output_dir = f"data/output/{output_prefix}"
+    name_prefix = f"{os.path.basename(video_name)}_{preset}"
 
     frame_tick_map = build_frame_tick_map(beats_per_minute, frames_per_second, ticks_per_beat)
 
-    values_csv = f"{output_dir}/{output_prefix}_values.csv"
+    values_csv = f"{output_dir}/{name_prefix}_values.csv"
     if os.path.exists(values_csv):
         print(f"Using metrics values CSV: {values_csv}")
         render_metrics_midi(
@@ -225,10 +228,10 @@ def write_midi_from_config(config):
     else:
         print(f"No metrics values CSV at {values_csv}; skipping metrics MIDI")
 
-    clusters_csv = f"{output_dir}/{output_prefix}_clusters.csv"
+    clusters_csv = f"{output_dir}/{name_prefix}_clusters.csv"
     if os.path.exists(clusters_csv):
         print(f"Using clusters CSV: {clusters_csv}")
-        render_cluster_midi(clusters_csv, output_dir, output_prefix, frame_tick_map)
+        render_cluster_midi(clusters_csv, output_dir, name_prefix, frame_tick_map)
     else:
         print(f"No clusters CSV at {clusters_csv}; skipping cluster MIDI")
 

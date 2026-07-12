@@ -150,14 +150,17 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
     if block_beats is None:
         block_beats = []
 
-    # Create output prefix with farneback preset
+    # Create output prefix with farneback preset.  prefix may contain a
+    # subdirectory (e.g. "N44/N44_testgi2"): the full path is used for the
+    # output directory, but file names use only the basename so the
+    # subdirectory is not re-embedded as a nested (non-existent) directory.
     output_prefix = f"{prefix}_{farneback_preset}"
+    output_dir = f"data/output/{output_prefix}"
+    os.makedirs(output_dir, exist_ok=True)
 
-    if not os.path.exists(f"data/output/{output_prefix}"):
-        os.makedirs(f"data/output/{output_prefix}")
-
-    # Use original prefix for file names (without farneback preset)
-    file_prefix = prefix
+    # File-name prefixes (basename only): with and without the farneback preset.
+    name_prefix = f"{os.path.basename(prefix)}_{farneback_preset}"
+    file_prefix = os.path.basename(prefix)
     
     # replace NA values with 0
     csv = csv.fillna(0)
@@ -262,7 +265,7 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
     print(f"Writing out frame-indexed values CSV")
     values_df = pd.DataFrame(master_dict)
     values_df.insert(0, 'frame_count_list', frame_count_list)
-    values_csv_path = f"data/output/{output_prefix}/{output_prefix}_values.csv"
+    values_csv_path = f"{output_dir}/{name_prefix}_values.csv"
     values_df.to_csv(values_csv_path, index=False)
     print(f"Values saved to {values_csv_path}")
 
@@ -275,8 +278,8 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
     # Reorder columns to put frame_count_list first
     cols = ['frame_count_list'] + [col for col in master_df.columns if col != 'frame_count_list']
     master_df = master_df[cols]
-    master_df.to_excel(f"data/output/{output_prefix}/{file_prefix}_derived.xlsx", index=False)
-    print(f"Derived data saved to data/output/{output_prefix}/{file_prefix}_derived.xlsx")
+    master_df.to_excel(f"{output_dir}/{file_prefix}_derived.xlsx", index=False)
+    print(f"Derived data saved to {output_dir}/{file_prefix}_derived.xlsx")
 
     # Flexible sorting configuration
     # Define the order of fields for sorting (can be easily modified)
@@ -363,7 +366,7 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
     
     # write out a pdf book of plots of each of the metrics
     print(f"Writing out pdf book of plots of each of the metrics")
-    pdf = PdfPages(f"data/output/{output_prefix}/{file_prefix}_plots.pdf")
+    pdf = PdfPages(f"{output_dir}/{file_prefix}_plots.pdf")
     
     plt.rcParams['figure.max_open_warning'] = 50  # Allow more figures before warning
 
@@ -438,10 +441,13 @@ def process_metrics_to_midi(prefix, config=None):
 
     # Try to find the CSV file with farneback preset suffix in data/output/
     import glob
-    csv_files = glob.glob(f"data/output/{prefix}_{farneback_preset}/{prefix}_{farneback_preset}_basic.csv")
+    # File names use the basename of prefix (a subdirectory in prefix is not
+    # re-embedded in the file name), so glob on the basename.
+    base = os.path.basename(prefix)
+    csv_files = glob.glob(f"data/output/{prefix}_{farneback_preset}/{base}_{farneback_preset}_basic.csv")
     if not csv_files:
         # Try older pattern without preset
-        csv_files = glob.glob(f"data/output/{prefix}_*/{prefix}_*_basic.csv")
+        csv_files = glob.glob(f"data/output/{prefix}_*/{base}_*_basic.csv")
 
     if csv_files:
         csv_filename = csv_files[0]

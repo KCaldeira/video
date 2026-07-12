@@ -1084,12 +1084,16 @@ def process_video_to_csv(video_path,
         key_i = key.replace("_std", "_int")  # i for intensity !
         basic_metrics[key_i] = (180 - basic_metrics[key]) * diff_monos
 
-    # Create output directory if it doesn't exist
+    # Create output directory if it doesn't exist.  subdir_name may contain a
+    # subdirectory (e.g. "N44/N44_testgi2"): the full path is used for the
+    # directory, but file names use only its basename to avoid re-embedding the
+    # subdirectory as a nested (non-existent) directory.
     output_dir = f"data/output/{subdir_name}_{farneback_preset}"
     os.makedirs(output_dir, exist_ok=True)
+    name_prefix = f"{os.path.basename(subdir_name)}_{farneback_preset}"
 
     # Export metrics to CSV
-    csv_filename = f"{output_dir}/{subdir_name}_{farneback_preset}_basic.csv"
+    csv_filename = f"{output_dir}/{name_prefix}_basic.csv"
     export_metrics_to_csv(frame_count_list, basic_metrics, csv_filename)
     print(f"Metrics exported to {csv_filename}")
 
@@ -1104,7 +1108,7 @@ def process_video_to_csv(video_path,
         "farneback_preset": farneback_preset,
         "farneback_params": get_farneback_params(farneback_preset, **farneback_kwargs)
     }
-    config_filename = f"{output_dir}/{subdir_name}_{farneback_preset}_config.json"
+    config_filename = f"{output_dir}/{name_prefix}_config.json"
     with open(config_filename, 'w') as f:
         json.dump(config, f, indent=2)
     print(f"Config exported to {config_filename}")

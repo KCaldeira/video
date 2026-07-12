@@ -273,8 +273,11 @@ def main():
         print("STEP 3: Running cluster analysis")
         print("=" * 50)
 
-        # Build path to CSV file
-        csv_path = f"data/output/{subdir_name}_{farneback_preset}/{subdir_name}_{farneback_preset}_basic.csv"
+        # Build path to CSV file.  subdir_name may contain a subdirectory
+        # (e.g. "N44/N44_testgi2"): the full path names the output directory,
+        # but the file name uses only the basename.
+        csv_base = f"{os.path.basename(subdir_name)}_{farneback_preset}"
+        csv_path = f"data/output/{subdir_name}_{farneback_preset}/{csv_base}_basic.csv"
 
         if not os.path.exists(csv_path):
             print(f"Warning: CSV file not found at {csv_path}, skipping clustering")
