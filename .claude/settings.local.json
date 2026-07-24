@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(awk '/if __name__/{f=1} f' calculate_tempo_from_inverse.py)",
+      "Bash(awk '/def compute_beat_tempos_from_inverse/{f=1} f&&/y_values|\\\\.s\\\\b|module|__import__|getattr|hasattr|exec|open\\\\\\(/{print NR\": \"$0} f&&/^def [a-z]/&&!/compute_beat_tempos_from_inverse/{exit}' calculate_tempo_from_inverse.py)",
+      "Bash(git check-ignore *)",
+      "Bash(git fetch *)",
+      "Bash(git ls-tree *)",
+      "Bash(git add *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(git checkout *)"
+    ]
+  }
+}

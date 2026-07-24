@@ -5,6 +5,7 @@
 !*.py
 !*.txt
 !*.md
+!*.json
 
 # Allow .gitignore itself
 !.gitignore
@@ -14,9 +15,11 @@
 
 # But ignore all files in directories (except the allowed extensions)
 **/*
+!**/
 !**/*.py
 !**/*.txt
 !**/*.md
+!**/*.json
 
 # Explicitly ignore virtual environments
 .venv/
