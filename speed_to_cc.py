@@ -43,7 +43,9 @@ def read_speed_data(filepath):
             return np.array(namespace['y_values'])
         elif 's' in namespace:
             return np.array(namespace['s'])
-        raise ValueError(f"Could not find 'y_values' or 's' in {filepath}")
+        elif 'r' in namespace:
+            return np.array(namespace['r'])
+        raise ValueError(f"Could not find 'y_values', 's', or 'r' in {filepath}")
 
     else:
         raise ValueError(f"Unsupported file extension: {ext} (expected .py, .csv, or .kfs)")
