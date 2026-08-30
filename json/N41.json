@@ -1,0 +1,77 @@
+{
+  "description": "Default configuration for video processing pipeline",
+  "input": {
+    "directory": "data/input",
+    "note": "Video files are read from this directory"
+  },
+  "output": {
+    "directory": "data/output",
+    "note": "All output files (CSV, MIDI, Excel, PDF) are written to subdirectories within this path"
+  },
+  "video": {
+    "video_name": "N41_OrgM3-c5f-AN483",
+    "file_extensions": [
+      ".wmv",
+      ".mp4"
+    ],
+    "max_frames": null
+  },
+  "timing": {
+    "frames_per_second": 30,
+    "beats_per_minute": 120,
+    "beats_per_midi_event": 1,
+    "ticks_per_beat": 480
+  },
+  "video_processing": {
+    "downscale_large": 100,
+    "downscale_medium": 10,
+    "optical_flow": {
+      "preset": "default",
+      "pyr_scale": 0.5,
+      "levels": 3,
+      "winsize": 15,
+      "iterations": 3,
+      "poly_n": 5,
+      "poly_sigma": 1.2
+    } 
+  },
+  "metrics_processing": {
+    "filter_periods": [
+      33,
+      65,
+      129
+    ],
+    "stretch_values": [
+      8
+    ],
+    "stretch_centers": [
+      0.33,
+      0.67
+    ],
+    "cc_number": 1
+  },
+  "pipeline_control": {
+    "process_video": true,
+    "process_metrics": true,
+    "process_clusters": true
+  },
+  "cluster_processing": {
+    "k_values": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "normalization": "rank",
+    "metrics_to_exclude": [],
+    "random_state": 42,
+    "boxcar_periods": [
+      33
+    ]
+  }
+}
