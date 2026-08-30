@@ -31,12 +31,15 @@ This repository contains tools for video analysis and tempo mapping, providing t
    pip install -r requirements.txt
    ```
 
-2. **Create a configuration file**:
+2. **Create a configuration file** in the `json/` folder (copy an existing
+   config, or build one from the [Configuration Structure](#configuration-structure)
+   below):
    ```bash
-   cp default_config.json my_video.json
+   cp json/some_existing_config.json json/my_video.json
    ```
 
-3. **Edit configuration** and set your video name:
+3. **Edit configuration** — set your video name and the required
+   `frame_interval` (see [Video Processing](#video-processing-section-video_processing)):
    ```json
    "video": {
      "video_name": "my_video"
@@ -50,7 +53,7 @@ This repository contains tools for video analysis and tempo mapping, providing t
 
 5. **Run the pipeline**:
    ```bash
-   python run_video_processing.py my_video.json
+   python run_video_processing.py json/my_video.json
    ```
 
 6. **Find outputs** in `data/output/my_video_default/`
@@ -224,12 +227,12 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
   "timing": {
     "frames_per_second": 30,
     "beats_per_minute": 64,
-    "beats_per_midi_event": 1,
     "ticks_per_beat": 480
   },
   "video_processing": {
     "downscale_large": 100,
     "downscale_medium": 10,
+    "frame_interval": 28.125,
     "optical_flow": {
       "preset": "default",
       "pyr_scale": 0.5,
@@ -242,13 +245,23 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
   },
   "metrics_processing": {
     "filter_periods": [17, 65, 257],
+    "block_beats": [],
     "stretch_values": [8],
     "stretch_centers": [0.33, 0.67],
     "cc_number": 1
   },
+  "cluster_processing": {
+    "k_values": [2, 3, 4, 5, 6, 8, 10, 12],
+    "normalization": "rank",
+    "metrics_to_exclude": [],
+    "random_state": 42,
+    "boxcar_periods": null
+  },
   "pipeline_control": {
-    "skip_video": false,
-    "skip_metrics": false
+    "process_video": true,
+    "process_metrics": true,
+    "process_clusters": true,
+    "write_midi": true
   }
 }
 ```
@@ -277,16 +290,16 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `frames_per_second` | int | `30` | Video frame rate |
-| `beats_per_minute` | int | `64` | Tempo for MIDI output |
-| `beats_per_midi_event` | int | `1` | MIDI event granularity |
+| `beats_per_minute` | int/float/string | `64` | Tempo for MIDI output. A number = constant tempo; a string = path to a MIDI tempo file (variable tempo, e.g. produced by `calculate_tempo_from_inverse.py`) |
 | `ticks_per_beat` | int | `480` | MIDI resolution |
+
+> **Note:** `beats_per_midi_event` from older configs is no longer read. Analysis-frame sampling is now controlled by `video_processing.frame_interval` (see below). Tempo is applied only in the MIDI-writing stage, so video analysis is tempo-free.
 
 **Example**:
 ```json
 "timing": {
   "frames_per_second": 30,
   "beats_per_minute": 120,
-  "beats_per_midi_event": 1,
   "ticks_per_beat": 480
 }
 ```
@@ -297,6 +310,7 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 |-----------|------|---------|-------------|
 | `downscale_large` | int | `100` | Large downscale factor |
 | `downscale_medium` | int | `10` | Medium downscale factor |
+| `frame_interval` | int/float | **REQUIRED** (when `process_video` runs) | Spacing, in video frames, between analysed frames (may be fractional). The analysis stage is tempo-free and samples every `frame_interval`-th frame. To get one analysis sample per beat, set it to `60 × frames_per_second / beats_per_minute` (e.g. `28.125` at 30 fps / 64 BPM, `16.667` at 30 fps / 108 BPM). Non-integer values are handled without drift — each target frame is recomputed as `round(k × frame_interval)`. |
 
 **Optical Flow Parameters**:
 
@@ -326,15 +340,24 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `filter_periods` | array | `[17, 65, 257]` | Smoothing filter window sizes |
+| `filter_periods` | array | `[17, 65, 257]` | Triangular (weighted moving-average) smoothing window sizes. Produces smooth, continuous curves. Each period becomes a column suffixed `_f{period:03d}` (`_f001` = unfiltered pass-through). |
+| `block_beats` | array | `[]` | **Block (boxcar) averaging** window sizes, in beats. Groups consecutive rows into blocks of N and replaces each block with its mean, producing a **stair-step (piecewise-constant)** curve — distinct from the triangular `filter_periods`. Each size becomes a column suffixed `_b{beats:03d}` (`_b001` = pass-through) and flows through the same downstream stages (stretch → invert → MIDI), yielding its own MIDI track. Units are beats **only when** one CSV row equals one beat, i.e. `frame_interval` = `60 × fps / bpm`. |
 | `stretch_values` | array | `[8]` | Non-linear stretch factors |
 | `stretch_centers` | array | `[0.33, 0.67]` | Center points for stretching |
 | `cc_number` | int | `1` | MIDI continuous controller number |
 
-**Example - Multiple filter periods**:
+**`filter_periods` vs `block_beats`** — the two smoothers are complementary:
+
+| Option | Filter shape | Result | Column suffix |
+|--------|--------------|--------|---------------|
+| `filter_periods` | triangular (weighted) moving average | smooth, continuous curve | `_f{period:03d}` |
+| `block_beats` | flat block mean over N beats | stair-step / piecewise-constant "hold for N beats" | `_b{beats:03d}` |
+
+**Example - Filters plus block averaging (4 / 8 / 16 bars at 4 beats/bar)**:
 ```json
 "metrics_processing": {
-  "filter_periods": [17, 65, 257, 513],
+  "filter_periods": [65, 129],
+  "block_beats": [16, 32, 64],
   "stretch_values": [4, 8, 16],
   "stretch_centers": [0.25, 0.5, 0.75],
   "cc_number": 1
@@ -346,8 +369,9 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `process_video` | bool | `true` | Run video analysis (extract primary metrics) |
-| `process_metrics` | bool | `true` | Run metrics processing (MIDI generation) |
+| `process_metrics` | bool | `true` | Run metrics processing (derive metrics, write values CSV) |
 | `process_clusters` | bool | `true` | Run clustering analysis |
+| `write_midi` | bool | `true` | Write MIDI files (the only tempo-aware stage; renders metrics and cluster CSVs to `.mid`) |
 
 **Example - Reprocess metrics only**:
 ```json
@@ -364,6 +388,24 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
   "process_video": false,
   "process_metrics": false,
   "process_clusters": true
+}
+```
+
+#### Cluster Processing Section (`cluster_processing`)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `k_values` | array | `[2, 3, 4, 5, 6, 8, 10, 12]` | Cluster counts (k) to try |
+| `normalization` | string | `"rank"` | Feature normalization method |
+| `metrics_to_exclude` | array | `[]` | Metric column names to drop before clustering |
+| `random_state` | int | `42` | Random seed for reproducibility |
+| `boxcar_periods` | array/null | `null` | **Iterative boxcar (majority-vote) smoothing** of cluster assignments — odd-integer widths, in **rows/frames**, applied repeatedly until convergence to remove cluster flickering. Distinct from `metrics_processing.block_beats`: it smooths integer cluster IDs, not metric values. Each period becomes a `_b`-suffixed cluster track. |
+
+**Example - Smooth cluster assignments**:
+```json
+"cluster_processing": {
+  "k_values": [4, 6, 8],
+  "boxcar_periods": [15, 31]
 }
 ```
 
