@@ -1,0 +1,47 @@
+{
+  "description": "Config for N47_organic-s2F-AN402",
+  "video": {
+    "video_name": "N47/N47_organic-s2F-AN402",
+    "file_extensions": [".wmv", ".mp4"],
+    "max_frames": null
+  },
+  "timing": {
+    "frames_per_second": 30,
+    "beats_per_minute": 108,
+    "ticks_per_beat": 480
+  },
+  "video_processing": {
+    "downscale_large": 100,
+    "downscale_medium": 10,
+    "frame_interval": 16.666666666666668,
+    "optical_flow": {
+      "preset": "default",
+      "pyr_scale": 0.5,
+      "levels": 3,
+      "winsize": 15,
+      "iterations": 3,
+      "poly_n": 5,
+      "poly_sigma": 1.2
+    }
+  },
+  "metrics_processing": {
+    "filter_periods": [65, 129],
+    "block_beats": [16, 32, 64],
+    "stretch_values": [8],
+    "stretch_centers": [0.33, 0.67],
+    "cc_number": 1
+  },
+  "cluster_processing": {
+    "k_values": [2, 3, 4, 5, 6, 8, 10, 12],
+    "normalization": "rank",
+    "metrics_to_exclude": [],
+    "random_state": 42,
+    "boxcar_periods": null
+  },
+  "pipeline_control": {
+    "process_video": true,
+    "process_metrics": true,
+    "process_clusters": true,
+    "write_midi": true
+  }
+}
