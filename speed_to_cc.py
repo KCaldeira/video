@@ -4,6 +4,9 @@ import mido
 import struct
 import os
 
+# Full-scale value for the generated CC1 tracks (MIDI allows up to 127).
+CC_MAX = 100
+
 
 def read_speed_data(filepath):
     """
@@ -52,15 +55,15 @@ def read_speed_data(filepath):
 
 
 def scale_to_cc(values):
-    """Scale an array to 0-127 integer range."""
+    """Scale an array to 0-CC_MAX integer range."""
     vmin = np.min(values)
     vmax = np.max(values)
     vrange = vmax - vmin
     if vrange > 0:
-        scaled = ((values - vmin) / vrange * 127).astype(int)
+        scaled = ((values - vmin) / vrange * CC_MAX).astype(int)
     else:
-        scaled = np.full(len(values), 64, dtype=int)
-    return np.clip(scaled, 0, 127)
+        scaled = np.full(len(values), CC_MAX // 2, dtype=int)
+    return np.clip(scaled, 0, CC_MAX)
 
 
 def make_cc_track(name, cc_values, ticks_per_frame, tempo_us=None, note=None):
@@ -119,9 +122,9 @@ def speed_to_cc_midi(input_path, tempo_bpm, output_path):
     cc_percentile = scale_to_cc(percentile_rank)
 
     # Tracks 4, 5, 6: inverted versions
-    cc_speed_inv = 127 - cc_speed
-    cc_inverse_inv = 127 - cc_inverse
-    cc_percentile_inv = 127 - cc_percentile
+    cc_speed_inv = CC_MAX - cc_speed
+    cc_inverse_inv = CC_MAX - cc_inverse
+    cc_percentile_inv = CC_MAX - cc_percentile
 
     # Build MIDI file. set_tempo lives on the first track so any DAW reading
     # the file knows the intended tempo without guessing.
@@ -145,14 +148,14 @@ file of CC1 (modulation) automation, one CC event per video frame at 30 fps.
 
 Six tracks are written, all carrying CC1 on channel 1:
 
-  1. CC1 <Quantity>                     value scaled linearly to 0-127
-  2. CC1 Inverse <Quantity>             1/value, scaled to 0-127
-  3. CC1 <Quantity> Percentile          percentile rank of value, 0-127
-  4. CC1 <Quantity> Inverted            127 - track 1
-  5. CC1 Inverse <Quantity> Inverted    127 - track 2
-  6. CC1 <Quantity> Percentile Inverted 127 - track 3
+  1. CC1 <Quantity>                     value scaled linearly to 0-100
+  2. CC1 Inverse <Quantity>             1/value, scaled to 0-100
+  3. CC1 <Quantity> Percentile          percentile rank of value, 0-100
+  4. CC1 <Quantity> Inverted            100 - track 1
+  5. CC1 Inverse <Quantity> Inverted    100 - track 2
+  6. CC1 <Quantity> Percentile Inverted 100 - track 3
 
-Each track is scaled independently so it spans the full 0-127 range.
+Each track is scaled independently so it spans the full 0-100 range.
 
 If the input filename contains "rot", the tracks are labelled "Rotation"
 instead of "Speed" and a text note recording the sign convention
