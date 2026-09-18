@@ -60,6 +60,27 @@ python run_video_processing.py config.json
 2. **Metrics Processing** (process_metrics.py) - Derive metrics, generate MIDI
 3. **Clustering** (cluster_primary.py) - Group similar frames
 
+### Audio Leveling Workflow (separate from the video pipeline)
+```bash
+python audio_level_curve.py INPUT_AUDIO [--target-lufs -28] [--mean-distance 15]
+python curve_to_dawproject.py POINTS_CSV AUDIO_FILE
+```
+1. **audio_level_curve.py** - K-weighted (BS.1770) loudness -> smoothed -> gain curve
+2. **curve_to_dawproject.py** - gain curve + audio -> `.dawproject` for Cubase
+
+Uses flag-based CLIs (the `speed_to_cc.py` style), not JSON configs. Key
+invariants for this workflow:
+- **Smoothing is specified by mean weighting distance**, not window width, so
+  all kernels are comparable. A one-minute boxcar is `--mean-distance 15`.
+  `audio_smoothing.py` is the single source of truth for the conversions.
+- **Volume riding only.** Limiting, normalizing, and peak-setting are a
+  separate concern and deliberately excluded; do not add them here.
+- **No loss of information.** Never resample, never reduce bit depth. The
+  preview render is always 32-bit float at the source rate; the DAWproject
+  embeds the source audio byte for byte.
+- Outputs go directly in `data/output/` named `{input_stem}_{tag}_*`, where
+  the tag encodes the curve-shaping settings (e.g. `c28_gau15`).
+
 ### Directory Structure
 - Videos: `data/input/`
 - Outputs: `data/output/{video_name}_{preset}/`

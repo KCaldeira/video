@@ -1,9 +1,10 @@
 # Video Processing and Tempo Mapping Suite
 
-This repository contains tools for video analysis and tempo mapping, providing two complementary workflows:
+This repository contains tools for video analysis, tempo mapping, and audio leveling, providing three complementary workflows:
 
 1. **Visual Metrics Pipeline** (`run_video_processing.py`) - Extracts comprehensive visual metrics from videos and generates MIDI CC tracks
 2. **Tempo Mapping** (`calculate_tempo_from_inverse.py`) - Generates variable tempo maps from zoom/speed data
+3. **Audio Leveling** (`audio_level_curve.py` + `curve_to_dawproject.py`) - Computes a volume-riding curve from an audio file and delivers it to Cubase as a DAWproject automation envelope
 
 ---
 
@@ -11,14 +12,20 @@ This repository contains tools for video analysis and tempo mapping, providing t
 
 - [Quick Start: Visual Metrics Pipeline](#quick-start-visual-metrics-pipeline)
 - [Quick Start: Tempo Mapping](#quick-start-tempo-mapping)
+- [Quick Start: Audio Leveling](#quick-start-audio-leveling)
 - [Entry Points](#entry-points)
   - [Visual Metrics Pipeline](#1-run_video_processingpy---visual-metrics-pipeline)
   - [Tempo Mapping](#2-calculate_tempo_from_inversepy---variable-tempo-mapping)
+  - [Audio Leveling](#3-audio_level_curvepy--curve_to_dawprojectpy---audio-leveling)
 - [Architecture: Visual Metrics Pipeline](#architecture-visual-metrics-pipeline)
 - [Configuration](#configuration)
 - [Video Analysis](#video-analysis-process_videopy)
 - [Metrics Processing](#metrics-processing-process_metricspy)
 - [Frame Clustering](#frame-clustering-cluster_primarypy)
+- [Audio Leveling](#audio-leveling-audio_level_curvepy)
+  - [Choosing the Mean Weighting Distance](#choosing-the-mean-weighting-distance)
+  - [Choosing the Target](#choosing-the-target)
+  - [Worked Example](#worked-example)
 - [Future Integration](#future-integration-tempo-synchronized-visual-metrics)
 - [Additional Utilities](#additional-utilities)
 
@@ -90,6 +97,39 @@ This repository contains tools for video analysis and tempo mapping, providing t
 - **Constant tempo** (no zoom influence): `scaling_param = 0.0`
 - **Linear 10% blend**: `use_log_scale = False, scaling_param = 0.1`
 - **Log ±20 BPM per doubling**: `use_log_scale = True, scaling_param = 20.0`
+
+---
+
+## Quick Start: Audio Leveling
+
+Compute a volume curve that evens out an audio file, then carry it into Cubase.
+
+```bash
+# 1. Analyze the audio and build the gain curve
+python audio_level_curve.py "data/input/my_song.wav"
+
+# 2. Package the curve and the audio into a DAWproject
+python curve_to_dawproject.py \
+    "data/output/my_song_cf25_gau15_gain_points.csv" \
+    "data/input/my_song.wav"
+
+# 3. In Cubase: File > Import > DAWproject
+```
+
+Step 1 also writes `my_song_cf25_gau15_leveled.wav`, a preview render, so you
+can hear the result before opening Cubase.
+
+The defaults need no knowledge of the file: the target is **derived from the
+audio** so the volume is reduced 25% of the time. The two knobs worth reaching
+for are `--target-fraction` (how often the level comes down) and
+`--mean-distance` (how quickly the curve may move).
+
+Both stages document themselves:
+
+```bash
+python audio_level_curve.py --help
+python curve_to_dawproject.py --help
+```
 
 ---
 
@@ -167,6 +207,26 @@ use_log_scale = False  # or True, doesn't matter for constant tempo
 ```
 
 ---
+
+### 3. `audio_level_curve.py` + `curve_to_dawproject.py` - Audio Leveling
+
+**Usage**:
+```bash
+python audio_level_curve.py INPUT_AUDIO [options]
+python curve_to_dawproject.py POINTS_CSV AUDIO_FILE [options]
+```
+
+**What it does**:
+- Measures EBU R128 / ITU-R BS.1770 K-weighted loudness over short blocks
+- Smooths that loudness with a kernel specified by its **mean weighting distance**
+- Turns the smoothed loudness into a gain curve (a slow fader ride)
+- Renders a preview and packages the curve into a `.dawproject` for Cubase
+
+**Key modules**: `audio_smoothing.py` (kernels), `audio_level_curve.py` (analysis),
+`curve_to_dawproject.py` (DAWproject writer)
+
+---
+
 
 ## Architecture: Visual Metrics Pipeline
 
@@ -862,6 +922,374 @@ python run_video_processing.py my_video.json
 
 ---
 
+## Audio Leveling (audio_level_curve.py)
+
+### Overview
+
+Produces a slowly-varying gain curve that evens out the loudness of an audio
+file, then delivers it to Cubase as a DAWproject volume automation envelope.
+Two stages, run separately:
+
+1. `audio_level_curve.py` - audio in, gain curve + preview out
+2. `curve_to_dawproject.py` - gain curve + audio in, `.dawproject` out
+
+### Loudness Measurement
+
+Loudness is EBU R128 / ITU-R BS.1770 K-weighted LUFS, measured over
+overlapping blocks (`--block-length`, default 0.4 s) at a fixed spacing
+(`--block-hop`, default 0.1 s). The K-weighting filter coefficients are derived
+for the file's own sample rate, so nothing is resampled. Calibration check: a
+-20 dBFS 997 Hz sine measures -20.00 LUFS.
+
+### Smoothing: Mean Weighting Distance
+
+Every smoothing method is specified by one method-independent quantity, the
+**mean weighting distance**:
+
+```
+d = integral |t| * w(t) dt
+```
+
+for the normalized symmetric weight function `w`. For a boxcar this is a
+quarter of the full width, so **a one-minute boxcar is `--mean-distance 15`**.
+Because all methods are normalized the same way, the same `--mean-distance`
+smooths by the same amount whichever method you pick — at `d` = 15 s all five
+have a 10-90% step rise time of about 48 s.
+
+| `--smoothing-method` | scale from `d` | notes |
+|---|---|---|
+| `boxcar` | half-width `h = 2d` | flat window; discretized by area overlap |
+| `triangular` | half-width `h = 3d` | Bartlett, as in `process_metrics.py` |
+| `gaussian` (default) | `sigma = d*sqrt(pi/2)` | no ringing, no hard edges |
+| `tricube` | half-width `h = (22/7)d` | the Tukey tri-cube weight |
+| `loess` | tricube span, `h = (22/7)d` | local **linear** fit; follows ramps into the edges |
+
+The scale is solved numerically so the *discrete* kernel on the block grid has
+exactly the requested mean weighting distance; the factors above are the
+large-window limit.
+
+### Choosing the Mean Weighting Distance
+
+This is the main knob, and it changes the character of the result more than
+anything else. Shorter distances track the material more closely, so the
+smoothed curve swings further and the ride works harder.
+
+| `--mean-distance` | Behaves like | Use when |
+|---|---|---|
+| 20-60 s | Riding a fader between sections | Balancing movements or scenes against each other |
+| 8-15 s | A careful engineer riding phrases | General-purpose leveling; a good starting point |
+| 3-8 s | Aggressive riding | Individual phrases stand out too much |
+| < 3 s | Slow compression | Rarely what you want from an automation envelope |
+
+Below roughly 3 s the tool stops behaving like volume automation and starts
+behaving like a compressor with a very slow attack. If you find yourself
+reaching for those values, a compressor is probably the better instrument.
+
+**Worked comparison.** One source (679.8 s, integrated -26.05 LUFS), one
+target (`--target-lufs -28`), four mean weighting distances. Everything except
+the smoothing is held constant:
+
+| `--mean-distance` | Gaussian sigma | Smoothed loudness range | Ride depth | Points | Preview peak |
+|---|---|---|---|---|---|
+| 2.5 s | 3.13 s | -34.6 to -19.5 LUFS | -8.45 dB | 241 | -9.46 dBFS |
+| 5 s | 6.27 s | -33.5 to -20.7 LUFS | -7.31 dB | 116 | -8.53 dBFS |
+| 10 s | 12.53 s | -32.1 to -23.0 LUFS | -5.01 dB | 53 | -7.43 dBFS |
+| 15 s | 18.80 s | -31.1 to -23.9 LUFS | -4.06 dB | 37 | -6.69 dBFS |
+
+Roughly, halving the mean weighting distance doubles the automation point
+count and adds about 1.5 dB of ride depth. At 15 s the curve makes a handful
+of slow 1-2 dB dips; at 2.5 s it makes about 25 distinct dips, several
+reaching 6-8 dB. Both are legitimate, but they are different effects.
+
+Because the tag encodes the setting, runs at different distances coexist in
+`data/output/` and can be compared by ear:
+
+```bash
+python audio_level_curve.py song.wav --target-lufs -28 --mean-distance 15
+python audio_level_curve.py song.wav --target-lufs -28 --mean-distance 5
+# -> song_c28_gau15_leveled.wav  and  song_c28_gau5_leveled.wav
+```
+
+⚠️ **Match levels when auditioning.** Note the preview peaks in the table
+above: a deeper ride pulls the loudest moments further down, so the previews
+differ by nearly 3 dB end to end. Louder reliably sounds better in an A/B, so
+comparing them as-is will favor the longest mean distance for the wrong
+reason. Level-match in your player or DAW before judging.
+
+### Choosing the Target
+
+There are two ways to set the level the ride aims at. They are mutually
+exclusive.
+
+#### `--target-fraction` (default)
+
+Sets the target **from the audio itself**, as the fraction of the time the
+volume should be reduced. `--target-fraction 0.25` places the target where a
+quarter of the material sits above it, so the volume comes down a quarter of
+the time. The target is the `1 - fraction` quantile of the smoothed loudness,
+computed over audible (ungated) blocks only — there is no audio in a gated
+stretch to reduce.
+
+This is the default (0.25) because it adapts to the material. The same setting
+means the same thing on every file, whatever its absolute level.
+
+```bash
+python audio_level_curve.py song.wav --target-fraction 0.25
+```
+
+```
+STEP 3: gain curve
+  target derived from the audio: -26.58 LUFS (25% of the time above it)
+  ride range -7.03 to +0.00 dB
+  volume reduced 25.0% of the audible time
+```
+
+The achieved fraction is reported and matches the request to within 0.1%.
+
+Not valid with `--mode boost-only`, which never reduces the volume.
+
+#### `--target-lufs`
+
+Sets the target as an absolute loudness. Use it when you want the same anchor
+across several files, for instance when they must sit together in a mix.
+
+The catch is that an absolute target may miss the material entirely. In
+`cut-only` mode it is a ceiling, so if it sits above the file's whole smoothed
+loudness range the curve does nothing and `STEP 3` reports a ride range of
+`+0.00 to +0.00 dB`. Check the range first:
+
+```bash
+python audio_level_curve.py song.wav --no-preview
+```
+
+```
+STEP 2: smoothing
+  smoothed loudness range -31.1 to -23.9 LUFS
+```
+
+#### Why the fraction usually wins
+
+Two recordings from the same session, same `--mean-distance 2.5`:
+
+| File | Setting | Target | Ride depth | Time reduced |
+|---|---|---|---|---|
+| `-04` | `--target-lufs -28` | -28.00 LUFS | -8.45 dB | **36.6%** |
+| `-06` | `--target-lufs -28` | -28.00 LUFS | -4.23 dB | **13.1%** |
+| `-04` | `--target-fraction 0.25` | -26.58 LUFS | -7.03 dB | **25.0%** |
+| `-06` | `--target-fraction 0.25` | -30.26 LUFS | -6.49 dB | **25.0%** |
+
+The same absolute target treats the two files very differently, because they
+sit at different absolute levels. The same fraction treats them consistently,
+deriving a different target for each to do so.
+
+### Headroom Report
+
+Every run reports how much the result can be turned up before clipping:
+
+```
+STEP 5: headroom
+  true peak with the curve applied: -8.33 dBFS
+  headroom before 0 dBFS: 8.33 dB
+  -> the whole file can be raised by up to 8.33 dB
+```
+
+By default this is an **inter-sample (true) peak**, measured by oversampling
+4x per ITU-R BS.1770-4 Annex 2, so it accounts for the reconstructed waveform
+overshooting the highest sample. `--peak-mode sample` reports only the highest
+sample, which is faster and less conservative.
+
+This is measurement only — the tool reports the number and does not act on it.
+Applying the makeup gain is a separate step, consistent with this tool doing
+volume riding and nothing else. The value is in the config JSON as
+`headroom_db`.
+
+Deeper rides leave more headroom, since they pull the loudest moments further
+down. On one test file: 6.69 dB of headroom at `--mean-distance 15`, rising to
+9.45 dB at 2.5 s.
+
+### The Silence Gate
+
+Blocks quieter than `--gate-lufs` (default -50) are excluded from the smoothing
+and the remaining kernel weights are renormalized. A silent stretch therefore
+inherits an interpolated gain from the music on either side, instead of
+dragging the curve down and producing a spurious boost.
+
+### Modes
+
+`--mode` controls the direction of the ride. The algorithm is identical in all
+three; only the clamp on the gain differs.
+
+| Mode | Behavior |
+|---|---|
+| `cut-only` (default) | Gain clamped to <= 0 dB. Passages at or below `--target-lufs` are left **exactly** alone; only louder passages are pulled down. The target acts as a **ceiling**. |
+| `both` | Symmetric leveling toward the target. |
+| `boost-only` | Gain clamped to >= 0 dB. |
+
+The clamp is applied after smoothing, so in `cut-only` the curve sits flat at
+0 dB and dips through loud passages, with corners where it crosses the
+threshold — the same shape a person riding a fader produces.
+
+### What This Tool Does Not Do
+
+It only rides the volume. It does **not** limit, normalize, or set the peak
+level. Those are a separate concern and belong in a separate step run
+afterwards. Keeping them apart avoids conflating two different operations on
+the same curve.
+
+### No Loss of Information
+
+- Nothing is resampled; the output sample rate always equals the input's.
+- The preview is always written as **32-bit float**, so applying gain to 24-bit
+  source audio does not requantize it. Where the gain is unity the preview is
+  bit-identical to the source.
+- `curve_to_dawproject.py` copies the source audio into the archive **byte for
+  byte** — never decoded, re-encoded, resampled, or requantized. Cubase
+  receives the original file plus a fader move.
+
+### Output Files
+
+Written to `data/output/`, named `{input_stem}_{tag}_*`:
+
+| File | Contents |
+|---|---|
+| `..._gain_curve.csv` | full resolution: `time_s,lufs_raw,lufs_smooth,gain_db,gain_linear,valid` |
+| `..._gain_points.csv` | decimated automation points — **input to stage 2** |
+| `..._leveled.wav` | preview render, 32-bit float at the source rate |
+| `..._plot.png` | loudness before, gain curve, loudness after |
+| `..._config.json` | every parameter used for the run |
+| `....dawproject` | stage 2 output |
+
+The tag encodes the settings that shape the curve, so different settings land
+in different files and a repeat of the same settings overwrites cleanly. For
+example `song_cf25_gau15_leveled.wav` is a cut-only ride reducing 25% of the
+time, with gaussian smoothing at a 15 s mean weighting distance;
+`song_c28_gau15_leveled.wav` is the same but anchored to an absolute -28 LUFS
+ceiling. Use `--tag` to name
+a run yourself.
+
+### DAWproject Notes
+
+[DAWproject](https://github.com/bitwig/dawproject) is a ZIP holding
+`project.xml`, `metadata.xml`, and media. Cubase has supported it since
+14.0.20; import with **File > Import > DAWproject**.
+
+- **Everything is in seconds.** The schema makes `Transport`/`Tempo` optional
+  and gives every timeline its own `timeUnit`, so no position in the generated
+  file depends on tempo. A `Tempo` element is written anyway because Cubase
+  always has a project tempo, but nothing positional uses it.
+- **Automation values are linear gain**, matching the `unit="linear"` declared
+  on the track's `Volume` parameter. `--volume-max-db` sets that parameter's
+  ceiling and defaults to +12 dB, Cubase's own fader maximum. The writer fails
+  loudly if the curve exceeds it.
+- `--external-audio` references the audio by absolute path instead of
+  embedding it, producing a tiny file — but the path must resolve on the
+  importing machine.
+- `--validate Project.xsd` validates the generated XML against the
+  [official schema](https://raw.githubusercontent.com/bitwig/dawproject/main/Project.xsd)
+  before writing. Requires `xmlschema`.
+
+### Worked Example
+
+A full pass over a 679.8 s, 48 kHz, 24-bit stereo recording.
+
+**1. Run with the defaults.** The target is derived from the audio, so this
+works without knowing anything about the file:
+
+```bash
+python audio_level_curve.py "data/input/N47 2026-09-17-04.wav" --no-preview
+```
+
+```
+  Format:           48000 Hz, 2 ch, PCM_24, 679.8 s
+  Target:           reduce the volume 25% of the time (derived from the audio)
+STEP 1: measuring K-weighted loudness
+  6798 blocks, loudness range -300.7 to -14.8 LUFS
+  2 blocks (0.0%) below the gate
+STEP 2: smoothing
+  smoothed loudness range -31.1 to -23.9 LUFS
+STEP 3: gain curve
+  target derived from the audio: -28.61 LUFS (25% of the time above it)
+  ride range -4.68 to +0.00 dB
+  volume reduced 25.0% of the audible time
+```
+
+The two gated blocks are digital silence at the head of the recording.
+
+**2. Adjust the fraction to taste and render a preview:**
+
+```bash
+python audio_level_curve.py "data/input/N47 2026-09-17-04.wav" --mean-distance 2.5
+```
+
+```
+STEP 4: decimating to automation points
+  6798 blocks -> 160 points (tolerance 0.05 dB)
+STEP 5: headroom
+  -> the whole file can be raised by up to 8.33 dB
+STEP 6: writing outputs
+  data/output/N47 2026-09-17-04_cf25_gau2.5_gain_curve.csv
+  data/output/N47 2026-09-17-04_cf25_gau2.5_gain_points.csv
+  data/output/N47 2026-09-17-04_cf25_gau2.5_plot.png
+  data/output/N47 2026-09-17-04_cf25_gau2.5_leveled.wav  (peak -8.33 dBFS)
+  data/output/N47 2026-09-17-04_cf25_gau2.5_config.json
+```
+
+**3. Check the plot and listen to the preview.** In `cut-only` mode the bottom
+panel should show the smoothed trace clipped flat at the target where the
+source exceeded it, and untouched below it.
+
+**4. Package for Cubase:**
+
+```bash
+python curve_to_dawproject.py \
+    "data/output/N47 2026-09-17-04_c28_gau15_gain_points.csv" \
+    "data/input/N47 2026-09-17-04.wav"
+```
+
+```
+  Gain range:       -4.06 to +0.00 dB
+  Volume ceiling:   +12.00 dB (linear 3.981072)
+  Audio placement:  embedded
+Wrote data/output/N47 2026-09-17-04_c28_gau15.dawproject (195.8 MB)
+```
+
+The archive holds `project.xml` (~5 KB), `metadata.xml`, and the source audio
+stored uncompressed and byte-identical to the input.
+
+---
+
+### Standalone Usage
+
+```bash
+# Reduce the volume 40% of the time instead of the default 25%
+python audio_level_curve.py song.wav --target-fraction 0.40
+
+# Anchor to an absolute level instead of deriving one
+python audio_level_curve.py song.wav --target-lufs -28
+
+# One-minute-boxcar-equivalent smoothing
+python audio_level_curve.py song.wav --mean-distance 15 --smoothing-method boxcar
+
+# Two-sided leveling
+python audio_level_curve.py song.wav --mode both --target-lufs -20
+
+# Tighter automation curve (more points)
+python audio_level_curve.py song.wav --point-tolerance-db 0.01
+```
+
+### Tests
+
+```bash
+python test_audio_smoothing.py
+```
+
+Verifies the two claims the workflow rests on: that each kernel's mean
+weighting distance is what was requested, and that the loudness measurement is
+calibrated to the BS.1770 reference (a -20 dBFS 997 Hz sine reads -20 LUFS).
+Also covers the silence gate and the loess edge behavior.
+
+---
+
 ## Dependencies
 
 Install via `pip install -r requirements.txt`:
@@ -873,6 +1301,11 @@ Install via `pip install -r requirements.txt`:
 - **Matplotlib** - Plotting and PDF generation
 - **SciPy** - Statistical functions
 - **scikit-learn** - Machine learning (Gaussian mixture models)
+- **SoundFile** - Audio file reading and writing (audio leveling workflow)
+
+Optional:
+
+- **xmlschema** - Only needed for `curve_to_dawproject.py --validate`
 
 Python version: 3.10+
 
@@ -938,6 +1371,10 @@ See `example_config.json` for a working example with a specific video.
 - **`find_extrema.py`** - Finds local maxima/minima in time series data
 - **`create_group_channel.py`** - MIDI channel grouping utility
 - **`speed_to_cc.py`** - Converts speed data into a fixed-tempo MIDI with CC1 tracks
+- **`audio_smoothing.py`** - Smoothing kernels parameterized by mean weighting distance (library, used by `audio_level_curve.py`)
+- **`audio_level_curve.py`** - Builds a loudness-leveling gain curve from an audio file
+- **`curve_to_dawproject.py`** - Packages a gain curve and its audio into a `.dawproject` for Cubase
+- **`test_audio_smoothing.py`** - Checks for the smoothing kernels and loudness calibration
 
 ### `speed_to_cc.py` - Speed Data to MIDI CC Tracks
 

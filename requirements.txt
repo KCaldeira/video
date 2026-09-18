@@ -23,6 +23,10 @@ scikit-image==0.24.0
 # Excel file handling (for derived data output)
 openpyxl==3.1.5
 
+# Audio file reading and writing (audio leveling workflow)
+# Wraps libsndfile; reads 24-bit WAV natively and MP3 via libsndfile >= 1.1
+soundfile==0.14.0
+
 # Additional dependencies for specific functionality
 # Note: These are included in the above packages but listed for clarity
 # - struct: Built-in Python module for binary data handling
@@ -33,3 +37,8 @@ openpyxl==3.1.5
 # - collections: Built-in Python module for specialized container datatypes
 # - json: Built-in Python module for JSON handling
 # - sys: Built-in Python module for system-specific parameters
+# - zipfile: Built-in Python module for reading and writing DAWproject archives
+# - wave: Built-in Python module for WAV headers
+#
+# Optional, for validating generated DAWproject files against the schema:
+# - xmlschema (only needed when passing --validate to curve_to_dawproject.py)
