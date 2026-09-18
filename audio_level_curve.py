@@ -124,6 +124,21 @@ READ_BLOCK_FRAMES = 1 << 18
 # Default fraction of the audible time spent under volume reduction.
 DEFAULT_TARGET_FRACTION = 0.25
 
+# Where the loudest point of the finished curve is placed, in dBFS.
+DEFAULT_PEAK_DBFS = -0.1
+
+# Largest boost allowed by default. Boosting lifts the noise floor with the
+# signal, so this stays finite. Cutting does not, so it is unlimited by
+# default -- see DEFAULT_MAX_CUT_DB.
+DEFAULT_MAX_BOOST_DB = 12.0
+
+# No limit on how far the ride may pull the level down.
+DEFAULT_MAX_CUT_DB = float("inf")
+
+# Cubase's fader maximum. Gains above this cannot be represented on a Cubase
+# volume fader, so the run warns when the curve exceeds it.
+CUBASE_FADER_MAX_DB = 12.0
+
 # The preview is always written as 32-bit float at the source sample rate, so
 # applying gain never requantizes the audio or changes its rate.
 PREVIEW_SUBTYPE = "FLOAT"
@@ -330,7 +345,8 @@ def render_preview(path, out_path, point_times, point_gain_linear):
     return peak
 
 
-def write_plot(out_path, times, lufs_raw, lufs_smooth, gain_db, target_lufs, gate_lufs, valid, title):
+def write_plot(out_path, times, lufs_raw, lufs_smooth, gain_db, target_lufs,
+               gate_lufs, valid, title, makeup_db=0.0):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -366,8 +382,13 @@ def write_plot(out_path, times, lufs_raw, lufs_smooth, gain_db, target_lufs, gat
 
     axes[2].plot(minutes, lufs_raw + gain_db, lw=0.5, color="0.7", label="measured + gain")
     axes[2].plot(minutes, lufs_smooth + gain_db, lw=1.8, color="C0", label="smoothed + gain")
-    axes[2].axhline(target_lufs, color="C3", ls="--", lw=1.2)
-    axes[2].set_ylim(low, high)
+    # The gain includes any constant makeup, so the result sits makeup_db
+    # above the target the ride aimed at. Shift both the reference line and
+    # the axis by the same amount, keeping the vertical scale identical to
+    # the panel above so the two can be read against each other.
+    axes[2].axhline(target_lufs + makeup_db, color="C3", ls="--", lw=1.2,
+                    label=f"target {target_lufs + makeup_db:.1f} LUFS")
+    axes[2].set_ylim(low + makeup_db, high + makeup_db)
     axes[2].set_ylabel("resulting loudness (LUFS)")
     axes[2].set_xlabel("time (minutes)")
     axes[2].legend(loc="lower right", fontsize=8)
@@ -382,7 +403,8 @@ def write_plot(out_path, times, lufs_raw, lufs_smooth, gain_db, target_lufs, gat
 MODE_CODE = {"cut-only": "c", "both": "b", "boost-only": "o"}
 
 
-def build_tag(mode, target_lufs, target_fraction, method, mean_distance_s):
+def build_tag(mode, target_lufs, target_fraction, method, mean_distance_s,
+              peak_dbfs, makeup):
     """
     Short suffix encoding the settings that change the curve, so two runs with
     different settings cannot overwrite each other and a repeat of the same
@@ -392,7 +414,12 @@ def build_tag(mode, target_lufs, target_fraction, method, mean_distance_s):
         target_part = f"f{target_fraction * 100:g}"
     else:
         target_part = f"{abs(target_lufs):g}"
-    return f"{MODE_CODE[mode]}{target_part}_{method[:3]}{mean_distance_s:g}"
+    peak_part = {
+        "none": "pkoff",
+        "curve": f"pk{abs(peak_dbfs):g}",
+        "clip-gain": f"cg{abs(peak_dbfs):g}",
+    }[makeup]
+    return f"{MODE_CODE[mode]}{target_part}_{method[:3]}{mean_distance_s:g}_{peak_part}"
 
 
 def main():
@@ -485,6 +512,24 @@ def main():
         "points (default: %(default)s)",
     )
     parser.add_argument(
+        "--peak-dbfs",
+        type=float,
+        default=DEFAULT_PEAK_DBFS,
+        help="place the loudest point of the finished curve here, by adding a "
+        "constant to the whole curve; this shifts the level without changing "
+        "the shape of the ride (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--makeup",
+        choices=("clip-gain", "curve", "none"),
+        default="clip-gain",
+        help="where the constant makeup gain goes. clip-gain keeps it out of "
+        "the automation curve and reports it for you to dial in by hand, so "
+        "the envelope stays within a fader's range; curve folds it into the "
+        "envelope, which can exceed what a DAW fader allows; none applies no "
+        "makeup at all (default: %(default)s)",
+    )
+    parser.add_argument(
         "--peak-mode",
         choices=("true", "sample"),
         default="true",
@@ -518,15 +563,15 @@ def main():
         if args.max_boost_db is not None and args.max_boost_db != 0.0:
             parser.error("--mode cut-only implies --max-boost-db 0; remove one of them")
         max_boost_db = 0.0
-        max_cut_db = 12.0 if args.max_cut_db is None else args.max_cut_db
+        max_cut_db = DEFAULT_MAX_CUT_DB if args.max_cut_db is None else args.max_cut_db
     elif args.mode == "boost-only":
         if args.max_cut_db is not None and args.max_cut_db != 0.0:
             parser.error("--mode boost-only implies --max-cut-db 0; remove one of them")
         max_cut_db = 0.0
-        max_boost_db = 12.0 if args.max_boost_db is None else args.max_boost_db
+        max_boost_db = DEFAULT_MAX_BOOST_DB if args.max_boost_db is None else args.max_boost_db
     else:
-        max_boost_db = 12.0 if args.max_boost_db is None else args.max_boost_db
-        max_cut_db = 12.0 if args.max_cut_db is None else args.max_cut_db
+        max_boost_db = DEFAULT_MAX_BOOST_DB if args.max_boost_db is None else args.max_boost_db
+        max_cut_db = DEFAULT_MAX_CUT_DB if args.max_cut_db is None else args.max_cut_db
 
     # Exactly one way of setting the target; fraction is the default because
     # it adapts to the material, where an absolute value may miss it entirely.
@@ -556,7 +601,7 @@ def main():
     stem = os.path.splitext(os.path.basename(args.input_file))[0]
     tag = args.tag or build_tag(
         args.mode, args.target_lufs, target_fraction, args.smoothing_method,
-        args.mean_distance,
+        args.mean_distance, args.peak_dbfs, args.makeup,
     )
     name_prefix = f"{stem}_{tag}"
     output_dir = args.output_dir
@@ -587,8 +632,15 @@ def main():
     else:
         print(f"  Target:           {args.target_lufs:g} LUFS"
               f"{' (ceiling)' if args.mode == 'cut-only' else ''}")
-    print(f"  Gain limits:      +{max_boost_db:g} / -{max_cut_db:g} dB")
+    cut_label = "no limit" if np.isinf(max_cut_db) else f"-{max_cut_db:g} dB"
+    print(f"  Gain limits:      +{max_boost_db:g} dB boost / {cut_label} cut")
     print(f"  Gate:             {args.gate_lufs:g} LUFS")
+    peak_label = {
+        "none": "no makeup applied (headroom reported only)",
+        "curve": f"{args.peak_dbfs:+g} dBFS, makeup folded into the curve",
+        "clip-gain": f"{args.peak_dbfs:+g} dBFS, makeup reported for clip gain",
+    }[args.makeup]
+    print(f"  Peak:             {peak_label} ({args.peak_mode} peak)")
     print(f"  Smoothing:        {audio_smoothing.describe(args.smoothing_method, args.mean_distance, args.block_hop)}")
     print(f"  Output:           {output_dir}/{name_prefix}_*")
     print()
@@ -645,21 +697,48 @@ def main():
     print(f"  {len(lufs_raw)} blocks -> {len(point_times)} points "
           f"(tolerance {args.point_tolerance_db:g} dB)")
 
-    gain_db = ride_db
-    point_gain_db = point_ride_db
-    point_gain_linear = 10.0 ** (point_gain_db / 20.0)
-
-    print("\nSTEP 5: headroom")
+    print("\nSTEP 5: peak")
     # Measured from the decimated points, so this is the peak of exactly what
-    # the DAW envelope will produce. Reported only -- the curve is not altered.
-    peak = measure_leveled_peak(
-        args.input_file, point_times, point_gain_linear, args.peak_mode
+    # the DAW envelope will produce, not of a higher-resolution curve.
+    ride_peak = measure_leveled_peak(
+        args.input_file, point_times, 10.0 ** (point_ride_db / 20.0), args.peak_mode
     )
-    peak_dbfs = 20.0 * np.log10(max(peak, 1e-30))
-    headroom_db = -peak_dbfs
-    print(f"  {args.peak_mode} peak with the curve applied: {peak_dbfs:+.2f} dBFS")
+    ride_peak_dbfs = 20.0 * np.log10(max(ride_peak, 1e-30))
+    headroom_db = -ride_peak_dbfs
+    print(f"  {args.peak_mode} peak after the ride: {ride_peak_dbfs:+.2f} dBFS")
     print(f"  headroom before 0 dBFS: {headroom_db:.2f} dB")
-    print(f"  -> the whole file can be raised by up to {headroom_db:.2f} dB")
+
+    # A single constant, so it shifts the level without changing the shape of
+    # the ride. Where it gets applied is what --makeup selects.
+    makeup_db = 0.0 if args.makeup == "none" else args.peak_dbfs - ride_peak_dbfs
+
+    # The curve written to CSV (and on to the DAWproject) carries the makeup
+    # only in "curve" mode. The preview always renders the finished result, so
+    # what you hear is the end state including a clip-gain move you make later.
+    curve_makeup_db = makeup_db if args.makeup == "curve" else 0.0
+    gain_db = ride_db + curve_makeup_db
+    point_gain_db = point_ride_db + curve_makeup_db
+    point_gain_linear = 10.0 ** (point_gain_db / 20.0)
+    preview_gain_linear = 10.0 ** ((point_ride_db + makeup_db) / 20.0)
+    peak_dbfs = ride_peak_dbfs + makeup_db
+
+    if args.makeup == "clip-gain":
+        print()
+        print(f"  ==> APPLY {makeup_db:+.2f} dB OF CLIP GAIN IN CUBASE <==")
+        print(f"      the automation curve holds the ride only "
+              f"({gain_db.min():+.2f} to {gain_db.max():+.2f} dB), which fits any fader;")
+        print(f"      with that clip gain the peak lands at {peak_dbfs:+.2f} dBFS")
+        print()
+    elif args.makeup == "curve":
+        print(f"  makeup folded into the curve: {makeup_db:+.2f} dB")
+        print(f"  final gain range {gain_db.min():+.2f} to {gain_db.max():+.2f} dB")
+        print(f"  final {args.peak_mode} peak: {peak_dbfs:+.2f} dBFS")
+        if gain_db.max() > CUBASE_FADER_MAX_DB:
+            print(f"  NOTE: the curve peaks at {gain_db.max():+.2f} dB, above Cubase's "
+                  f"+{CUBASE_FADER_MAX_DB:g} dB fader maximum; --makeup clip-gain avoids this")
+    else:
+        print(f"  no makeup applied; curve range {gain_db.min():+.2f} to "
+              f"{gain_db.max():+.2f} dB")
 
     print("\nSTEP 6: writing outputs")
     gain_linear = 10.0 ** (gain_db / 20.0)
@@ -687,10 +766,12 @@ def main():
 
     plot_path = os.path.join(output_dir, f"{name_prefix}_plot.png")
     write_plot(
-        plot_path, times, lufs_raw, lufs_smooth, gain_db, target_lufs,
+        plot_path, times, lufs_raw, lufs_smooth, ride_db + makeup_db, target_lufs,
         args.gate_lufs, valid,
         f"{stem}  |  {args.mode}, target {target_lufs:.1f} LUFS, "
-        f"{args.smoothing_method} d={args.mean_distance:g}s",
+        f"{args.smoothing_method} d={args.mean_distance:g}s"
+        + (f", makeup {makeup_db:+.2f} dB" if makeup_db else ""),
+        makeup_db,
     )
     print(f"  {plot_path}")
 
@@ -698,7 +779,7 @@ def main():
     if not args.no_preview:
         preview_path = os.path.join(output_dir, f"{name_prefix}_leveled.wav")
         rendered_peak = render_preview(
-            args.input_file, preview_path, point_times, point_gain_linear
+            args.input_file, preview_path, point_times, preview_gain_linear
         )
         print(f"  {preview_path}  (peak {20.0 * np.log10(max(rendered_peak, 1e-30)):+.2f} dBFS)")
 
@@ -723,14 +804,21 @@ def main():
                 "mean_distance_s": args.mean_distance,
                 "smoothing_method": args.smoothing_method,
                 "max_boost_db": max_boost_db,
-                "max_cut_db": max_cut_db,
+                "max_cut_db": None if np.isinf(max_cut_db) else max_cut_db,
                 "gate_lufs": args.gate_lufs,
                 "block_hop_s": args.block_hop,
                 "block_length_s": args.block_length,
                 "point_tolerance_db": args.point_tolerance_db,
                 "peak_mode": args.peak_mode,
-                "leveled_peak_dbfs": float(peak_dbfs),
+                "peak_dbfs_target": args.peak_dbfs,
+                "makeup_mode": args.makeup,
+                "clip_gain_to_apply_db": (
+                    float(makeup_db) if args.makeup == "clip-gain" else 0.0
+                ),
+                "ride_peak_dbfs": float(ride_peak_dbfs),
                 "headroom_db": float(headroom_db),
+                "makeup_db": float(makeup_db),
+                "leveled_peak_dbfs": float(peak_dbfs),
                 "ride_db_min": float(ride_db.min()),
                 "ride_db_max": float(ride_db.max()),
                 "preview_subtype": PREVIEW_SUBTYPE,
