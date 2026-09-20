@@ -789,14 +789,19 @@ def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_regi
     distance_from_center = np.sqrt(rel_x**2 + rel_y**2)
     
     # Zoom metrics (divergence of flow) - only in centered region
-    # Positive divergence = zoom out, negative = zoom in
+    # Flow runs prev -> curr, so magnifying the image moves features outward
+    # from the centre and the flow field diverges.
+    # Positive divergence = zoom IN, negative = zoom out.
+    # (Verified with synthetic 1.05x/0.95x warps: +0.071 / -0.078.)
     # Divergence = ∂u/∂x + ∂v/∂y (approximated using finite differences)
     du_dx = np.gradient(flow_x_center, axis=1)
     dv_dy = np.gradient(flow_y_center, axis=0)
     zoom_divergence = float(np.mean(du_dx + dv_dy))
     
     # Rotation metrics (curl of flow) - only in centered region
-    # Positive curl = counterclockwise rotation, negative = clockwise
+    # The image y-axis points down, so this curl is positive for rotation
+    # that appears CLOCKWISE on screen.
+    # (Verified with synthetic +/-3 deg warps: CCW -0.074, CW +0.074.)
     # Curl = ∂v/∂x - ∂u/∂y (approximated using finite differences)
     dv_dx = np.gradient(flow_y_center, axis=1)
     du_dy = np.gradient(flow_x_center, axis=0)

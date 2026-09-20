@@ -1,5 +1,5 @@
 {
-  "description": "N48 visual metrics -> DAWproject volume automation. Every column of the values CSV becomes a track, so track count is controlled by narrowing metrics_processing.",
+  "description": "N48 visual metrics -> DAWproject volume automation. Full run: frame step 6 (0.2 s/row, divides the 486-frame cycle), zoom-direction metrics, rank normalisation.",
   "video": {
     "video_name": "N48_SSSj(10)a(5)a6",
     "file_extensions": [
@@ -12,8 +12,8 @@
     "frames_per_second": 30
   },
   "video_processing": {
-    "_comment_process_every_nth_frame": "Integer video-frame step between analysis rows. Seconds per row = process_every_nth_frame / frames_per_second (15 / 30 = 0.5 s).",
-    "process_every_nth_frame": 15,
+    "_comment_process_every_nth_frame": "Integer video-frame step between analysis rows. 6 divides the 486-frame (16.2 s) zoom cycle exactly (486 = 2 x 3^5), so every cycle is sampled at the same phase with no drift. 6/30 = 0.2 s per row, 81 rows per cycle. Divisors of 486 available as steps: 1 2 3 6 9 18 27 54.",
+    "process_every_nth_frame": 6,
     "downscale_large": 100,
     "downscale_medium": 10,
     "optical_flow": {
@@ -50,10 +50,9 @@
       "o",
       "i"
     ],
-    "_comment_filter_seconds": "Triangular smoothing widths in seconds; converted to the nearest odd number of analysis rows using process_every_nth_frame / frames_per_second. Column suffix _f032s etc.",
+    "_comment_filter_seconds": "Triangular smoothing widths in seconds, converted to the nearest odd number of analysis rows (so the actual width quantises to a multiple of the row spacing). 4.75 s is one third of N48's ~14.2 s of zoom per ~16.2 s cycle. Fractional values are allowed; the column tag is _f004.75s.",
     "filter_seconds": [
-      32,
-      64
+      4.75
     ],
     "_comment_block_seconds": "Block-average widths in seconds, piecewise constant. Suffix _b016s etc.",
     "block_seconds": [],

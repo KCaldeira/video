@@ -72,17 +72,19 @@ def add_derived_columns(csv):
         cra_col = f"{base_name}_cra"
         
         # Create the new metrics
-        # crl = max(crc, 0) - captures positive rotation (counterclockwise)
-        csv[crl_col] = np.maximum(csv[crc_col], 0)
-        
-        # crr = max(-crc, 0) - captures negative rotation (clockwise)
-        csv[crr_col] = np.maximum(-csv[crc_col], 0)
+        # crl = counterclockwise speed. Positive crc is clockwise on screen
+        # (the image y-axis points down), so the negative side is CCW.
+        csv[crl_col] = np.maximum(-csv[crc_col], 0)
+
+        # crr = clockwise speed
+        csv[crr_col] = np.maximum(csv[crc_col], 0)
         
         # cra = abs(crc) - captures absolute rotation magnitude
         csv[cra_col] = np.abs(csv[crc_col])
 
     # Add zoom metrics (czi, czo, cza) based on czd, mirroring the rotation
-    # split above. czd is signed: positive is zoom out, negative is zoom in.
+    # split above. czd is signed: positive is zoom IN, negative is zoom out
+    # (magnifying moves features outward, so the flow field diverges).
     # Half-wave rectifying gives one signal per direction, each zero unless
     # the camera is moving that way, so separate sounds can follow each.
     czd_columns = [col for col in csv.columns if "_czd" in col]
@@ -90,11 +92,11 @@ def add_derived_columns(csv):
     for czd_col in czd_columns:
         base_name = czd_col.replace("_czd", "")
 
-        # czi = max(-czd, 0) - zoom-in speed (zero while zooming out)
-        csv[f"{base_name}_czi"] = np.maximum(-csv[czd_col], 0)
+        # czi = max(czd, 0) - zoom-in speed (zero while zooming out)
+        csv[f"{base_name}_czi"] = np.maximum(csv[czd_col], 0)
 
-        # czo = max(czd, 0) - zoom-out speed (zero while zooming in)
-        csv[f"{base_name}_czo"] = np.maximum(csv[czd_col], 0)
+        # czo = max(-czd, 0) - zoom-out speed (zero while zooming in)
+        csv[f"{base_name}_czo"] = np.maximum(-csv[czd_col], 0)
 
         # cza = abs(czd) - zoom speed regardless of direction
         csv[f"{base_name}_cza"] = np.abs(csv[czd_col])
@@ -170,6 +172,20 @@ def block_average(data, N):
     # Mean of each block, then broadcast back to per-row values
     block_means = np.bincount(group, weights=data) / np.bincount(group)
     return block_means[group]
+
+
+def width_tag(seconds):
+    """
+    Column-name tag for a width in seconds: 32 -> "032", 4.75 -> "004.75".
+
+    The integer part stays zero-padded to three digits so that names still
+    sort sensibly, and a fractional part is appended only when there is one.
+    """
+    if float(seconds).is_integer():
+        return f"{int(seconds):03d}"
+    whole = int(seconds)
+    fraction = f"{seconds:g}".split(".")[1]
+    return f"{whole:03d}.{fraction}"
 
 
 def seconds_to_odd_rows(seconds, seconds_per_row):
@@ -299,7 +315,7 @@ def post_process(csv, prefix, filter_seconds, stretch_values, stretch_centers,
                 # Widths are given in seconds and named in seconds; the row
                 # count they map to depends on the sampling rate.
                 for seconds in filter_seconds:
-                    new_key = entry_key + f"_f{seconds:03d}s"
+                    new_key = entry_key + f"_f{width_tag(seconds)}s"
                     rows = seconds_to_odd_rows(seconds, seconds_per_row)
                     if rows == 1:
                         # Shorter than one row: no filtering to do
@@ -312,7 +328,7 @@ def post_process(csv, prefix, filter_seconds, stretch_values, stretch_centers,
                 # named in seconds, merged into filtered_entries so it flows
                 # through the same downstream stages
                 for seconds in block_seconds:
-                    new_key = entry_key + f"_b{seconds:03d}s"
+                    new_key = entry_key + f"_b{width_tag(seconds)}s"
                     rows = int(round(seconds / seconds_per_row))
                     if rows <= 1:
                         filtered_entries[new_key] = entry_data
@@ -413,8 +429,10 @@ def post_process(csv, prefix, filter_seconds, stretch_values, stretch_centers,
         # Extract smoothing period (field 4) - triangular filter (f###) or block average (b###)
         smoothing_period = None
         for part in parts[3:]:
-            # f032s / b016s -- a leading f or b, digits, trailing 's'
-            if part[:1] in ('f', 'b') and part[-1:] == 's' and part[1:-1].isdigit():
+            # f032s / f004.75s / b016s -- f or b, digits (maybe with a
+            # decimal point), trailing 's'
+            if (part[:1] in ('f', 'b') and part[-1:] == 's'
+                    and part[1:-1].replace('.', '', 1).isdigit()):
                 smoothing_period = part
                 break
         fields['smoothing_period'] = smoothing_period

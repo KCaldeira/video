@@ -74,8 +74,9 @@ def render_metrics_midi(values_csv, output_dir, frame_tick_map, cc_number,
     ticks_per_beat = frame_tick_map.ticks_per_beat
 
     variables = sorted(set(c.split('_')[0] for c in value_cols))
-    averaging_suffixes = [f"f{seconds:03d}s" for seconds in filter_seconds] + \
-                         [f"b{seconds:03d}s" for seconds in block_seconds]
+    from process_metrics import width_tag
+    averaging_suffixes = [f"f{width_tag(s)}s" for s in filter_seconds] + \
+                         [f"b{width_tag(s)}s" for s in block_seconds]
 
     midi_output_dir = os.path.join(output_dir, "metrics_midi")
     os.makedirs(midi_output_dir, exist_ok=True)
