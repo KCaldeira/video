@@ -840,12 +840,26 @@ independent of how many columns the values CSV holds:
 | `columns` | list | `[]` | Values-CSV column names to export, one group buss each. Required when `write_dawproject` is true |
 | `interpolation` | string | `"linear"` | Interpolation written on each `RealPoint` |
 
+#### Cubase Requires a Transport Tempo
+
+The schema makes `Transport/Tempo` optional (`minOccurs="0"`), but **Cubase
+will not load a project without one** — it fails silently, with nothing
+appearing. A `Tempo` is therefore always written, defaulting to 120 bpm when
+no `timing.beats_per_minute` is configured. The value is cosmetic: all times
+are in seconds, so nothing positional depends on it, and for a variable-tempo
+video it is simply wrong and harmless.
+
+This is the second case where **schema-valid is not the same as loadable**;
+the other is `contentType`, which is also optional and also required in
+practice. Schema validation catches malformed XML and bad enumeration values,
+not Cubase's undocumented expectations. After changing the emitted structure,
+always confirm with a real import.
+
 #### No `timing` Section Needed
 
 This stage reads **no** beats or ticks. `ticks_per_beat` is never read, and
-`beats_per_minute` only supplies a cosmetic `Transport` tempo — omit it and no
-`Tempo` element is written at all, which is the honest result for a video with
-a variable tempo map, where no single value would be correct.
+`beats_per_minute` only supplies the `Transport` tempo, which is cosmetic but
+must be present (see above); omitting it just means the 120 bpm default.
 
 The frame rate comes from `{name_prefix}_config.json`, the config
 `process_video` wrote beside the values CSV. That file is authoritative: it

@@ -18,8 +18,9 @@ written into the file is cosmetic; nothing positional depends on it.
 
 Nothing here needs beats or ticks. The frame rate is read from the config
 that process_video wrote next to the values CSV, which is authoritative: it
-records the rate actually used to produce those rows. A project tempo is
-written only if one is configured, purely as a cosmetic Transport value.
+records the rate actually used to produce those rows. A project tempo is always
+written, because Cubase will not load the file without one; it is cosmetic
+and nothing positional depends on it.
 
 Note that a track's time base (musical vs linear) is NOT part of the DAWproject
 schema; it is a DAW-side property applied when the track is created. In Cubase
@@ -89,6 +90,13 @@ APPLICATION_VERSION = "1.0"
 VOLUME_MAX = 1.0
 
 FRAME_COLUMN = "frame_count_list"
+
+# Cubase refuses to load a project whose Transport has no Tempo, even though
+# the schema makes it optional and nothing positional depends on it -- times
+# are seconds throughout. So one is always written, falling back to this when
+# the config states none. For a variable-tempo video the value is simply
+# wrong, and harmless; omitting it is not an option.
+DEFAULT_TEMPO_BPM = 120.0
 
 # Each column costs two Cubase tracks (the audio/buss pair), so a full
 # unfiltered CSV would be thousands. Refuse rather than emit something
@@ -284,11 +292,13 @@ def write_dawproject_from_config(config):
     preset = config.get("video_processing", {}).get("optical_flow", {}).get(
         "preset", "default")
 
-    # ticks_per_beat is not read at all, and beats_per_minute only supplies a
-    # cosmetic Transport tempo. A config may omit the timing section entirely.
+    # ticks_per_beat is not read at all, and beats_per_minute only supplies the
+    # Transport tempo, which is cosmetic but must be present for Cubase to
+    # load the file. A config may still omit the timing section entirely.
     beats_per_minute = config.get("timing", {}).get("beats_per_minute")
     tempo_bpm = (float(beats_per_minute)
-                 if isinstance(beats_per_minute, (int, float)) else None)
+                 if isinstance(beats_per_minute, (int, float))
+                 else DEFAULT_TEMPO_BPM)
 
     if "columns" in dawproject:
         raise ValueError(
