@@ -62,6 +62,12 @@
   },
   "dawproject": {
     "_comment": "Every column of the values CSV becomes one track. There is no column list: narrow metrics_processing to get fewer.",
+    "_comment_transport": "Cubase overwrites the target project's initial tempo marking and time signature with these on import, so set them to match that project and the import leaves it alone. N48's tempo map starts at 75 bpm in 1/4. Both are always written: Cubase will not load a file with no Tempo, and with no TimeSignature it imposes 4/4 rather than leaving the signature untouched.",
+    "tempo": 75,
+    "time_signature": [
+      1,
+      4
+    ],
     "max_columns": 64,
     "interpolation": "linear"
   },

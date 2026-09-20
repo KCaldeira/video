@@ -75,9 +75,16 @@ line — that string is accurate and names the binary that wrote the file.
   audio track carrying the automation plus a like-named dummy buss to copy it
   onto. Do not redesign this without first re-running the round-trip test.
 - **`contentType` is required** on a `Track`, or Cubase creates no track.
-- **`Transport/Tempo` is required**, or Cubase silently loads nothing. Both it
-  and `contentType` are optional in the schema, so **schema-valid is not the
-  same as loadable** — always confirm a structural change with a real import.
+- **`Transport/Tempo` is required**, or Cubase silently loads nothing.
+- **`Transport/TimeSignature` is required**, or Cubase imposes 4/4 on the
+  target project instead of leaving its signature alone.
+- Importing into an existing project **overwrites its initial tempo marking
+  and time signature**, so set `dawproject.tempo` and
+  `dawproject.time_signature` to match that project (N48: 75 bpm, 1/4).
+- `contentType`, `Tempo` and `TimeSignature` are all optional in the schema
+  and all required in practice: **schema-valid is not the same as loadable**,
+  and an optional element is not safe to omit. Confirm every structural
+  change with a real import.
 - **Track time base is not in the DAWproject schema.** Cubase applies
   *Preferences > Editing > Default Track Time Type* at import; set it to
   **Linear** or seconds-based automation will still move with tempo.

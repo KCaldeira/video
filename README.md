@@ -840,20 +840,36 @@ independent of how many columns the values CSV holds:
 | `columns` | list | `[]` | Values-CSV column names to export, one group buss each. Required when `write_dawproject` is true |
 | `interpolation` | string | `"linear"` | Interpolation written on each `RealPoint` |
 
-#### Cubase Requires a Transport Tempo
+#### Transport: Set Tempo and Time Signature to Match the Target Project
 
-The schema makes `Transport/Tempo` optional (`minOccurs="0"`), but **Cubase
-will not load a project without one** — it fails silently, with nothing
-appearing. A `Tempo` is therefore always written, defaulting to 120 bpm when
-no `timing.beats_per_minute` is configured. The value is cosmetic: all times
-are in seconds, so nothing positional depends on it, and for a variable-tempo
-video it is simply wrong and harmless.
+`Transport/Tempo` and `Transport/TimeSignature` are both optional in the
+schema and both effectively mandatory in Cubase:
 
-This is the second case where **schema-valid is not the same as loadable**;
-the other is `contentType`, which is also optional and also required in
-practice. Schema validation catches malformed XML and bad enumeration values,
-not Cubase's undocumented expectations. After changing the emitted structure,
-always confirm with a real import.
+- **No `Tempo`:** the project fails to load at all, silently.
+- **No `TimeSignature`:** the project loads, but Cubase imposes **4/4** on the
+  target project rather than leaving its signature alone.
+
+Both are therefore always written, and both are configurable, because
+**importing into an existing project overwrites that project's initial tempo
+marking and time signature** with these values. Set them to match the target
+and the import leaves the tempo track as it was:
+
+```json
+"dawproject": {
+  "tempo": 75,
+  "time_signature": [1, 4]
+}
+```
+
+The tempo is cosmetic for positioning — all times are in seconds — so a wrong
+value on a variable-tempo video is harmless in that respect, but it will still
+overwrite the initial marking.
+
+This is the third case where **schema-valid is not the same as loadable**,
+after `contentType` and `Tempo`. Schema validation catches malformed XML and
+bad enumeration values, not Cubase's undocumented expectations. An optional
+element in the schema is not safe to omit. After any structural change,
+confirm with a real import.
 
 #### No `timing` Section Needed
 

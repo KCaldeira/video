@@ -104,7 +104,8 @@ DEFAULT_TEMPO_BPM = 120.0
 DEFAULT_MAX_COLUMNS = 64
 
 
-def build_project_xml(times, columns, values, tempo_bpm, interpolation):
+def build_project_xml(times, columns, values, tempo_bpm, time_signature,
+                      interpolation):
     """
     Build the project.xml tree: one group buss per column, plus a master.
 
@@ -121,16 +122,20 @@ def build_project_xml(times, columns, values, tempo_bpm, interpolation):
     application.set("name", APPLICATION_NAME)
     application.set("version", APPLICATION_VERSION)
 
-    # Both Tempo and TimeSignature are optional. A tempo is written only when
-    # one is configured: nothing positional depends on it, and stating a wrong
-    # number is worse than stating none -- N48, for instance, runs a variable
-    # tempo map, so no single value would be correct.
+    # Both Tempo and TimeSignature are always written. The schema marks them
+    # optional, but Cubase will not load a project with no Tempo, and with no
+    # TimeSignature it silently imposes 4/4 rather than leaving the target
+    # project's signature alone. Omitting either is never useful.
+    #
+    # On import into an existing project Cubase overwrites that project's
+    # initial tempo marking and time signature with these values, so set them
+    # to match the target project and the import leaves it as it was.
     transport = ET.SubElement(root, "Transport")
-    if tempo_bpm is not None:
-        real_parameter(transport, "Tempo", tempo_bpm, "bpm", 20.0, 666.0, "Tempo", ids)
+    real_parameter(transport, "Tempo", tempo_bpm, "bpm", 20.0, 666.0, "Tempo", ids)
+    numerator, denominator = time_signature
     signature = ET.SubElement(transport, "TimeSignature")
-    signature.set("denominator", "4")
-    signature.set("numerator", "4")
+    signature.set("denominator", str(denominator))
+    signature.set("numerator", str(numerator))
     signature.set("id", ids.next())
 
     structure = ET.SubElement(root, "Structure")
@@ -235,7 +240,8 @@ def read_frames_per_second(stage1_config):
 
 
 def render_metrics_dawproject(values_csv, output_path, max_columns,
-                              frames_per_second, tempo_bpm, interpolation, title):
+                              frames_per_second, tempo_bpm, time_signature,
+                              interpolation, title):
     """Read the values CSV and write the .dawproject archive."""
     csv = pd.read_csv(values_csv)
 
@@ -258,7 +264,8 @@ def render_metrics_dawproject(values_csv, output_path, max_columns,
     times = csv[FRAME_COLUMN] / frames_per_second
 
     project_xml = serialize(
-        build_project_xml(times, columns, csv, tempo_bpm, interpolation)
+        build_project_xml(times, columns, csv, tempo_bpm, time_signature,
+                          interpolation)
     )
     validate_project_xml(project_xml)
     metadata_xml = serialize(
@@ -280,6 +287,8 @@ def render_metrics_dawproject(values_csv, output_path, max_columns,
     print("  Cubase will not import automation onto a group: copy each lane")
     print("  from the audio track to its like-named buss by hand.")
     print(f"  Time range: 0.000 to {times.iloc[-1]:.3f} seconds")
+    print(f"  Transport: {tempo_bpm:g} bpm, "
+          f"time signature {time_signature[0]:d}/{time_signature[1]:d}")
     print("Import in Cubase with File > Import > DAWproject.")
 
 
@@ -296,9 +305,18 @@ def write_dawproject_from_config(config):
     # Transport tempo, which is cosmetic but must be present for Cubase to
     # load the file. A config may still omit the timing section entirely.
     beats_per_minute = config.get("timing", {}).get("beats_per_minute")
-    tempo_bpm = (float(beats_per_minute)
-                 if isinstance(beats_per_minute, (int, float))
-                 else DEFAULT_TEMPO_BPM)
+    tempo_bpm = dawproject.get(
+        "tempo",
+        float(beats_per_minute) if isinstance(beats_per_minute, (int, float))
+        else DEFAULT_TEMPO_BPM)
+
+    # [numerator, denominator]. Always emitted -- see build_project_xml.
+    time_signature = dawproject.get("time_signature", [4, 4])
+    if time_signature is None or len(time_signature) != 2:
+        raise ValueError(
+            "dawproject.time_signature must be [numerator, denominator]. It "
+            "cannot be omitted: Cubase then imposes 4/4 on the target project "
+            "rather than leaving its signature alone.")
 
     if "columns" in dawproject:
         raise ValueError(
@@ -326,6 +344,7 @@ def write_dawproject_from_config(config):
         max_columns,
         frames_per_second,
         tempo_bpm,
+        time_signature,
         interpolation,
         name_prefix,
     )
