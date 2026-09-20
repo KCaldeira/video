@@ -6,6 +6,7 @@
 !*.txt
 !*.md
 !*.json
+!*.xsd
 
 # Allow .gitignore itself
 !.gitignore
@@ -20,6 +21,7 @@
 !**/*.txt
 !**/*.md
 !**/*.json
+!**/*.xsd
 
 # Explicitly ignore virtual environments
 .venv/

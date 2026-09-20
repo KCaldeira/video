@@ -25,6 +25,7 @@ from process_video import process_video_to_csv
 from process_metrics import process_metrics_to_midi
 from process_clusters import cluster_primary_metrics
 from write_midi import write_midi_from_config
+from write_dawproject import write_dawproject_from_config
 
 def run_process_video(subdir_name, **kwargs):
     """
@@ -54,7 +55,7 @@ def run_process_video(subdir_name, **kwargs):
             video_file,
             subdir_name,
             kwargs.get("frames_per_second", 30),
-            kwargs.get("frame_interval", 30),
+            kwargs["process_every_nth_frame"],
             kwargs.get("downscale_large", 100),
             kwargs.get("downscale_medium", 10),
             kwargs.get("max_frames", None),
@@ -72,25 +73,12 @@ def run_process_metrics(subdir_name, **kwargs):
     Run process_metrics_to_midi function directly with the specified subdir_name and parameters.
     """
     print(f"Running process_metrics_to_midi with subdir_name={subdir_name}")
-    
-    try:
-        # Create config dictionary with all parameters (tempo-free; MIDI is
-        # written separately by write_midi.py)
-        config = {
-            'filter_periods': kwargs.get('filter_periods', [17, 65, 257]),
-            'block_beats': kwargs.get('block_beats', []),
-            'stretch_values': kwargs.get('stretch_values', [8]),
-            'stretch_centers': kwargs.get('stretch_centers', [0.33, 0.67]),
-            'farneback_preset': kwargs.get('farneback_preset', 'default')
-        }
-        
-        # Call the function directly with config
-        process_metrics_to_midi(subdir_name, config)
-        print("process_metrics_to_midi completed successfully")
-        return True
-    except Exception as e:
-        print(f"Error running process_metrics_to_midi: {e}")
-        return False
+
+    # No try/except: a failure here should surface with its traceback rather
+    # than be flattened into a one-line message.
+    process_metrics_to_midi(subdir_name, dict(kwargs))
+    print("process_metrics_to_midi completed successfully")
+    return True
 
 def load_config(config_file):
     """
@@ -147,10 +135,16 @@ def main():
     downscale_large = video_proc_config.get('downscale_large', 100)
     downscale_medium = video_proc_config.get('downscale_medium', 10)
     max_frames = video_config.get('max_frames', None)
-    # Analysis-frame sampling is tempo-free: take one sample every frame_interval
-    # video frames (may be fractional).  Required when process_video runs; fail
-    # fast rather than silently guessing a sampling rate.
-    frame_interval = video_proc_config.get('frame_interval', None)
+    # Analysis-frame sampling is tempo-free: take one sample every N video
+    # frames.  Required when process_video runs; fail fast rather than
+    # silently guessing a sampling rate.
+    process_every_nth_frame = video_proc_config.get('process_every_nth_frame', None)
+    if 'frame_interval' in video_proc_config:
+        raise ValueError(
+            "video_processing.frame_interval has been replaced by "
+            "video_processing.process_every_nth_frame, which must be a whole "
+            "number of video frames. Seconds per analysis row is then "
+            "process_every_nth_frame / frames_per_second.")
 
     # Optical flow parameters
     farneback_preset = optical_flow_config.get('preset', 'default')
@@ -162,8 +156,18 @@ def main():
     farneback_poly_sigma = optical_flow_config.get('poly_sigma', 1.2)
 
     # Metrics processing parameters
-    filter_periods = metrics_config.get('filter_periods', [17, 65, 257])
-    block_beats = metrics_config.get('block_beats', [])
+    for removed, replacement in (("filter_periods", "filter_seconds"),
+                                 ("block_beats", "block_seconds")):
+        if removed in metrics_config:
+            raise ValueError(
+                f"metrics_processing.{removed} has been replaced by "
+                f"{replacement}; widths are now given in seconds, not rows")
+    filter_seconds = metrics_config.get('filter_seconds', [32, 64])
+    block_seconds = metrics_config.get('block_seconds', [])
+    color_channels = metrics_config.get('color_channels', [])
+    metric_names = metrics_config.get('metrics', [])
+    rank_types = metrics_config.get('rank_types', [])
+    inversions = metrics_config.get('inversions', [])
     stretch_values = metrics_config.get('stretch_values', [8])
     stretch_centers = metrics_config.get('stretch_centers', [0.33, 0.67])
     cc_number = metrics_config.get('cc_number', 1)
@@ -172,7 +176,9 @@ def main():
     process_video = pipeline_config.get('process_video', True)
     process_metrics = pipeline_config.get('process_metrics', True)
     process_clusters = pipeline_config.get('process_clusters', True)
-    write_midi = pipeline_config.get('write_midi', True)
+    # DAWproject is the output format; MIDI is legacy and opt-in.
+    write_midi = pipeline_config.get('write_midi', False)
+    write_dawproject = pipeline_config.get('write_dawproject', True)
 
     # Clustering parameters
     cluster_processing_config = config.get('cluster_processing', {})
@@ -188,12 +194,14 @@ def main():
     print(f"  Subdir name: {subdir_name}")
     print(f"  Beats per minute / tempo file: {beats_per_minute}")
     print(f"  Frames per second: {frames_per_second}")
-    print(f"  Frame interval: {frame_interval}")
+    print(f"  Process every Nth frame: {process_every_nth_frame}")
     print(f"  Ticks per beat: {ticks_per_beat}")
     print(f"  Downscale large: {downscale_large}")
     print(f"  Downscale medium: {downscale_medium}")
-    print(f"  Filter periods: {filter_periods}")
-    print(f"  Block beats: {block_beats}")
+    print(f"  Filter seconds: {filter_seconds}")
+    print(f"  Block seconds: {block_seconds}")
+    print(f"  Color channels: {color_channels or 'all'}")
+    print(f"  Metrics: {metric_names or 'all'}")
     print(f"  Stretch values: {stretch_values}")
     print(f"  Stretch centers: {stretch_centers}")
     print(f"  CC number: {cc_number}")
@@ -219,17 +227,16 @@ def main():
 
     # Step 1: Run process_video.py
     if process_video:
-        if frame_interval is None:
+        if process_every_nth_frame is None:
             raise ValueError(
-                "video_processing.frame_interval is required when process_video is enabled. "
-                "For a config migrated from the old schema, set it to "
-                "beats_per_midi_event * 60 * frames_per_second / beats_per_minute.")
+                "video_processing.process_every_nth_frame is required when "
+                "process_video is enabled.")
         print("=" * 50)
         print("STEP 1: Running process_video.py")
         print("=" * 50)
         video_params = {
             'frames_per_second': frames_per_second,
-            'frame_interval': frame_interval,
+            'process_every_nth_frame': process_every_nth_frame,
             'downscale_large': downscale_large,
             'downscale_medium': downscale_medium,
             'max_frames': max_frames,
@@ -254,10 +261,14 @@ def main():
         print("STEP 2: Running process_metrics.py")
         print("=" * 50)
         metrics_params = {
-            'filter_periods': filter_periods,
-            'block_beats': block_beats,
+            'filter_seconds': filter_seconds,
+            'block_seconds': block_seconds,
             'stretch_values': stretch_values,
             'stretch_centers': stretch_centers,
+            'color_channels': color_channels,
+            'metrics': metric_names,
+            'rank_types': rank_types,
+            'inversions': inversions,
             'farneback_preset': farneback_preset
         }
         if not run_process_metrics(subdir_name, **metrics_params):
@@ -300,6 +311,15 @@ def main():
         print("=" * 50)
         write_midi_from_config(config)
         print("MIDI writing completed successfully")
+        print()
+
+    # Step 5: Write DAWproject file (tempo-free; automation times are seconds)
+    if write_dawproject and success:
+        print("=" * 50)
+        print("STEP 5: Writing DAWproject file")
+        print("=" * 50)
+        write_dawproject_from_config(config)
+        print("DAWproject writing completed successfully")
         print()
 
     if success:

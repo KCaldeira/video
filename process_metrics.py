@@ -146,9 +146,65 @@ def block_average(data, N):
     return block_means[group]
 
 
-def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, block_beats=None, farneback_preset="default"):
-    if block_beats is None:
-        block_beats = []
+def seconds_to_odd_rows(seconds, seconds_per_row):
+    """
+    Convert a smoothing width in seconds to an odd number of analysis rows.
+
+    The triangular filter requires an odd length, so the nearest odd row count
+    is used and the requested seconds are kept for naming. A width shorter
+    than one row collapses to 1, which is a no-op filter.
+    """
+    rows = int(round(seconds / seconds_per_row))
+    if rows < 1:
+        rows = 1
+    if rows % 2 == 0:
+        rows += 1
+    return rows
+
+
+def read_seconds_per_row(prefix, farneback_preset):
+    """
+    Seconds between analysis rows, from the config process_video wrote.
+
+    That file is authoritative: it records the frame rate and frame step
+    actually used to produce the rows, so it cannot drift from them.
+    """
+    base = os.path.basename(prefix)
+    path = (f"data/output/{prefix}_{farneback_preset}/"
+            f"{base}_{farneback_preset}_config.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"No video-stage config at {path}; it records the frame rate and "
+            f"frame step needed to convert filter seconds to rows")
+    with open(path) as handle:
+        recorded = json.load(handle)
+    for key in ("frames_per_second", "process_every_nth_frame"):
+        if key not in recorded:
+            raise KeyError(f"{path} has no '{key}'")
+    return recorded["process_every_nth_frame"] / recorded["frames_per_second"]
+
+
+def select(requested, available, what):
+    """Restrict `available` to `requested`, failing on anything unknown."""
+    if not requested:
+        return sorted(available)
+    unknown = [r for r in requested if r not in available]
+    if unknown:
+        raise ValueError(
+            f"unknown {what}: {', '.join(sorted(unknown))}. "
+            f"available: {', '.join(sorted(available))}")
+    return [r for r in requested if r in available]
+
+
+def post_process(csv, prefix, filter_seconds, stretch_values, stretch_centers,
+                 block_seconds=None, farneback_preset="default",
+                 color_channels=None, metric_names=None,
+                 rank_types=None, inversions=None):
+    if block_seconds is None:
+        block_seconds = []
+
+    seconds_per_row = read_seconds_per_row(prefix, farneback_preset)
+    print(f"  Seconds per analysis row: {seconds_per_row:.4f}")
 
     # Create output prefix with farneback preset.  prefix may contain a
     # subdirectory (e.g. "N44/N44_testgi2"): the full path is used for the
@@ -181,8 +237,19 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
                 metrics.add(metric)
     
     # Process all combinations
-    for var in sorted(variables):
-        for metric in sorted(metrics):
+    # Narrow what gets generated. The values CSV is the contract for every
+    # downstream stage, so the way to get fewer output tracks is to generate
+    # fewer columns here rather than to filter later.
+    variables = select(color_channels, variables, "color_channels")
+    metrics = select(metric_names, metrics, "metrics")
+    ranks = select(rank_types, {"v", "r"}, "rank_types")
+    inverts = select(inversions, {"o", "i"}, "inversions")
+    print(f"  Channels: {variables}")
+    print(f"  Metrics:  {metrics}")
+    print(f"  Ranks:    {ranks}    Inversions: {inverts}")
+
+    for var in variables:
+        for metric in metrics:
             key = var + "_" + metric
             if key not in csv.columns:
                 continue
@@ -190,8 +257,10 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
 
             # Create base entries for processing
             raw_entries = {}
-            raw_entries[key + "_v"] = csv[key]
-            raw_entries[key + "_r"] = percentile_data(csv[key])
+            if "v" in ranks:
+                raw_entries[key + "_v"] = csv[key]
+            if "r" in ranks:
+                raw_entries[key + "_r"] = percentile_data(csv[key])
 
             # Scale the data to 0-1
             scaled_entries = {}
@@ -201,27 +270,28 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
             # Apply filtering first - create filtered entries
             filtered_entries = {}
             for entry_key, entry_data in scaled_entries.items():
-                for filter_period in filter_periods:
-                    # Create filtered version for all periods (including 1)
-                    new_key = entry_key + f"_f{filter_period:03d}"
-                    if filter_period == 1:
-                        # For period 1, just copy the data (no filtering)
+                # Widths are given in seconds and named in seconds; the row
+                # count they map to depends on the sampling rate.
+                for seconds in filter_seconds:
+                    new_key = entry_key + f"_f{seconds:03d}s"
+                    rows = seconds_to_odd_rows(seconds, seconds_per_row)
+                    if rows == 1:
+                        # Shorter than one row: no filtering to do
                         filtered_entries[new_key] = entry_data
                     else:
-                        # For other periods, apply triangular filtering and rescale to 0-1
-                        filtered_data = triangular_filter_odd(entry_data, filter_period)
+                        filtered_data = triangular_filter_odd(entry_data, rows)
                         filtered_entries[new_key] = scale_data(filtered_data)
 
-                # Block averaging (piecewise-constant over `beats` rows == beats),
-                # merged into filtered_entries so it flows through the same downstream stages
-                for beats in block_beats:
-                    new_key = entry_key + f"_b{beats:03d}"
-                    if beats == 1:
-                        # For block size 1, just copy the data (no averaging)
+                # Block averaging (piecewise-constant), also specified and
+                # named in seconds, merged into filtered_entries so it flows
+                # through the same downstream stages
+                for seconds in block_seconds:
+                    new_key = entry_key + f"_b{seconds:03d}s"
+                    rows = int(round(seconds / seconds_per_row))
+                    if rows <= 1:
                         filtered_entries[new_key] = entry_data
                     else:
-                        # Apply block averaging and rescale to 0-1
-                        block_data = block_average(entry_data, beats)
+                        block_data = block_average(entry_data, rows)
                         filtered_entries[new_key] = scale_data(block_data)
 
             # Apply stretching to filtered data
@@ -242,10 +312,10 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
             # Apply inversion
             final_entries = {}
             for entry_key, entry_data in stretched_entries.items():
-                # Add original version with _o suffix
-                final_entries[entry_key + "_o"] = entry_data
-                # Add inverted version with _i suffix
-                final_entries[entry_key + "_i"] = 1.0 - entry_data
+                if "o" in inverts:
+                    final_entries[entry_key + "_o"] = entry_data
+                if "i" in inverts:
+                    final_entries[entry_key + "_i"] = 1.0 - entry_data
 
             # Add final entries to the master dictionary
             process_dict.update(final_entries)
@@ -287,7 +357,7 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
         'color_channel',     # field 1: R, G, B, Gray, H000, etc.
         'metric',           # field 2: avg, std, xps, etc.
         'rank_value',        # field 4: r or v
-        'smoothing_period',  # field 3: f001, f017, f065, f257
+        'smoothing_period',  # field 3: f032s, f064s, b016s
         'inversion',         # field 5: o or i
         'stretching'       # field 6: s1-0.5, s8-0.33, etc.
     ]
@@ -315,7 +385,8 @@ def post_process(csv, prefix, filter_periods, stretch_values, stretch_centers, b
         # Extract smoothing period (field 4) - triangular filter (f###) or block average (b###)
         smoothing_period = None
         for part in parts[3:]:
-            if part[:1] in ('f', 'b') and part[1:].isdigit():
+            # f032s / b016s -- a leading f or b, digits, trailing 's'
+            if part[:1] in ('f', 'b') and part[-1:] == 's' and part[1:-1].isdigit():
                 smoothing_period = part
                 break
         fields['smoothing_period'] = smoothing_period
@@ -434,10 +505,20 @@ def process_metrics_to_midi(prefix, config=None):
     
     # Extract processing parameters from config with defaults
     # (this stage is tempo-free; tempo/cc parameters are used only by write_midi.py)
-    filter_periods = config.get("filter_periods", [17, 65, 257])
-    block_beats = config.get("block_beats", [])
+    for removed, replacement in (("filter_periods", "filter_seconds"),
+                                 ("block_beats", "block_seconds")):
+        if removed in config:
+            raise ValueError(
+                f"metrics_processing.{removed} has been replaced by "
+                f"{replacement}; widths are now given in seconds, not rows")
+    filter_seconds = config.get("filter_seconds", [32, 64])
+    block_seconds = config.get("block_seconds", [])
     stretch_values = config.get("stretch_values", [8])
     stretch_centers = config.get("stretch_centers", [0.33, 0.67])
+    color_channels = config.get("color_channels", [])
+    metric_names = config.get("metrics", [])
+    rank_types = config.get("rank_types", [])
+    inversions = config.get("inversions", [])
 
     # Try to find the CSV file with farneback preset suffix in data/output/
     import glob
@@ -461,8 +542,11 @@ def process_metrics_to_midi(prefix, config=None):
     csv = add_derived_columns(csv)
     # All transformations are now applied by default (no conditional logic needed)
 
-    post_process(csv, prefix, filter_periods,
-                 stretch_values, stretch_centers, block_beats=block_beats, farneback_preset=farneback_preset)
+    post_process(csv, prefix, filter_seconds,
+                 stretch_values, stretch_centers, block_seconds=block_seconds,
+                 farneback_preset=farneback_preset,
+                 color_channels=color_channels, metric_names=metric_names,
+                 rank_types=rank_types, inversions=inversions)
 
 def run_metrics_only(config_path):
     """Run the metrics stage standalone from a pipeline JSON config file.
@@ -480,16 +564,20 @@ def run_metrics_only(config_path):
     farneback_preset = config.get("video_processing", {}).get("optical_flow", {}).get("preset", "default")
 
     flat_config = {
-        "filter_periods": metrics.get("filter_periods", [17, 65, 257]),
-        "block_beats": metrics.get("block_beats", []),
+        "filter_seconds": metrics.get("filter_seconds", [32, 64]),
+        "block_seconds": metrics.get("block_seconds", []),
+        "color_channels": metrics.get("color_channels", []),
+        "metrics": metrics.get("metrics", []),
+        "rank_types": metrics.get("rank_types", []),
+        "inversions": metrics.get("inversions", []),
         "stretch_values": metrics.get("stretch_values", [8]),
         "stretch_centers": metrics.get("stretch_centers", [0.33, 0.67]),
         "farneback_preset": farneback_preset,
     }
 
     print(f"Metrics-only processing for '{video_name}' (preset: {farneback_preset})")
-    print(f"  Filter periods: {flat_config['filter_periods']}")
-    print(f"  Block beats:    {flat_config['block_beats']}")
+    print(f"  Filter seconds: {flat_config['filter_seconds']}")
+    print(f"  Block seconds:  {flat_config['block_seconds']}")
     process_metrics_to_midi(video_name, flat_config)
 
 

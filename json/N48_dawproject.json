@@ -1,0 +1,74 @@
+{
+  "description": "N48 visual metrics -> DAWproject volume automation. Every column of the values CSV becomes a track, so track count is controlled by narrowing metrics_processing.",
+  "video": {
+    "video_name": "N48_SSSj(10)a(5)a6",
+    "file_extensions": [
+      ".mp4",
+      ".wmv"
+    ],
+    "max_frames": null
+  },
+  "timing": {
+    "frames_per_second": 30
+  },
+  "video_processing": {
+    "_comment_process_every_nth_frame": "Integer video-frame step between analysis rows. Seconds per row = process_every_nth_frame / frames_per_second (15 / 30 = 0.5 s).",
+    "process_every_nth_frame": 15,
+    "downscale_large": 100,
+    "downscale_medium": 10,
+    "optical_flow": {
+      "preset": "default",
+      "pyr_scale": 0.5,
+      "levels": 3,
+      "winsize": 15,
+      "iterations": 3,
+      "poly_n": 5,
+      "poly_sigma": 1.2
+    }
+  },
+  "metrics_processing": {
+    "_comment_color_channels": "Outer product with 'metrics'. Available: R G B Gray S V H000 H060 H120 H180 H240 H300 Hmon. Empty list = all.",
+    "color_channels": [
+      "Gray",
+      "R",
+      "G",
+      "B"
+    ],
+    "_comment_metrics": "Available per channel -- combinations that do not exist are skipped. R/G/B/S/V: avg std gmn gs1. H000..H300: int std. Hmon: std. Gray also has: cmv crc czd dcd dcl ed0 ed1 ed2 ee0 ee1 ee2 es0 es1 es2 ga1-ga6 gm1-gm6 gmb gs2-gs6 rad rsn rss. Empty list = all.",
+    "metrics": [
+      "avg",
+      "std",
+      "gmn"
+    ],
+    "_comment_rank_types": "v = raw value, r = percentile rank. Empty = both.",
+    "rank_types": [
+      "v"
+    ],
+    "_comment_inversions": "o = original, i = 1 - value. Empty = both.",
+    "inversions": [
+      "o",
+      "i"
+    ],
+    "_comment_filter_seconds": "Triangular smoothing widths in seconds; converted to the nearest odd number of analysis rows using process_every_nth_frame / frames_per_second. Column suffix _f032s etc.",
+    "filter_seconds": [
+      32,
+      64
+    ],
+    "_comment_block_seconds": "Block-average widths in seconds, piecewise constant. Suffix _b016s etc.",
+    "block_seconds": [],
+    "_comment_stretch": "Logistic stretch: outer product of stretch_values x stretch_centers. _s1-0.5 (identity) is always added, so empty lists give just that one.",
+    "stretch_values": [],
+    "stretch_centers": []
+  },
+  "dawproject": {
+    "_comment": "Every column of the values CSV becomes one track. There is no column list: narrow metrics_processing to get fewer.",
+    "max_columns": 64,
+    "interpolation": "linear"
+  },
+  "pipeline_control": {
+    "process_video": true,
+    "process_metrics": true,
+    "process_clusters": false,
+    "write_dawproject": true
+  }
+}

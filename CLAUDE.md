@@ -48,6 +48,37 @@ The processing uses separate dictionaries for each transformation stage:
 - **`stretched_entries`** - After stretching transformations
 - **`final_entries`** - After inversion with `_o` and `_i` suffixes
 
+## Environment
+
+- **DAW: Cubase 15.0.30** (Windows). Assume this version for any DAWproject or
+  MIDI question; do not ask which DAW or version.
+- Windows drives visible from WSL: `C:` and `D:` only, as `/mnt/c` and
+  `/mnt/d`. `E:` is not mounted. To hand a file to Cubase, write it under
+  `/mnt/d/`.
+
+**Two Cubase versions are installed (14 and 15).** The Windows file
+association for `.dawproject` and `.cpr` opens **14**, while the desktop
+shortcut launches **15**. Always start Cubase from the shortcut and use
+`File > Import > DAWproject` from inside it; never double-click the file, or
+the test runs against the wrong version. To confirm which version is running,
+export any `.dawproject` from it and read the `<Application version="...">`
+line — that string is accurate and names the binary that wrote the file.
+
+### Known Cubase DAWproject limitations
+
+- **Automation will not import onto a group (`role="submix"`) channel.**
+  Confirmed on both Cubase 14.0.41 and 15.0.30 across twelve structural
+  variants, including Cubase's own export shape. Cubase 15 also fails to
+  reimport its *own* exported group automation, so this is a Cubase
+  limitation, not a problem with the generated XML. Settled approach in
+  `write_dawproject.py`: `contentType="audio"` + `role="submix"`, giving an
+  audio track carrying the automation plus a like-named dummy buss to copy it
+  onto. Do not redesign this without first re-running the round-trip test.
+- **`contentType` is required** on a `Track`, or Cubase creates no track.
+- **Track time base is not in the DAWproject schema.** Cubase applies
+  *Preferences > Editing > Default Track Time Type* at import; set it to
+  **Linear** or seconds-based automation will still move with tempo.
+
 ## Quick Reference
 
 ### Running the Pipeline

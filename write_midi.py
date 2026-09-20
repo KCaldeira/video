@@ -56,7 +56,7 @@ def _append_cc_track(midi_file, track_name, values_0_127, tick_list, control,
 
 
 def render_metrics_midi(values_csv, output_dir, frame_tick_map, cc_number,
-                        filter_periods, block_beats, stretch_values, stretch_centers):
+                        filter_seconds, block_seconds, stretch_values, stretch_centers):
     """Render the metrics MIDI files from the frame-indexed values CSV.
 
     Reproduces the two original groupings: (1) one file per
@@ -74,8 +74,8 @@ def render_metrics_midi(values_csv, output_dir, frame_tick_map, cc_number,
     ticks_per_beat = frame_tick_map.ticks_per_beat
 
     variables = sorted(set(c.split('_')[0] for c in value_cols))
-    averaging_suffixes = [f"f{period:03d}" for period in filter_periods] + \
-                         [f"b{beats:03d}" for beats in block_beats]
+    averaging_suffixes = [f"f{seconds:03d}s" for seconds in filter_seconds] + \
+                         [f"b{seconds:03d}s" for seconds in block_seconds]
 
     midi_output_dir = os.path.join(output_dir, "metrics_midi")
     os.makedirs(midi_output_dir, exist_ok=True)
@@ -221,8 +221,8 @@ def write_midi_from_config(config):
         render_metrics_midi(
             values_csv, output_dir, frame_tick_map,
             cc_number=metrics.get("cc_number", 1),
-            filter_periods=metrics.get("filter_periods", [17, 65, 257]),
-            block_beats=metrics.get("block_beats", []),
+            filter_seconds=metrics.get("filter_seconds", [32, 64]),
+            block_seconds=metrics.get("block_seconds", []),
             stretch_values=metrics.get("stretch_values", [8]),
             stretch_centers=metrics.get("stretch_centers", [0.33, 0.67]))
     else:

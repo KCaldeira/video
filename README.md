@@ -21,6 +21,7 @@ This repository contains tools for video analysis, tempo mapping, and audio leve
 - [Configuration](#configuration)
 - [Video Analysis](#video-analysis-process_videopy)
 - [Metrics Processing](#metrics-processing-process_metricspy)
+- [DAWproject Output](#dawproject-output-write_dawprojectpy)
 - [Frame Clustering](#frame-clustering-cluster_primarypy)
 - [Audio Leveling](#audio-leveling-audio_level_curvepy)
   - [Choosing the Mean Weighting Distance](#choosing-the-mean-weighting-distance)
@@ -242,9 +243,13 @@ Step 1: process_video.py → CSV + Config (data/output/)
 Step 2: process_metrics.py → MIDI + Excel + Plots (data/output/)
     ↓
 Step 3: cluster_primary.py → Cluster assignments + Quality metrics (data/output/)
+    ↓
+Step 4: write_midi.py → MIDI CC files (data/output/)          [tempo-aware]
+    ↓
+Step 5: write_dawproject.py → .dawproject (data/output/)      [tempo-free]
 ```
 
-Each step can be enabled/disabled via configuration (`process_video`, `process_metrics`, `process_clusters`).
+Each step can be enabled/disabled via configuration (`process_video`, `process_metrics`, `process_clusters`, `write_midi`, `write_dawproject`).
 
 ---
 
@@ -321,7 +326,12 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
     "process_video": true,
     "process_metrics": true,
     "process_clusters": true,
-    "write_midi": true
+    "write_midi": true,
+    "write_dawproject": false
+  },
+  "dawproject": {
+    "columns": [],
+    "interpolation": "linear"
   }
 }
 ```
@@ -432,6 +442,7 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 | `process_metrics` | bool | `true` | Run metrics processing (derive metrics, write values CSV) |
 | `process_clusters` | bool | `true` | Run clustering analysis |
 | `write_midi` | bool | `true` | Write MIDI files (the only tempo-aware stage; renders metrics and cluster CSVs to `.mid`) |
+| `write_dawproject` | bool | `false` | Write a `.dawproject` of volume-automated group busses (tempo-free; see below) |
 
 **Example - Reprocess metrics only**:
 ```json
@@ -692,6 +703,181 @@ Created in `data/output/{video_name}_{preset}/`:
   - Filter periods (`_f001`, `_f017`, `_f065`, `_f257`)
   - Stretch parameters (`_s1-0.5`, `_s8-0.33`, etc.)
   - Inversion (`_o`, `_i`)
+
+---
+
+## DAWproject Output (write_dawproject.py)
+
+### Overview
+
+Renders selected metric curves as **volume automation on group (buss) tracks**
+in a single `.dawproject` file, as an alternative to the MIDI CC output.
+
+Unlike `write_midi.py`, this stage is **tempo-free**. Automation times are
+wall-clock seconds computed as `frame_count_list / frames_per_second`, so the
+curves stay locked to the video and changing the project tempo in the DAW does
+not move them.
+
+### What Is Generated
+
+One `.dawproject` at `data/output/{video_name}_{preset}/{name_prefix}.dawproject`,
+a ZIP holding `project.xml` and `metadata.xml`. No audio is embedded, so the
+file is small.
+
+Inside:
+- One **empty group buss per listed column**, named after the column, each
+  routed to a master track. The busses carry automation only, with no clips;
+  route your own sources into them in the DAW.
+- A `Points` envelope per buss with `timeUnit="seconds"`, targeting that
+  buss's `Volume` parameter, with one `RealPoint` per CSV row.
+- A `Transport` tempo, which is cosmetic — nothing positional depends on it.
+
+Group busses use `Channel role="submix"`. The `mixerRole` enumeration is
+`regular | master | effect | submix | vca` — **there is no `group`**, and
+Cubase silently imports an invalid role as an ordinary audio track rather than
+reporting an error. Every generated file is therefore validated against the
+vendored schema in `schema/dawproject/Project.xsd`, and a schema error aborts
+the write.
+
+### Cubase Limitation: Automation on a Group
+
+**Cubase will not import automation onto a group (submix) channel.**
+Confirmed on both 14.0.41 and 15.0.30. Decisively, Cubase 15 cannot reimport
+its *own* exported group automation, so this is a Cubase limitation rather
+than a defect in the generated XML.
+Each metric therefore produces a *pair*: an audio track carrying the
+automation, and a like-named group buss. Copy each lane from the audio track
+to its buss by hand in Cubase.
+
+This is a workaround for a DAW limitation, not the structure the format calls
+for. It was established by testing eight structural variants:
+
+| Variant | `contentType` | `role` | Structure | Result in Cubase |
+|---|---|---|---|---|
+| A | *(none)* | submix | Track-wrapped | no tracks at all |
+| B | `automation` | submix | Track-wrapped | group busses, no automation |
+| C | `audio` | submix | Track-wrapped | **audio tracks + group busses, automation on the audio tracks** |
+| D | *(none)* | regular | Track-wrapped | no tracks at all |
+| E, I, J, K | various | submix | bare `Channel` in `Structure` | busses appear, automation does not |
+
+A second round tested whether *any* other automatable parameter would work,
+since `Volume` might have been a special case:
+
+| Variant | Automated parameter | Result |
+|---|---|---|
+| L | `Volume` on a `role="vca"` channel | no automation |
+| M | `Pan` on a submix | no automation |
+| N | `Send/Volume` on a submix | no automation |
+| O | `Equalizer/OutputGain` on a submix | no automation |
+
+Variant M is the informative one: `Pan` is not a volume parameter, and it
+failed too. So Cubase refuses **all** automation on a submix or VCA channel,
+not merely `Volume`. Channel-level automatable parameters are `Volume`, `Pan`,
+`Mute`, `Send/Volume`, `Send/Pan`, `Send/Enable` and device parameters — that
+is the whole list, and none of them attach. There is no remaining structural
+workaround; the paired audio track is the only route until Cubase changes.
+
+The round-trip test is the one to repeat after a Cubase update: put volume
+automation on a group, export a `.dawproject`, reimport it. Until the
+automation survives that, nothing this writer emits can work either.
+
+Variants I/J/K matched the shape of Cubase's *own* DAWproject export, in which
+a group buss is a bare `<Channel role="submix">` directly inside `<Structure>`,
+never wrapped in a `<Track>`. Automation still did not attach. Cubase's
+exporter is consistent with this: exporting a project whose group carries
+volume automation yields a file with zero `Points` elements.
+
+Two things follow. `contentType` is **required** — Cubase creates no track
+without it. And schema validation cannot catch any of this, since every
+variant above is schema-valid; only importing reveals the behaviour.
+
+Revisit if a later Cubase version imports group automation; the writer would
+then emit bare submix channels and drop the paired audio tracks.
+
+### Track Time Base (Musical vs Linear)
+
+Automation times are written in seconds, but a track's **time base is not part
+of the DAWproject schema** — it is a DAW-side property applied when the track
+is created. Cubase takes it from **Preferences > Editing > Default Track Time
+Type**, so tracks will arrive in musical time base unless that is set to
+**Linear** before importing.
+
+This matters: on a musical-time-base track, the automation moves when the
+project tempo changes, which defeats the purpose of exporting in seconds. Set
+the preference to Linear before importing, or select the imported tracks
+afterwards and switch their time base with the note/clock toggle in the
+Inspector.
+
+### Value Mapping
+
+Metric values are 0-1 and are written as **linear gain directly**. The `Volume`
+parameter is `unit="linear"` with `min=0` and `max=1.0`, so:
+
+| Metric | Gain | dB |
+|--------|------|-----|
+| 0.0 | 0.0 | -inf |
+| 0.5 | 0.5 | -6.0 |
+| 1.0 | 1.0 | 0.0 (unity, fader top) |
+
+### Configuration
+
+The number of group busses is set **only** by `dawproject.columns`, so it is
+independent of how many columns the values CSV holds:
+
+```json
+"dawproject": {
+  "columns": [
+    "Gray_avg_v_f065_s1-0.5_o",
+    "Gray_std_v_f065_s1-0.5_o",
+    "Gray_avg_v_f065_s1-0.5_i"
+  ],
+  "interpolation": "linear"
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `columns` | list | `[]` | Values-CSV column names to export, one group buss each. Required when `write_dawproject` is true |
+| `interpolation` | string | `"linear"` | Interpolation written on each `RealPoint` |
+
+#### No `timing` Section Needed
+
+This stage reads **no** beats or ticks. `ticks_per_beat` is never read, and
+`beats_per_minute` only supplies a cosmetic `Transport` tempo — omit it and no
+`Tempo` element is written at all, which is the honest result for a video with
+a variable tempo map, where no single value would be correct.
+
+The frame rate comes from `{name_prefix}_config.json`, the config
+`process_video` wrote beside the values CSV. That file is authoritative: it
+records the rate actually used to produce those rows, so it cannot drift from
+them. A missing file or missing key is an error, not a default.
+
+A config that only runs this stage can therefore drop `timing` entirely. A
+config that also runs `process_video` still needs `timing.frames_per_second`,
+because that stage reads it and silently defaults to 30 otherwise — see
+`json/N48_dawproject.json`.
+
+The writer reads only `video.video_name`, the optical-flow preset, and
+`dawproject.columns`. A config that runs nothing else needs nothing else.
+
+A column name that is not in the CSV is an error naming the missing column; it
+is never silently skipped.
+
+### Standalone Usage
+
+```bash
+python write_dawproject.py json/N48_dawproject.json
+```
+
+`json/N48_dawproject.json` is a worked example. To re-render only the
+`.dawproject` from an existing `_values.csv`, set `process_video` and
+`process_metrics` to false; that takes a few seconds instead of reprocessing
+the video.
+
+**DAWproject is the default output.** `write_dawproject` defaults to `true`
+and `write_midi` to `false`; MIDI is legacy and must be opted into.
+
+Import in Cubase with **File > Import > DAWproject**.
 
 ---
 
