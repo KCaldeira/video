@@ -34,15 +34,16 @@
       "G",
       "B"
     ],
-    "_comment_metrics": "Available per channel -- combinations that do not exist are skipped. R/G/B/S/V: avg std gmn gs1. H000..H300: int std. Hmon: std. Gray also has: cmv crc czd dcd dcl ed0 ed1 ed2 ee0 ee1 ee2 es0 es1 es2 ga1-ga6 gm1-gm6 gmb gs2-gs6 rad rsn rss. Empty list = all.",
+    "_comment_metrics": "Available per channel -- combinations that do not exist are skipped. R/G/B/S/V: avg std gmn gs1. H000..H300: int std. Hmon: std. Gray-only camera motion: czd = signed zoom divergence (positive is zoom out), and its half-wave split czi = zoom-in speed, czo = zoom-out speed, cza = zoom speed either way -- each of czi/czo is zero unless the camera is moving that way, so separate sounds can follow each direction. Same split for rotation: crc signed, crl counterclockwise, crr clockwise, cra either way. Gray also has cmv dcd dcl ed0-2 ee0-2 es0-2 ga1-6 gm1-6 gmb gs2-6 rad rsn rss. Empty list = all.",
     "metrics": [
+      "czi",
+      "czo",
       "avg",
-      "std",
-      "gmn"
+      "std"
     ],
     "_comment_rank_types": "v = raw value, r = percentile rank. Empty = both.",
     "rank_types": [
-      "v"
+      "r"
     ],
     "_comment_inversions": "o = original, i = 1 - value. Empty = both.",
     "inversions": [
@@ -56,9 +57,13 @@
     ],
     "_comment_block_seconds": "Block-average widths in seconds, piecewise constant. Suffix _b016s etc.",
     "block_seconds": [],
-    "_comment_stretch": "Logistic stretch: outer product of stretch_values x stretch_centers. _s1-0.5 (identity) is always added, so empty lists give just that one.",
-    "stretch_values": [],
-    "stretch_centers": []
+    "_comment_stretch": "Logistic stretch: outer product of stretch_values x stretch_centers. If both are empty the identity stretch _s1-0.5 is emitted instead.",
+    "stretch_values": [
+      8
+    ],
+    "stretch_centers": [
+      0.67
+    ]
   },
   "dawproject": {
     "_comment": "Every column of the values CSV becomes one track. There is no column list: narrow metrics_processing to get fewer.",

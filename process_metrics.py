@@ -80,14 +80,40 @@ def add_derived_columns(csv):
         
         # cra = abs(crc) - captures absolute rotation magnitude
         csv[cra_col] = np.abs(csv[crc_col])
-    
+
+    # Add zoom metrics (czi, czo, cza) based on czd, mirroring the rotation
+    # split above. czd is signed: positive is zoom out, negative is zoom in.
+    # Half-wave rectifying gives one signal per direction, each zero unless
+    # the camera is moving that way, so separate sounds can follow each.
+    czd_columns = [col for col in csv.columns if "_czd" in col]
+
+    for czd_col in czd_columns:
+        base_name = czd_col.replace("_czd", "")
+
+        # czi = max(-czd, 0) - zoom-in speed (zero while zooming out)
+        csv[f"{base_name}_czi"] = np.maximum(-csv[czd_col], 0)
+
+        # czo = max(czd, 0) - zoom-out speed (zero while zooming in)
+        csv[f"{base_name}_czo"] = np.maximum(csv[czd_col], 0)
+
+        # cza = abs(czd) - zoom speed regardless of direction
+        csv[f"{base_name}_cza"] = np.abs(csv[czd_col])
+
     return csv
 
 def percentile_data(data):
     """
     Transform the vector <data> into a percentile list where 0 is the lowest and 1 the highest.
+
+    Ties take the lowest rank, not the average of the tied ranks. This matters
+    for half-wave rectified metrics such as czi/czo and crl/crr, which are
+    zero whenever the camera is not moving that way: with averaged ranks a
+    large block of zeros lands mid-range (0.37 on a clip that zooms in a
+    quarter of the time), so an inactive direction would never reach silence.
+    With the lowest rank the zeros map to 0, as intended. For metrics with no
+    repeated values the two conventions are identical.
     """
-    ranks = rankdata(data, method='average')
+    ranks = rankdata(data, method='min')
     percentiles = (ranks-1) / (len(data)-1)
     return percentiles
 
@@ -304,9 +330,11 @@ def post_process(csv, prefix, filter_seconds, stretch_values, stretch_centers,
                         new_key = entry_key + "_s" + str(stretch_value) + "-" + str(stretch_center)
                         stretched_entries[new_key] = (x / stretch_center)**stretch_value / ((x / stretch_center)**stretch_value + ((1 - x) / (1 - stretch_center))**stretch_value)
                 
-                # Always ensure the special case stretch_value=1, stretch_center=0.5 is included
-                special_key = entry_key + "_s1-0.5"
-                if special_key not in stretched_entries:
+                # The identity stretch is a fallback, not an addition: it is
+                # only emitted when no stretch is configured, so asking for
+                # one stretch yields one column rather than two.
+                if not (stretch_values and stretch_centers):
+                    special_key = entry_key + "_s1-0.5"
                     stretched_entries[special_key] = (x / 0.5)**1 / ((x / 0.5)**1 + ((1 - x) / (1 - 0.5))**1)
 
             # Apply inversion
