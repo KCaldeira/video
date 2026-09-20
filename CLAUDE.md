@@ -81,6 +81,10 @@ line — that string is accurate and names the binary that wrote the file.
 - Importing into an existing project **overwrites its initial tempo marking
   and time signature**, so set `dawproject.tempo` and
   `dawproject.time_signature` to match that project (N48: 75 bpm, 1/4).
+- **Track order is not controllable.** Cubase collects every submix channel
+  into its own Group folder, so audio tracks and their busses cannot be
+  interleaved no matter what order the `Structure` element lists them in.
+  Tested with explicit interleaved Track/Channel pairs; ignored.
 - `contentType`, `Tempo` and `TimeSignature` are all optional in the schema
   and all required in practice: **schema-valid is not the same as loadable**,
   and an optional element is not safe to omit. Confirm every structural

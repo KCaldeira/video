@@ -73,6 +73,12 @@ from curve_to_dawproject import (
 # the format calls for. Revisit if a later Cubase imports group automation.
 TRACK_SHAPE = "audio track + submix channel per metric"
 
+# Busses are named after their metric plus this suffix, so a pair is
+# unambiguous rather than two tracks sharing one name.
+BUSS_SUFFIX = " BUS"
+
+MASTER_NAME = "Stereo Out"
+
 # The group/buss role. The mixerRole enumeration is
 # regular|master|effect|submix|vca -- there is no "group", and an invalid value
 # is imported by Cubase as an ordinary audio track rather than rejected, so the
@@ -140,34 +146,36 @@ def build_project_xml(times, columns, values, tempo_bpm, time_signature,
 
     structure = ET.SubElement(root, "Structure")
 
-    # Group tracks are written first and the master second, matching the order
-    # DAWs use. Each group channel's destination is a forward reference to the
-    # master channel, which XML IDREF resolution allows.
-    # Each Track carries contentType="audio" *and* a submix channel, so Cubase
-    # creates a pair per metric: an audio track holding the automation, and a
-    # like-named group buss. See TRACK_SHAPE above for why.
+    # The master is a bare Channel in Structure, which is how Cubase writes it
+    # in its own exports.
+    master_channel, _ = build_channel(structure, ids, "master", VOLUME_MAX)
+    master_channel.set("name", MASTER_NAME)
+    master_channel_id = master_channel.get("id")
+
+    # Each metric emits a pair: an audio Track carrying the automation, and a
+    # separate submix Channel named "<metric> BUS" for it to feed. The audio
+    # track is routed into its own buss, so the signal path is already wired
+    # on import. See TRACK_SHAPE above for why the automation cannot simply
+    # live on the buss.
+    #
+    # Cubase collects all submix channels into its Group folder, so the pairs
+    # never appear adjacent in the track list however they are ordered here.
     group_tracks = []
+    volume_ids = []
     for column in columns:
         track = ET.SubElement(structure, "Track")
         track.set("contentType", "audio")
         track.set("loaded", "true")
         track.set("id", ids.next())
         track.set("name", column)
+
+        buss, _ = build_channel(structure, ids, GROUP_ROLE, VOLUME_MAX,
+                                destination=master_channel_id)
+        buss.set("name", column + BUSS_SUFFIX)
+
+        _, volume = build_channel(track, ids, "regular", VOLUME_MAX,
+                                  destination=buss.get("id"))
         group_tracks.append(track)
-
-    master_track = ET.SubElement(structure, "Track")
-    master_track.set("contentType", "audio")
-    master_track.set("loaded", "true")
-    master_track.set("id", ids.next())
-    master_track.set("name", "Master")
-    master_channel, _ = build_channel(master_track, ids, "master", VOLUME_MAX)
-    master_channel_id = master_channel.get("id")
-
-    volume_ids = []
-    for track in group_tracks:
-        _, volume = build_channel(
-            track, ids, GROUP_ROLE, VOLUME_MAX, destination=master_channel_id
-        )
         volume_ids.append(volume.get("id"))
 
     arrangement = ET.SubElement(root, "Arrangement")
@@ -284,8 +292,9 @@ def render_metrics_dawproject(values_csv, output_path, max_columns,
     print(f"Wrote {output_path} ({size / 1e6:.2f} MB)")
     print(f"  {len(columns)} audio tracks (automation) + {len(columns)} group "
           f"busses, {len(times)} points each")
+    print(f"  Each audio track is routed into its own \"<metric>{BUSS_SUFFIX}\".")
     print("  Cubase will not import automation onto a group: copy each lane")
-    print("  from the audio track to its like-named buss by hand.")
+    print("  from the audio track to its buss by hand.")
     print(f"  Time range: 0.000 to {times.iloc[-1]:.3f} seconds")
     print(f"  Transport: {tempo_bpm:g} bpm, "
           f"time signature {time_signature[0]:d}/{time_signature[1]:d}")

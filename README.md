@@ -777,6 +777,10 @@ not merely `Volume`. Channel-level automatable parameters are `Volume`, `Pan`,
 is the whole list, and none of them attach. There is no remaining structural
 workaround; the paired audio track is the only route until Cubase changes.
 
+Track order is likewise outside our control: Cubase collects submix channels
+into its Group folder, so emitting an audio track immediately followed by its
+buss does not interleave them in the track list. Tested and ignored.
+
 The round-trip test is the one to repeat after a Cubase update: put volume
 automation on a group, export a `.dawproject`, reimport it. Until the
 automation survives that, nothing this writer emits can work either.
