@@ -36,6 +36,10 @@
     }
   },
   "metrics_processing": {
+    "color_channels": [],
+    "metrics": [],
+    "rank_types": [],
+    "inversions": [],
     "filter_seconds": [
       32,
       64
@@ -58,9 +62,14 @@
     "write_dawproject": true
   },
   "dawproject": {
-    "columns": [],
-    "interpolation": "linear",
-    "note": "columns lists the value-CSV column names to export, one group buss each"
+    "note": "Every column of the values CSV becomes one track; narrow metrics_processing to get fewer. tempo and time_signature overwrite the target project's initial marking on import, so set them to match it.",
+    "tempo": 120,
+    "time_signature": [
+      4,
+      4
+    ],
+    "max_columns": 64,
+    "interpolation": "linear"
   },
   "cluster_processing": {
     "k_values": [

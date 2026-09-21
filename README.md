@@ -47,7 +47,7 @@ This repository contains tools for video analysis, tempo mapping, and audio leve
    ```
 
 3. **Edit configuration** — set your video name and the required
-   `frame_interval` (see [Video Processing](#video-processing-section-video_processing)):
+   `process_every_nth_frame` (see [Video Processing](#video-processing-section-video_processing)):
    ```json
    "video": {
      "video_name": "my_video"
@@ -290,14 +290,12 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
     "max_frames": null
   },
   "timing": {
-    "frames_per_second": 30,
-    "beats_per_minute": 64,
-    "ticks_per_beat": 480
+    "frames_per_second": 30
   },
   "video_processing": {
     "downscale_large": 100,
     "downscale_medium": 10,
-    "frame_interval": 28.125,
+    "process_every_nth_frame": 15,
     "optical_flow": {
       "preset": "default",
       "pyr_scale": 0.5,
@@ -309,11 +307,14 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
     }
   },
   "metrics_processing": {
-    "filter_periods": [17, 65, 257],
-    "block_beats": [],
+    "color_channels": [],
+    "metrics": [],
+    "rank_types": [],
+    "inversions": [],
+    "filter_seconds": [32, 64],
+    "block_seconds": [],
     "stretch_values": [8],
-    "stretch_centers": [0.33, 0.67],
-    "cc_number": 1
+    "stretch_centers": [0.33, 0.67]
   },
   "cluster_processing": {
     "k_values": [2, 3, 4, 5, 6, 8, 10, 12],
@@ -326,11 +327,13 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
     "process_video": true,
     "process_metrics": true,
     "process_clusters": true,
-    "write_midi": true,
-    "write_dawproject": false
+    "write_midi": false,
+    "write_dawproject": true
   },
   "dawproject": {
-    "columns": [],
+    "tempo": 120,
+    "time_signature": [4, 4],
+    "max_columns": 64,
     "interpolation": "linear"
   }
 }
@@ -359,18 +362,19 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `frames_per_second` | int | `30` | Video frame rate |
-| `beats_per_minute` | int/float/string | `64` | Tempo for MIDI output. A number = constant tempo; a string = path to a MIDI tempo file (variable tempo, e.g. produced by `calculate_tempo_from_inverse.py`) |
-| `ticks_per_beat` | int | `480` | MIDI resolution |
+| `frames_per_second` | int | `30` | Video frame rate. **Required when `process_video` runs** — it silently defaults to 30 otherwise, and the value is recorded in the stage-1 config that later stages read |
+| `beats_per_minute` | int/float/string | — | Legacy, MIDI output only. A number = constant tempo; a string = path to a MIDI tempo file. Not read by the DAWproject path |
+| `ticks_per_beat` | int | `480` | Legacy, MIDI resolution only |
 
-> **Note:** `beats_per_midi_event` from older configs is no longer read. Analysis-frame sampling is now controlled by `video_processing.frame_interval` (see below). Tempo is applied only in the MIDI-writing stage, so video analysis is tempo-free.
+> **Note:** the whole pipeline is tempo-free apart from `write_midi.py`. A config
+> that only produces a DAWproject needs nothing here but `frames_per_second`,
+> and may omit `timing` entirely if it also skips `process_video`. Set the
+> DAWproject's own `Transport` values under `dawproject` instead.
 
 **Example**:
 ```json
 "timing": {
-  "frames_per_second": 30,
-  "beats_per_minute": 120,
-  "ticks_per_beat": 480
+  "frames_per_second": 30
 }
 ```
 
@@ -380,7 +384,11 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 |-----------|------|---------|-------------|
 | `downscale_large` | int | `100` | Large downscale factor |
 | `downscale_medium` | int | `10` | Medium downscale factor |
-| `frame_interval` | int/float | **REQUIRED** (when `process_video` runs) | Spacing, in video frames, between analysed frames (may be fractional). The analysis stage is tempo-free and samples every `frame_interval`-th frame. To get one analysis sample per beat, set it to `60 × frames_per_second / beats_per_minute` (e.g. `28.125` at 30 fps / 64 BPM, `16.667` at 30 fps / 108 BPM). Non-integer values are handled without drift — each target frame is recomputed as `round(k × frame_interval)`. |
+| `process_every_nth_frame` | int | **REQUIRED** (when `process_video` runs) | Whole-number spacing, in video frames, between analysed frames. Seconds per analysis row = `process_every_nth_frame / frames_per_second` (15 / 30 = 0.5 s). **This fixes the time resolution permanently** — everything else can be re-derived from `basic.csv` in seconds, but changing this means re-decoding the video, so choose it before a long run. If the source has a repeating cycle, pick a divisor of its frame length so every cycle is sampled at the same phase (N48: 486-frame cycle, 486 = 2 × 3⁵, so 6 gives 81 rows per cycle with no drift). |
+
+> `frame_interval` was the previous name and was allowed to be fractional, because
+> it was derived from tempo to land samples on beats. It is now rejected with a
+> message pointing at `process_every_nth_frame`.
 
 **Optical Flow Parameters**:
 
@@ -410,29 +418,58 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `filter_periods` | array | `[17, 65, 257]` | Triangular (weighted moving-average) smoothing window sizes. Produces smooth, continuous curves. Each period becomes a column suffixed `_f{period:03d}` (`_f001` = unfiltered pass-through). |
-| `block_beats` | array | `[]` | **Block (boxcar) averaging** window sizes, in beats. Groups consecutive rows into blocks of N and replaces each block with its mean, producing a **stair-step (piecewise-constant)** curve — distinct from the triangular `filter_periods`. Each size becomes a column suffixed `_b{beats:03d}` (`_b001` = pass-through) and flows through the same downstream stages (stretch → invert → MIDI), yielding its own MIDI track. Units are beats **only when** one CSV row equals one beat, i.e. `frame_interval` = `60 × fps / bpm`. |
-| `stretch_values` | array | `[8]` | Non-linear stretch factors |
-| `stretch_centers` | array | `[0.33, 0.67]` | Center points for stretching |
-| `cc_number` | int | `1` | MIDI continuous controller number |
+**Selection — what the values CSV contains.** These four form an outer product
+and are the only way to control how many tracks the DAWproject ends up with,
+since every CSV column becomes one. An empty list means "all".
 
-**`filter_periods` vs `block_beats`** — the two smoothers are complementary:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `color_channels` | array | `[]` (all) | Channels to process: `R G B Gray S V H000 H060 H120 H180 H240 H300 Hmon` |
+| `metrics` | array | `[]` (all) | Metrics to process. Combinations that do not exist are skipped, so non-Gray channels quietly contribute only `avg std gmn gs1` |
+| `rank_types` | array | `[]` (both) | `v` = raw value, `r` = percentile rank |
+| `inversions` | array | `[]` (both) | `o` = original, `i` = `1 - value` |
+
+An unknown channel or metric name is an error listing what is available.
+
+**Smoothing — both widths are in seconds.**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `filter_seconds` | array | `[32, 64]` | Triangular (weighted moving-average) widths **in seconds**. Converted to the nearest odd number of analysis rows, so the realised width quantises to a multiple of the row spacing. Fractional values allowed. Column suffix `_f{width}s` (`_f032s`, `_f004.75s`) |
+| `block_seconds` | array | `[]` | **Block (boxcar) averaging** widths in seconds, giving a **stair-step (piecewise-constant)** curve rather than a smooth one. Column suffix `_b{width}s` |
+| `stretch_values` | array | `[8]` | Logistic stretch factors |
+| `stretch_centers` | array | `[0.33, 0.67]` | Centre points for stretching |
+| `cc_number` | int | `1` | Legacy, MIDI output only |
 
 | Option | Filter shape | Result | Column suffix |
 |--------|--------------|--------|---------------|
-| `filter_periods` | triangular (weighted) moving average | smooth, continuous curve | `_f{period:03d}` |
-| `block_beats` | flat block mean over N beats | stair-step / piecewise-constant "hold for N beats" | `_b{beats:03d}` |
+| `filter_seconds` | triangular (weighted) moving average | smooth, continuous curve | `_f{width}s` |
+| `block_seconds` | flat block mean | stair-step / piecewise-constant hold | `_b{width}s` |
 
-**Example - Filters plus block averaging (4 / 8 / 16 bars at 4 beats/bar)**:
+> Because widths are in seconds, the realised width depends on the sampling
+> rate: at 0.5 s/row a requested 4.75 s becomes 5.50 s (+16%), while at
+> 0.2 s/row it becomes 5.00 s (+5%). Choose `process_every_nth_frame` with the
+> smoothing you want in mind.
+
+> The identity stretch `_s1-0.5` is a **fallback, not an addition**: it is
+> emitted only when `stretch_values` and `stretch_centers` are both empty, so
+> asking for one stretch yields one column rather than two.
+
+**Example — zoom direction, rank-normalised, one 4.75 s filter**:
 ```json
 "metrics_processing": {
-  "filter_periods": [65, 129],
-  "block_beats": [16, 32, 64],
-  "stretch_values": [4, 8, 16],
-  "stretch_centers": [0.25, 0.5, 0.75],
-  "cc_number": 1
+  "color_channels": ["Gray", "R", "G", "B"],
+  "metrics": ["czi", "czo", "avg", "std"],
+  "rank_types": ["r"],
+  "inversions": ["o", "i"],
+  "filter_seconds": [4.75],
+  "block_seconds": [],
+  "stretch_values": [8],
+  "stretch_centers": [0.67]
 }
 ```
+That is 4 channels × 4 metrics (two of them Gray-only) × 1 rank × 1 filter ×
+1 stretch × 2 inversions = **20 columns → 40 Cubase tracks**.
 
 #### Pipeline Control Section (`pipeline_control`)
 
@@ -470,7 +507,7 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 | `normalization` | string | `"rank"` | Feature normalization method |
 | `metrics_to_exclude` | array | `[]` | Metric column names to drop before clustering |
 | `random_state` | int | `42` | Random seed for reproducibility |
-| `boxcar_periods` | array/null | `null` | **Iterative boxcar (majority-vote) smoothing** of cluster assignments — odd-integer widths, in **rows/frames**, applied repeatedly until convergence to remove cluster flickering. Distinct from `metrics_processing.block_beats`: it smooths integer cluster IDs, not metric values. Each period becomes a `_b`-suffixed cluster track. |
+| `boxcar_periods` | array/null | `null` | **Iterative boxcar (majority-vote) smoothing** of cluster assignments — odd-integer widths, in **rows**, applied repeatedly until convergence to remove cluster flickering. Distinct from `metrics_processing.block_seconds`: these are row counts, not seconds, and they smooth integer cluster IDs rather than metric values. Each period becomes a `_b`-suffixed cluster track. |
 
 **Example - Smooth cluster assignments**:
 ```json
@@ -490,17 +527,17 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
 }
 ```
 
-**High tempo music video**:
+**Finer time resolution** (halves the row spacing; doubles the analysis time):
 ```json
-"timing": {
-  "beats_per_minute": 140
+"video_processing": {
+  "process_every_nth_frame": 3
 }
 ```
 
-**Experimenting with filters**:
+**Experimenting with filters** (widths in seconds):
 ```json
 "metrics_processing": {
-  "filter_periods": [9, 17, 33, 65, 129, 257, 513]
+  "filter_seconds": [1, 2, 4, 8, 16, 32]
 }
 ```
 
@@ -632,10 +669,38 @@ Processes basic metrics from `process_video.py`, computes derived metrics, appli
 - **`es1r`** - `es1/es0` (large-scale to total spatial variation)
 - **`es2r`** - `es2/es0` (small-scale to total spatial variation)
 
-#### Motion Derived Calculations
-- **`crl`** - Positive rotation (`max(crc, 0)`) - counterclockwise
-- **`crr`** - Negative rotation (`max(-crc, 0)`) - clockwise
-- **`cra`** - Absolute rotation (`abs(crc)`) - total rotation magnitude
+#### Motion Derived Calculations (Gray Channel Only)
+
+Both `czd` (zoom divergence) and `crc` (rotation curl) are **signed**, so a
+single track cannot drive one sound in each direction. Each is half-wave
+rectified into a pair of speeds plus a magnitude. Each directional signal is
+**zero whenever the camera is not moving that way**, so separate sounds can
+follow each direction.
+
+| Derived | From | Meaning |
+|---------|------|---------|
+| **`czi`** | `max(czd, 0)` | zoom-**in** speed |
+| **`czo`** | `max(-czd, 0)` | zoom-**out** speed |
+| **`cza`** | `abs(czd)` | zoom speed, either direction |
+| **`crl`** | `max(-crc, 0)` | counter**clockwise** speed |
+| **`crr`** | `max(crc, 0)` | **clockwise** speed |
+| **`cra`** | `abs(crc)` | rotation speed, either direction |
+
+> **Sign conventions, verified rather than assumed.** Optical flow runs
+> `prev → curr`, so magnifying the image moves features outward and the field
+> diverges: **positive `czd` is zoom IN**. And because the image y-axis points
+> down, **positive `crc` is CLOCKWISE** on screen. Both were checked with
+> synthetic warps (1.05× / 0.95× → `czd` +0.071 / −0.078; ±3° → `crc` −0.074 /
+> +0.074), because the original source comments stated the opposite for both.
+> Re-verify the same way before trusting either sign.
+
+> **Rank normalisation and rectified metrics.** A rectified metric is zero for
+> every frame the camera is not moving that way, and those zeros all tie.
+> `percentile_data` therefore ranks ties by **lowest**, not average: with
+> averaged ranks a large block of zeros lands mid-range (0.37 on a clip that
+> zooms in a quarter of the time) and the inactive direction would never reach
+> silence. For metrics with no repeated values the two conventions are
+> identical.
 
 ### Processing Pipeline
 
@@ -649,15 +714,18 @@ The script applies transformation stages in this exact order:
    - Applied to all data (no key name change)
 
 3. **Filtering** - Triangular smoothing filters ⚠️ **MUST BE LAST**
-   - `_f001` - No filtering (original, period 1)
-   - `_f017` - ~2 bars at 4/4 time (period 17)
-   - `_f065` - ~16 bars at 4/4 time (period 65)
-   - `_f257` - ~64 bars at 4/4 time (period 257)
+   - Widths given in **seconds** via `filter_seconds`, converted to the
+     nearest odd number of analysis rows
+   - `_f001s` - 1 second
+   - `_f004.75s` - 4.75 seconds (fractional widths allowed)
+   - `_f032s` - 32 seconds
+   - A width shorter than one row collapses to a no-op
 
 4. **Stretching** - Non-linear transformation
    - Sigmoid-like stretching function
    - Parameters: `stretch_value` and `stretch_center`
-   - Always includes `stretch_value=1, stretch_center=0.5`
+   - `_s1-0.5` (identity) is a **fallback**, emitted only when no stretch is
+     configured — so one configured stretch yields one column, not two
 
 5. **Inversion** - Value inversion
    - `_o` - Original values (no inversion)
@@ -669,15 +737,20 @@ The script applies transformation stages in this exact order:
 
 Final key names reflect processing order:
 ```
-R_avg_v_f017_s1-0.5_o
-│ │   │ │    │      │
-│ │   │ │    │      └─ Inversion (o=original, i=inverted)
-│ │   │ │    └──────── Stretching (s{value}-{center})
-│ │   │ └───────────── Filtering (f{period:03d})
-│ │   └─────────────── Rank/Value (v=value, r=rank)
-│ └─────────────────── Metric name
-└───────────────────── Color channel
+Gray_czi_r_f004.75s_s8-0.67_o
+│    │   │ │        │       │
+│    │   │ │        │       └─ Inversion (o=original, i=inverted)
+│    │   │ │        └───────── Stretching (s{value}-{center})
+│    │   │ └────────────────── Filtering, in SECONDS (f{width}s)
+│    │   └──────────────────── Rank/Value (v=value, r=rank)
+│    └──────────────────────── Metric name
+└───────────────────────────── Color channel
 ```
+
+The filter width is the number of **seconds** requested, not a row count, with
+the integer part zero-padded to three digits so names still sort: `_f032s`,
+`_f004.75s`. Block averages use `_b{width}s`. `width_tag()` in
+`process_metrics.py` is the single source of that format.
 
 ### MIDI File Generation
 
@@ -685,7 +758,7 @@ R_avg_v_f017_s1-0.5_o
 
 MIDI files in `data/output/{video_name}_{preset}/`:
 - Individual files: `{variable}_{metric}_{rank_type}_{filter}_{stretch}_{inversion}.mid`
-- Example: `R_avg_v_f017_s8-0.33_o.mid`
+- Example: `R_avg_v_f032s_s8-0.33_o.mid`
 
 #### MIDI Parameters
 - **CC Number**: Configurable (default: 1)
@@ -700,7 +773,7 @@ Created in `data/output/{video_name}_{preset}/`:
 - `{video_name}_plots.pdf` - Visual plots (30 per page)
 - Multiple `.mid` files for different combinations:
   - Value vs Rank (`_v`, `_r`)
-  - Filter periods (`_f001`, `_f017`, `_f065`, `_f257`)
+  - Filter widths in seconds (`_f001s`, `_f032s`, `_f004.75s`)
   - Stretch parameters (`_s1-0.5`, `_s8-0.33`, etc.)
   - Inversion (`_o`, `_i`)
 
@@ -1118,16 +1191,20 @@ python run_video_processing.py my_video.json
 }
 ```
 
-### Custom Filter Periods
+### Custom Filter Widths
 ```json
 {
   "metrics_processing": {
-    "filter_periods": [5, 17, 65, 257, 513],
+    "filter_seconds": [1, 2, 4, 8, 16],
     "stretch_values": [1, 2, 4, 8],
     "stretch_centers": [0.1, 0.33, 0.5, 0.67, 0.9]
   }
 }
 ```
+
+> Every combination multiplies the column count, and each column costs two
+> Cubase tracks. `dawproject.max_columns` (default 64) refuses a project that
+> would be unopenable rather than emitting it.
 
 ### Different Optical Flow Preset
 ```json
