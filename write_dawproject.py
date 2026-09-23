@@ -247,6 +247,15 @@ def read_frames_per_second(stage1_config):
     return recorded["frames_per_second"]
 
 
+def render_archive(output_path, project_xml, title, comment):
+    """Write the .dawproject: a ZIP of project.xml plus metadata.xml."""
+    metadata_xml = serialize(build_metadata_xml(title, comment))
+    with zipfile.ZipFile(output_path, "w") as archive:
+        archive.writestr("project.xml", project_xml, zipfile.ZIP_DEFLATED)
+        archive.writestr("metadata.xml", metadata_xml, zipfile.ZIP_DEFLATED)
+    print(f"Wrote {output_path} ({os.path.getsize(output_path) / 1e6:.2f} MB)")
+
+
 def render_metrics_dawproject(values_csv, output_path, max_columns,
                               frames_per_second, tempo_bpm, time_signature,
                               interpolation, title):
@@ -276,20 +285,11 @@ def render_metrics_dawproject(values_csv, output_path, max_columns,
                           interpolation)
     )
     validate_project_xml(project_xml)
-    metadata_xml = serialize(
-        build_metadata_xml(
-            title,
-            f"Volume automation for {len(columns)} metrics from "
-            f"{os.path.basename(values_csv)}",
-        )
-    )
+    render_archive(
+        output_path, project_xml, title,
+        f"Volume automation for {len(columns)} metrics from "
+        f"{os.path.basename(values_csv)}")
 
-    with zipfile.ZipFile(output_path, "w") as archive:
-        archive.writestr("project.xml", project_xml, zipfile.ZIP_DEFLATED)
-        archive.writestr("metadata.xml", metadata_xml, zipfile.ZIP_DEFLATED)
-
-    size = os.path.getsize(output_path)
-    print(f"Wrote {output_path} ({size / 1e6:.2f} MB)")
     print(f"  {len(columns)} audio tracks (automation) + {len(columns)} group "
           f"busses, {len(times)} points each")
     print(f"  Each audio track is routed into its own \"<metric>{BUSS_SUFFIX}\".")

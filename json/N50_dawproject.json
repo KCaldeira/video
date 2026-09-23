@@ -1,0 +1,84 @@
+{
+  "description": "N50 visual metrics -> DAWproject volume automation. Same settings as N48: frame step 30 (1.0 s/row), zoom-direction metrics, rank normalisation. Transport 108 bpm 4/4.",
+  "video": {
+    "video_name": "N50_organic-rvs6f-An337",
+    "file_extensions": [
+      ".wmv",
+      ".mp4"
+    ],
+    "max_frames": null
+  },
+  "timing": {
+    "frames_per_second": 30
+  },
+  "video_processing": {
+    "_comment_process_every_nth_frame": "Integer video-frame step between analysis rows. 30/30 = exactly one analysis row per second. Fixes the time resolution permanently: everything else re-derives from basic.csv in seconds, but a finer rate means re-decoding the video. Smoothing widths quantise to odd multiples of this spacing, so at 1 s/row the shortest usable filter is 3 s.",
+    "process_every_nth_frame": 30,
+    "downscale_large": 100,
+    "downscale_medium": 10,
+    "optical_flow": {
+      "preset": "default",
+      "pyr_scale": 0.5,
+      "levels": 3,
+      "winsize": 15,
+      "iterations": 3,
+      "poly_n": 5,
+      "poly_sigma": 1.2
+    }
+  },
+  "metrics_processing": {
+    "_comment_color_channels": "Outer product with 'metrics'. Available: R G B Gray S V H000 H060 H120 H180 H240 H300 Hmon. Empty list = all.",
+    "color_channels": [
+      "Gray",
+      "R",
+      "G",
+      "B"
+    ],
+    "_comment_metrics": "Available per channel -- combinations that do not exist are skipped. R/G/B/S/V: avg std gmn gs1. H000..H300: int std. Hmon: std. Gray-only camera motion: czd = signed zoom divergence (positive is zoom IN; magnifying moves features outward so the flow diverges), and its half-wave split czi = zoom-in speed, czo = zoom-out speed, cza = zoom speed either way -- each of czi/czo is zero unless the camera is moving that way, so separate sounds can follow each direction. Same split for rotation: crc signed, crl counterclockwise, crr clockwise, cra either way. Gray also has cmv dcd dcl ed0-2 ee0-2 es0-2 ga1-6 gm1-6 gmb gs2-6 rad rsn rss. Empty list = all.",
+    "metrics": [
+      "czi",
+      "czo",
+      "avg",
+      "std"
+    ],
+    "_comment_rank_types": "v = raw value, r = percentile rank. Empty = both.",
+    "rank_types": [
+      "r"
+    ],
+    "_comment_inversions": "o = original, i = 1 - value. Empty = both.",
+    "inversions": [
+      "o",
+      "i"
+    ],
+    "_comment_filter_seconds": "Triangular smoothing width in seconds, converted to the nearest odd number of analysis rows. 4.4444 s is two bars of 4/4 at 108 bpm (4 beats = 2.2222 s). N48 used 4.75 s because that was one third of its 16.2 s zoom cycle; with no known cycle here, the bar length is the sensible analogue. Cheap to change: re-run with process_video and process_metrics false.",
+    "filter_seconds": [
+      10,20,40
+    ],
+    "_comment_block_seconds": "Block-average widths in seconds, piecewise constant. Suffix _b016s etc.",
+    "block_seconds": [],
+    "_comment_stretch": "Logistic stretch: outer product of stretch_values x stretch_centers. If both are empty the identity stretch _s1-0.5 is emitted instead.",
+    "stretch_values": [
+      8
+    ],
+    "stretch_centers": [
+      0.67
+    ]
+  },
+  "dawproject": {
+    "_comment": "Every column of the values CSV becomes one track. There is no column list: narrow metrics_processing to get fewer.",
+    "_comment_transport": "Cubase overwrites the target project's initial tempo marking and time signature with these on import, so set them to match that project. Both are always written: Cubase will not load a file with no Tempo, and with no TimeSignature it imposes 4/4 rather than leaving the signature untouched.",
+    "tempo": 108,
+    "time_signature": [
+      4,
+      4
+    ],
+    "max_columns": 64,
+    "interpolation": "linear"
+  },
+  "pipeline_control": {
+    "process_video": true,
+    "process_metrics": true,
+    "process_clusters": false,
+    "write_dawproject": true
+  }
+}
