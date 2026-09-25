@@ -1371,6 +1371,7 @@ See `example_config.json` for a working example with a specific video.
 - **`find_extrema.py`** - Finds local maxima/minima in time series data
 - **`create_group_channel.py`** - MIDI channel grouping utility
 - **`speed_to_cc.py`** - Converts speed data into a fixed-tempo MIDI with CC1 tracks
+- **`frame_similarity.py`** - Measures how much each video frame differs from the next, as CSV
 - **`audio_smoothing.py`** - Smoothing kernels parameterized by mean weighting distance (library, used by `audio_level_curve.py`)
 - **`audio_level_curve.py`** - Builds a loudness-leveling gain curve from an audio file
 - **`curve_to_dawproject.py`** - Packages a gain curve and its audio into a `.dawproject` for Cubase
@@ -1407,6 +1408,55 @@ python speed_to_cc.py <input_file> <tempo_bpm> [output.mid]
 **Example**:
 ```bash
 python speed_to_cc.py data/input/N32_speed.py 108 data/output/N32_speed_cc.mid
+```
+
+---
+
+### `frame_similarity.py` - Frame-to-Frame Similarity CSV
+
+Standalone CLI utility that decodes an entire video in one pass and writes one CSV row per frame
+transition, describing how much frame `i` differs from frame `i+1`. Useful for locating still or
+slow passages, finding held/duplicated frames, and producing a per-frame change signal that is far
+cheaper than the optical-flow metrics in `process_video.py`.
+
+For each consecutive pair, the signed difference `frame[i+1] - frame[i]` is taken per RGB channel,
+and the mean and standard deviation of that difference are recorded. The headline metric,
+`diff_std_sum`, is the sum of the three per-channel standard deviations.
+
+**Usage**:
+```bash
+python frame_similarity.py <video> [-o OUTPUT] [--max-frames N]
+```
+
+**Arguments**:
+- `video` - Any of: a path to a video file; a directory holding exactly one `.wmv`/`.mp4`; or a bare
+  name resolved against `data/input/` in either of those forms. So `N48`, `data/input/N48`, and the
+  full path to the file inside it are all equivalent.
+- `-o`, `--output` - Output CSV path (default: `data/output/{video stem}_framesim.csv`)
+- `--max-frames N` - Stop after N frames, for quick checks (default: the whole video)
+
+**Output Columns**:
+
+| Column | Description |
+|--------|-------------|
+| `frame` | Index of the first frame of the pair |
+| `time_sec` | `frame / fps` |
+| `diff_std_sum` | `R_std + G_std + B_std`, the headline similarity metric |
+| `R_std`, `G_std`, `B_std` | Per-channel standard deviation of `frame[i+1] - frame[i]` |
+| `R_mean`, `G_mean`, `B_mean` | Per-channel mean of `frame[i+1] - frame[i]` |
+| `identical` | 1 if the two frames are bit-identical, else 0 |
+
+A video of *n* frames produces *n-1* rows; the last frame has no successor.
+
+**Performance**: frames are compared at native resolution with no downscaling, since downscaling
+attenuates the metric and can hide small differences. Decoding is the bottleneck (a reader thread
+gives no measurable gain), so expect roughly 85 frames per second - about 5.5 minutes for a
+26,000-frame 1080p video.
+
+**Example**:
+```bash
+python frame_similarity.py N48
+python frame_similarity.py data/input/N48 --max-frames 400 -o data/output/N48_smoke.csv
 ```
 
 ---
