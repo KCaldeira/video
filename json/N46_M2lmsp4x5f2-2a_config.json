@@ -13,7 +13,7 @@
   "video_processing": {
     "downscale_large": 100,
     "downscale_medium": 10,
-    "frame_interval": 16.666666666666668,
+    "process_every_nth_frame": 17,
     "optical_flow": {
       "preset": "default",
       "pyr_scale": 0.5,
@@ -25,8 +25,8 @@
     }
   },
   "metrics_processing": {
-    "filter_periods": [65, 129],
-    "block_beats": [16, 32, 64],
+    "filter_seconds": [36.11, 71.67],
+    "block_seconds": [8.89, 17.78, 35.56],
     "stretch_values": [8],
     "stretch_centers": [0.33, 0.67],
     "cc_number": 1
