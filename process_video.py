@@ -789,14 +789,19 @@ def compute_lucas_kanade_metrics(color_channel, color_channel_prior, center_regi
     distance_from_center = np.sqrt(rel_x**2 + rel_y**2)
     
     # Zoom metrics (divergence of flow) - only in centered region
-    # Positive divergence = zoom out, negative = zoom in
+    # Flow runs prev -> curr, so magnifying the image moves features outward
+    # from the centre and the flow field diverges.
+    # Positive divergence = zoom IN, negative = zoom out.
+    # (Verified with synthetic 1.05x/0.95x warps: +0.071 / -0.078.)
     # Divergence = ∂u/∂x + ∂v/∂y (approximated using finite differences)
     du_dx = np.gradient(flow_x_center, axis=1)
     dv_dy = np.gradient(flow_y_center, axis=0)
     zoom_divergence = float(np.mean(du_dx + dv_dy))
     
     # Rotation metrics (curl of flow) - only in centered region
-    # Positive curl = counterclockwise rotation, negative = clockwise
+    # The image y-axis points down, so this curl is positive for rotation
+    # that appears CLOCKWISE on screen.
+    # (Verified with synthetic +/-3 deg warps: CCW -0.074, CW +0.074.)
     # Curl = ∂v/∂x - ∂u/∂y (approximated using finite differences)
     dv_dx = np.gradient(flow_y_center, axis=1)
     du_dy = np.gradient(flow_x_center, axis=0)
@@ -967,7 +972,7 @@ def export_metrics_to_csv(frame_count_list, metrics, filename):
 def process_video_to_csv(video_path,
                            subdir_name, # output prefix
                            frames_per_second,
-                           frame_interval,
+                           process_every_nth_frame,
                            downscale_large,
                            downscale_medium,
                            max_frames=None,
@@ -976,22 +981,30 @@ def process_video_to_csv(video_path,
     """
     Process every Nth frame, calculate metrics, and write a frame-indexed CSV.
 
-    This stage is tempo-free: analysis samples are taken every `frame_interval`
-    video frames.  Tempo is applied only later, in the MIDI writing stage.
+    This stage is tempo-free: analysis samples are taken every
+    `process_every_nth_frame` video frames.
 
     :param video_path: Path to the video file.
     :param output_prefix: Prefix for output MIDI filenames.
     :param frames_per_second (number of frames per second in video)
-    :param frame_interval (number of video frames between analysed frames; may be fractional)
+    :param process_every_nth_frame (integer number of video frames between analysed frames)
     :param downscale_large: spatial scale for computing metrics
     :param downscale_medium: resolution reduction for computing metrics
     :param max_frames: maximum number of frames to process (None = process all frames)
 
     """
 
-    # Take every Nth frame, where frame_interval is the floating point (possibly
-    # non-integer) spacing between analysed frames.
-    frames_per_analysis_frame_real = frame_interval
+    # The step is an exact integer, so sampling is a plain modulo test. It used
+    # to be fractional only so that samples would land on beat boundaries; the
+    # pipeline no longer has any notion of beats.
+    if int(process_every_nth_frame) != process_every_nth_frame:
+        raise ValueError(
+            f"process_every_nth_frame must be a whole number of video frames, "
+            f"got {process_every_nth_frame}"
+        )
+    step = int(process_every_nth_frame)
+    if step < 1:
+        raise ValueError(f"process_every_nth_frame must be >= 1, got {step}")
 
     frame_count = 0
     frame_count_list = []
@@ -1032,10 +1045,7 @@ def process_video_to_csv(video_path,
         if frame_prior is None:
             frame_prior = frame.copy()
         
-        k = frame_count / frames_per_analysis_frame_real
-        k_rounded = round(k)
-        frame_count_good = round(k_rounded * frames_per_analysis_frame_real)
-        if frame_count == frame_count_good or frame_count == total_frames_to_process - 1:
+        if frame_count % step == 0 or frame_count == total_frames_to_process - 1:
             print ("Processing frame:", frame_count)
             frame_count_list.append(frame_count)
             timing_data['frame_count'] += 1
@@ -1102,7 +1112,7 @@ def process_video_to_csv(video_path,
         "video_file": video_path,
         "subdir_name": subdir_name,
         "frames_per_second": frames_per_second,
-        "frame_interval": frame_interval,
+        "process_every_nth_frame": step,
         "downscale_large": downscale_large,
         "downscale_medium": downscale_medium,
         "farneback_preset": farneback_preset,

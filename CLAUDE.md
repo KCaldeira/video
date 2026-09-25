@@ -17,10 +17,13 @@ This file provides coding guidance to Claude Code when working with code in this
 - Prefer failing and understanding problems over hiding them
 
 ### Code Structure Principles
-- **Single Source of Truth**: The `filter_periods` list controls which filters are applied
+- **Single Source of Truth**: The `filter_seconds` list controls which filters are applied
 - **Simplified Logic**: Prefer linear processing over complex conditional logic
 - **Avoid if-then complexity**: Keep control flow simple and obvious
-- **Consistent Naming**: Use `_f{period:03d}` format for all filter periods (including `_f001` for unfiltered)
+- **Consistent Naming**: Smoothing widths are given in **seconds** and named in
+  seconds: `_f{width}s`, where the integer part is zero-padded to three digits
+  (`_f032s`, `_f004.75s`). `width_tag()` in `process_metrics.py` is the single
+  source of that format. Block averages use `_b{width}s`.
 
 ## Output Location
 
@@ -44,9 +47,57 @@ Applying filtering to raw data produces jagged, inconsistent curves. Filtering m
 The processing uses separate dictionaries for each transformation stage:
 - **`raw_entries`** - Initial base entries (`_v`, `_r`)
 - **`scaled_entries`** - After scaling to 0-1 range
-- **`filtered_entries`** - After filtering with `_f{period:03d}` suffixes
+- **`filtered_entries`** - After filtering with `_f{width}s` suffixes
 - **`stretched_entries`** - After stretching transformations
 - **`final_entries`** - After inversion with `_o` and `_i` suffixes
+
+## Environment
+
+- **DAW: Cubase 15.0.30** (Windows). Assume this version for any DAWproject or
+  MIDI question; do not ask which DAW or version.
+- Windows drives visible from WSL: `C:` and `D:` only, as `/mnt/c` and
+  `/mnt/d`. `E:` is not mounted. To hand a file to Cubase, write it under
+  `/mnt/d/`.
+
+**Two Cubase versions are installed (14 and 15).** The Windows file
+association for `.dawproject` and `.cpr` opens **14**, while the desktop
+shortcut launches **15**. Always start Cubase from the shortcut and use
+`File > Import > DAWproject` from inside it; never double-click the file, or
+the test runs against the wrong version. To confirm which version is running,
+export any `.dawproject` from it and read the `<Application version="...">`
+line — that string is accurate and names the binary that wrote the file.
+
+### Known Cubase DAWproject limitations
+
+- **Automation will not import onto a group (`role="submix"`) channel.**
+  Confirmed on both Cubase 14.0.41 and 15.0.30 across twelve structural
+  variants, including Cubase's own export shape. Cubase 15 also fails to
+  reimport its *own* exported group automation, so this is a Cubase
+  limitation, not a problem with the generated XML. Settled approach in
+  `write_dawproject.py`, verified importing on 15.0.30: each metric emits an
+  explicit pair -- an audio `Track` whose channel is `role="regular"` and
+  carries the automation, plus a separate `role="submix"` Channel named
+  `"<metric> BUS"` that the audio track is routed into. The automation is
+  copied from the audio track to its buss by hand. Do not redesign this
+  without first re-running the round-trip test.
+- **`contentType` is required** on a `Track`, or Cubase creates no track.
+- **`Transport/Tempo` is required**, or Cubase silently loads nothing.
+- **`Transport/TimeSignature` is required**, or Cubase imposes 4/4 on the
+  target project instead of leaving its signature alone.
+- Importing into an existing project **overwrites its initial tempo marking
+  and time signature**, so set `dawproject.tempo` and
+  `dawproject.time_signature` to match that project (N48: 75 bpm, 1/4).
+- **Track order is not controllable.** Cubase collects every submix channel
+  into its own Group folder, so audio tracks and their busses cannot be
+  interleaved no matter what order the `Structure` element lists them in.
+  Tested with explicit interleaved Track/Channel pairs; ignored.
+- `contentType`, `Tempo` and `TimeSignature` are all optional in the schema
+  and all required in practice: **schema-valid is not the same as loadable**,
+  and an optional element is not safe to omit. Confirm every structural
+  change with a real import.
+- **Track time base is not in the DAWproject schema.** Cubase applies
+  *Preferences > Editing > Default Track Time Type* at import; set it to
+  **Linear** or seconds-based automation will still move with tempo.
 
 ## Quick Reference
 
@@ -59,6 +110,8 @@ python run_video_processing.py config.json
 1. **Video Analysis** (process_video.py) - Extract primary metrics
 2. **Metrics Processing** (process_metrics.py) - Derive metrics, generate MIDI
 3. **Clustering** (cluster_primary.py) - Group similar frames
+4. **MIDI** (write_midi.py) - Legacy CC output, off by default
+5. **DAWproject** (write_dawproject.py) - Volume automation; the default output
 
 ### Audio Leveling Workflow (separate from the video pipeline)
 ```bash
@@ -90,11 +143,19 @@ All parameters are in JSON config files. See `default_config.json` for template.
 
 Key config parameters:
 - `video.video_name` - Video filename (without extension) - **REQUIRED**
-- `timing.beats_per_minute` - Tempo (default: 64)
+- `timing.frames_per_second` - Required when `process_video` runs (it silently
+  defaults to 30 otherwise)
+- `video_processing.process_every_nth_frame` - Integer frame step; fixes the time
+  resolution permanently, so choose it before a long run
 - `video_processing.optical_flow.preset` - Motion detection preset (default: "default")
-- `metrics_processing.filter_periods` - [17, 65, 257] - Smoothing filters
+- `metrics_processing.filter_seconds` - Smoothing widths in seconds (fractional allowed)
+- `metrics_processing.color_channels` / `metrics` / `rank_types` / `inversions` -
+  Outer product controlling which columns the values CSV holds, and hence how
+  many DAWproject tracks result
 - `cluster_processing.k_values` - [2, 3, 4, 5, 6, 8, 10, 12] - Cluster counts to try
-- `pipeline_control.process_video` / `process_metrics` / `process_clusters` - Enable/disable stages
+- `pipeline_control.process_video` / `process_metrics` / `process_clusters` /
+  `write_dawproject` / `write_midi` - Enable/disable stages. DAWproject is the
+  default output; MIDI is legacy and off by default
 
 ### Performance Optimizations
 

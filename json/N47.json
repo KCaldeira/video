@@ -1,7 +1,7 @@
 {
   "description": "Config for N47_organic-s2F-AN402",
   "video": {
-    "video_name": "N47/N47_organic-s2F-AN402",
+    "video_name": "N47_organic-s2F-AN402",
     "file_extensions": [".wmv", ".mp4"],
     "max_frames": null
   },

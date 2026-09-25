@@ -23,6 +23,10 @@ scikit-image==0.24.0
 # Excel file handling (for derived data output)
 openpyxl==3.1.5
 
+# XML schema validation (DAWproject output is validated against
+# schema/dawproject/Project.xsd on every write)
+xmlschema==4.3.2
+
 # Audio file reading and writing (audio leveling workflow)
 # Wraps libsndfile; reads 24-bit WAV natively and MP3 via libsndfile >= 1.1
 soundfile==0.14.0
@@ -39,6 +43,4 @@ soundfile==0.14.0
 # - sys: Built-in Python module for system-specific parameters
 # - zipfile: Built-in Python module for reading and writing DAWproject archives
 # - wave: Built-in Python module for WAV headers
-#
-# Optional, for validating generated DAWproject files against the schema:
-# - xmlschema (only needed when passing --validate to curve_to_dawproject.py)
+# - xmlschema is also used by curve_to_dawproject.py --validate

@@ -10,7 +10,10 @@
   },
   "video": {
     "video_name": "your_video_name_here",
-    "file_extensions": [".wmv", ".mp4"],
+    "file_extensions": [
+      ".wmv",
+      ".mp4"
+    ],
     "max_frames": null
   },
   "timing": {
@@ -21,7 +24,7 @@
   "video_processing": {
     "downscale_large": 100,
     "downscale_medium": 10,
-    "frame_interval": 28.125,
+    "process_every_nth_frame": 15,
     "optical_flow": {
       "preset": "default",
       "pyr_scale": 0.5,
@@ -33,23 +36,60 @@
     }
   },
   "metrics_processing": {
-    "filter_periods": [17, 65, 257],
-    "block_beats": [],
-    "stretch_values": [8],
-    "stretch_centers": [0.33, 0.67],
+    "color_channels": [],
+    "metrics": [],
+    "rank_types": [],
+    "inversions": [],
+    "filter_seconds": [
+      32,
+      64
+    ],
+    "block_seconds": [],
+    "stretch_values": [
+      8
+    ],
+    "stretch_centers": [
+      0.33,
+      0.67
+    ],
     "cc_number": 1
   },
   "pipeline_control": {
     "process_video": true,
     "process_metrics": true,
     "process_clusters": true,
-    "write_midi": true
+    "write_midi": false,
+    "write_dawproject": true
+  },
+  "dawproject": {
+    "note": "Every column of the values CSV becomes one track; narrow metrics_processing to get fewer. tempo and time_signature overwrite the target project's initial marking on import, so set them to match it.",
+    "tempo": 120,
+    "time_signature": [
+      4,
+      4
+    ],
+    "max_columns": 64,
+    "interpolation": "linear"
   },
   "cluster_processing": {
-    "k_values": [2, 3, 4, 5, 6, 8, 10, 12],
+    "k_values": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      8,
+      10,
+      12
+    ],
     "normalization": "rank",
     "metrics_to_exclude": [],
     "random_state": 42,
-    "boxcar_periods": [1, 17, 65, 257]
+    "boxcar_periods": [
+      1,
+      17,
+      65,
+      257
+    ]
   }
 }
