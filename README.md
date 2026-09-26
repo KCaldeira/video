@@ -1668,6 +1668,7 @@ See `example_config.json` for a working example with a specific video.
 - **`find_extrema.py`** - Finds local maxima/minima in time series data
 - **`create_group_channel.py`** - MIDI channel grouping utility
 - **`speed_to_cc.py`** - Converts speed data into a fixed-tempo MIDI with CC1 tracks
+- **`speed_to_dawproject.py`** - Converts an inverse-speed file into `.dawproject` volume automation (six tracks)
 - **`frame_similarity.py`** - Measures how much each video frame differs from the next, as CSV
 - **`audio_smoothing.py`** - Smoothing kernels parameterized by mean weighting distance (library, used by `audio_level_curve.py`)
 - **`audio_level_curve.py`** - Builds a loudness-leveling gain curve from an audio file
@@ -1705,6 +1706,60 @@ python speed_to_cc.py <input_file> <tempo_bpm> [output.mid]
 **Example**:
 ```bash
 python speed_to_cc.py data/input/N32_speed.py 108 data/output/N32_speed_cc.mid
+```
+
+---
+
+### `speed_to_dawproject.py` - Inverse Speed Data to DAWproject Automation
+
+The DAWproject counterpart of `speed_to_cc.py`: it reads the same input files and writes the same
+six derived series, but as volume automation in a `.dawproject` for Cubase rather than as MIDI CC.
+
+**The `*_speed.py` files hold inverse speed** (time per unit of motion: large when the camera is
+slow). This script takes speed as `1/value` before deriving anything, so its track names are
+correct. `speed_to_cc.py` does not invert, so its `Speed` and `Inverse Speed` tracks are the other
+way round. Any value `<= 0` in an inverse-speed file is an error.
+
+**Usage**:
+```bash
+python speed_to_dawproject.py <input_file> [-o OUTPUT] [--fps 30] [--tempo 120]
+       [--time-signature 4/4] [--every-nth-frame 1] [--interpolation linear]
+```
+
+**Arguments**:
+- `input_file` - `.py`, `.csv`, or `.kfs` file, one value per frame (same formats as `speed_to_cc.py`)
+- `-o`, `--output` - Output path (default: `data/output/<input stem>.dawproject`)
+- `--fps` - Frame rate of the series; automation time is `frame_index / fps` seconds (default 30)
+- `--tempo` - Transport tempo. Cosmetic, since all times are in seconds, but Cubase will not load a
+  project without one, and importing overwrites the target project's initial tempo marking, so set
+  it to match that project (default 120)
+- `--time-signature` - Transport time signature; also overwrites the target's on import (default `4/4`)
+- `--every-nth-frame` - Keep every Nth point to thin the automation. Scaling and percentiles are
+  still computed from every frame. This decimates; it does not smooth (default 1)
+- `--interpolation` - Interpolation written on each point (default `linear`)
+
+**Output Tracks** (each scaled independently to 0-1, written as linear gain: 0 = -inf dB, 1 = 0 dB):
+
+| Track | Description |
+|-------|-------------|
+| `Speed` | Speed (`1/file value`) |
+| `Inverse Speed` | Inverse speed (the file's values) |
+| `Speed Percentile` | Percentile rank of speed |
+| `Speed Inverted` | `1 - Speed` |
+| `Inverse Speed Inverted` | `1 - Inverse Speed` |
+| `Speed Percentile Inverted` | `1 - Speed Percentile` |
+
+If the filename contains `rot`, the tracks are labelled `Rotation` and the values are used as they
+are, not inverted: rotation is signed, so it has no meaningful reciprocal. Positive is
+counter-clockwise.
+
+As in `write_dawproject.py`, each track is an audio track carrying the automation, routed into its
+own `"<track> BUS"` group channel. Cubase will not import automation onto a group, so copy each lane
+onto its buss by hand. Import with `File > Import > DAWproject` from Cubase 15 (see `CLAUDE.md`).
+
+**Example**:
+```bash
+python speed_to_dawproject.py data/input/N50_speed.py --tempo 108 --time-signature 4/4
 ```
 
 ---

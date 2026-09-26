@@ -5,18 +5,24 @@ Convert a per-frame speed (or rotation) time series into a .dawproject.
 The DAWproject counterpart of speed_to_cc.py: same input files and the same
 six derived series, written as volume automation instead of MIDI CC.
 
+The "speed" files hold INVERSE speed (time per unit of motion: large when the
+camera is slow), so speed is taken as 1/value before anything is derived.
+speed_to_cc.py does not do this, so its "Speed" and "Inverse Speed" tracks
+are the other way round.
+
 Six tracks are written, each scaled independently to span 0-1:
 
-  1. <Quantity>                     value
-  2. Inverse <Quantity>             1/value
-  3. <Quantity> Percentile          percentile rank of value
+  1. <Quantity>                     speed
+  2. Inverse <Quantity>             1/speed, i.e. the file's values
+  3. <Quantity> Percentile          percentile rank of speed
   4. <Quantity> Inverted            1 - track 1
   5. Inverse <Quantity> Inverted    1 - track 2
   6. <Quantity> Percentile Inverted 1 - track 3
 
 If the input filename contains "rot" the tracks are labelled "Rotation"
-instead of "Speed"; the sign convention there is that positive is
-counter-clockwise.
+instead of "Speed", and the values are used as they are, not inverted:
+rotation is signed, so it has no meaningful reciprocal. The sign convention
+there is that positive is counter-clockwise.
 
 Automation times are wall-clock seconds, `frame_index / fps`, so the curves
 line up with the video and with the output of write_dawproject.py. Nothing
@@ -30,7 +36,7 @@ automation plus a like-named "<track> BUS" it feeds. Copy the lane onto the
 buss by hand in Cubase.
 
 Usage:
-    python speed_to_dawproject.py data/input/N51_speed.py --tempo 108
+    python speed_to_dawproject.py data/input/N50_speed.py --tempo 108
 """
 
 import argparse
@@ -119,12 +125,23 @@ def main():
     is_rotation = "rot" in os.path.basename(args.input_file).lower()
     quantity = "Rotation" if is_rotation else "Speed"
 
-    speed = read_speed_data(args.input_file)
-    print(f"Loaded {len(speed)} frames from {args.input_file}")
-    print(f"{quantity} stats: min={speed.min():.4f}, max={speed.max():.4f}, "
-          f"mean={speed.mean():.4f}")
+    data = read_speed_data(args.input_file)
+    print(f"Loaded {len(data)} frames from {args.input_file}")
+    print(f"File stats: min={data.min():.4f}, max={data.max():.4f}, "
+          f"mean={data.mean():.4f}")
     if is_rotation:
         print("Note: convention is that positive is counter-clockwise")
+        speed = data
+    else:
+        # The file holds inverse speed; a zero or negative value has no
+        # meaningful reciprocal, so refuse rather than write infinities.
+        if np.any(data <= 0):
+            raise ValueError(
+                f"inverse-speed file has {int(np.sum(data <= 0))} values <= 0; "
+                "cannot take 1/value")
+        speed = 1.0 / data
+        print(f"Treating file values as inverse speed; speed = 1/value "
+              f"(min={speed.min():.6f}, max={speed.max():.6f})")
 
     if args.every_nth_frame < 1:
         raise ValueError(

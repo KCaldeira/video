@@ -50,9 +50,11 @@
       "o",
       "i"
     ],
-    "_comment_filter_seconds": "Triangular smoothing width in seconds, converted to the nearest odd number of analysis rows. 4.4444 s is two bars of 4/4 at 108 bpm (4 beats = 2.2222 s). N48 used 4.75 s because that was one third of its 16.2 s zoom cycle; with no known cycle here, the bar length is the sensible analogue. Cheap to change: re-run with process_video and process_metrics false.",
+    "_comment_filter_seconds": "Triangular smoothing width in seconds, converted to the nearest odd number of analysis rows. Cheap to change: re-run with process_video false.",
     "filter_seconds": [
-      10,20,40
+      10,
+      20,
+      40
     ],
     "_comment_block_seconds": "Block-average widths in seconds, piecewise constant. Suffix _b016s etc.",
     "block_seconds": [],
