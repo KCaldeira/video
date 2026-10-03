@@ -1,0 +1,17 @@
+{
+  // Dark plum window tint so this repo's VS Code window is easy to tell apart.
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#3d1f3a",
+    "titleBar.activeForeground": "#f3e6f1",
+    "titleBar.inactiveBackground": "#2c1629",
+    "titleBar.inactiveForeground": "#c2abbf",
+    "activityBar.background": "#3d1f3a",
+    "activityBar.foreground": "#f3e6f1",
+    "statusBar.background": "#3d1f3a",
+    "statusBar.foreground": "#f3e6f1",
+    "sideBar.background": "#24121f",
+    "editor.background": "#1a0e18",
+    "panel.background": "#1a0e18",
+    "terminal.background": "#1a0e18"
+  }
+}

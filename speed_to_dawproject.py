@@ -19,6 +19,12 @@ Six tracks are written, each scaled independently to span 0-1:
   5. Inverse <Quantity> Inverted    1 - track 2
   6. <Quantity> Percentile Inverted 1 - track 3
 
+With --clip-fraction F, tracks 1-3 (and so 4-6) are each scaled so that
+the F and 1-F quantiles span 0-1, with anything beyond clipped to the bounds.
+A brief extreme -- such as a slow-down at the very end -- then no longer
+squashes the rest of the curve into a sliver of the range. On the
+percentile track this maps percentile F to 0 and 1-F to 1.
+
 If the input filename contains "rot" the tracks are labelled "Rotation"
 instead of "Speed", and the values are used as they are, not inverted:
 rotation is signed, so it has no meaningful reciprocal. The sign convention
@@ -59,19 +65,31 @@ from write_dawproject import (
 DEFAULT_FPS = 30.0
 
 
-def scale_unit(values):
-    """Scale an array to span 0-1. Matches scale_to_cc but without the 0-100 step."""
-    low, high = float(np.min(values)), float(np.max(values))
+def scale_unit(values, clip_fraction=0.0):
+    """Scale an array to span 0-1, clipping the extreme tails first.
+
+    The `clip_fraction` and `1 - clip_fraction` quantiles map to 0 and 1, and
+    values beyond them are clipped to those bounds. 0 uses the true min and
+    max, which matches scale_to_cc without the 0-100 step.
+    """
+    low = float(np.quantile(values, clip_fraction))
+    high = float(np.quantile(values, 1.0 - clip_fraction))
     if high == low:
-        raise ValueError("series is constant, so it cannot be scaled to 0-1")
-    return (values - low) / (high - low)
+        raise ValueError(
+            f"series is constant between the {clip_fraction} and "
+            f"{1.0 - clip_fraction} quantiles, so it cannot be scaled to 0-1")
+    return (np.clip(values, low, high) - low) / (high - low)
 
 
-def build_series(speed, quantity):
-    """The six derived series, in the same order speed_to_cc.py writes them."""
-    value = scale_unit(speed)
-    inverse = scale_unit(1.0 / (speed + 1e-10))
-    percentile = scale_unit(percentile_data(speed))
+def build_series(speed, quantity, clip_fraction):
+    """The six derived series, in the same order speed_to_cc.py writes them.
+
+    Clipping applies to all three base series, so on the percentile series
+    percentile `clip_fraction` maps to 0 and `1 - clip_fraction` to 1.
+    """
+    value = scale_unit(speed, clip_fraction)
+    inverse = scale_unit(1.0 / (speed + 1e-10), clip_fraction)
+    percentile = scale_unit(percentile_data(speed), clip_fraction)
 
     return {
         f"{quantity}": value,
@@ -116,6 +134,14 @@ def main():
         help="keep only every Nth frame, to thin the automation. 1 keeps the "
              "full per-frame resolution (default: %(default)s)")
     parser.add_argument(
+        "--clip-fraction", type=float, default=0.0,
+        help="fraction of each tail to clip before scaling each track to "
+             "0-1: 0.05 maps the 5th and 95th percentiles "
+             "to 0 and 1 and clips everything beyond them, so a brief "
+             "extreme cannot squash the rest of the curve. 0 uses the true "
+             "min and max. On the percentile tracks, percentile 0.05 "
+             "maps to 0 and 0.95 to 1 (default: %(default)s)")
+    parser.add_argument(
         "--interpolation", default="linear",
         help="interpolation written on each point (default: %(default)s)")
     args = parser.parse_args()
@@ -143,13 +169,16 @@ def main():
         print(f"Treating file values as inverse speed; speed = 1/value "
               f"(min={speed.min():.6f}, max={speed.max():.6f})")
 
+    if not 0.0 <= args.clip_fraction < 0.5:
+        raise ValueError(
+            f"--clip-fraction must be in [0, 0.5), got {args.clip_fraction}")
     if args.every_nth_frame < 1:
         raise ValueError(
             f"--every-nth-frame must be at least 1, got {args.every_nth_frame}")
 
     # Derive from the full series, then thin, so that the percentile ranks and
     # the 0-1 scaling reflect every frame rather than only the kept ones.
-    series = build_series(speed, quantity)
+    series = build_series(speed, quantity, args.clip_fraction)
     frames = np.arange(len(speed))[::args.every_nth_frame]
     values = pd.DataFrame({k: v[::args.every_nth_frame] for k, v in series.items()})
     times = frames / args.fps
@@ -177,6 +206,8 @@ def main():
     print("  Cubase will not import automation onto a group: copy each lane")
     print("  from the audio track to its buss by hand.")
     print(f"  Time range: 0.000 to {times[-1]:.3f} seconds")
+    print(f"  Clip fraction: {args.clip_fraction:g} of each tail "
+          f"(all tracks)")
     print(f"  Transport: {args.tempo:g} bpm, time signature "
           f"{numerator}/{denominator}")
     print("Import in Cubase with File > Import > DAWproject.")

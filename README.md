@@ -1723,7 +1723,8 @@ way round. Any value `<= 0` in an inverse-speed file is an error.
 **Usage**:
 ```bash
 python speed_to_dawproject.py <input_file> [-o OUTPUT] [--fps 30] [--tempo 120]
-       [--time-signature 4/4] [--every-nth-frame 1] [--interpolation linear]
+       [--time-signature 4/4] [--every-nth-frame 1] [--clip-fraction 0]
+       [--interpolation linear]
 ```
 
 **Arguments**:
@@ -1736,6 +1737,11 @@ python speed_to_dawproject.py <input_file> [-o OUTPUT] [--fps 30] [--tempo 120]
 - `--time-signature` - Transport time signature; also overwrites the target's on import (default `4/4`)
 - `--every-nth-frame` - Keep every Nth point to thin the automation. Scaling and percentiles are
   still computed from every frame. This decimates; it does not smooth (default 1)
+- `--clip-fraction` - Fraction of each tail to clip before scaling each track to 0-1.
+  `0.05` maps the 5th and 95th percentiles to 0 and 1 and clips everything beyond them, so a brief
+  extreme (N50's slow-down over its last 12 s) cannot squash the rest of the curve into a sliver
+  of the range. `0` uses the true min and max. Must be in `[0, 0.5)`. It applies to the percentile
+  tracks too: percentile 0.05 maps to 0 and 0.95 to 1, with the tails clipped (default 0)
 - `--interpolation` - Interpolation written on each point (default `linear`)
 
 **Output Tracks** (each scaled independently to 0-1, written as linear gain: 0 = -inf dB, 1 = 0 dB):
@@ -1759,7 +1765,7 @@ onto its buss by hand. Import with `File > Import > DAWproject` from Cubase 15 (
 
 **Example**:
 ```bash
-python speed_to_dawproject.py data/input/N50_speed.py --tempo 108 --time-signature 4/4
+python speed_to_dawproject.py data/input/N50_speed.py --tempo 108 --time-signature 4/4 --clip-fraction 0.05
 ```
 
 ---
