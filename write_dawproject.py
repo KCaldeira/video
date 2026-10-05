@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Render metric curves as DAWproject volume automation on group (buss) tracks.
+Render metric curves as DAWproject volume automation on audio tracks.
 
 Reads the same `{prefix}_values.csv` that write_midi.py reads and writes a
 single .dawproject carrying every metric column in that CSV as a volume
@@ -53,37 +53,19 @@ from curve_to_dawproject import (
 )
 
 # Cubase (tested 15.0.30) will not attach automation to a submix (group)
-# channel on
-# import. This was established by testing eight structural variants, including
-# one matching Cubase's own DAWproject export byte for byte in shape (group
-# busses as bare <Channel role="submix"> directly in <Structure>): the busses
-# appear, the automation does not. Cubase's exporter likewise writes no
-# automation for a group channel.
-#
-# Nor is this specific to Volume: Pan, Send/Volume and Equalizer/OutputGain on
-# a submix, and Volume on a VCA, were all tested and none attach. Cubase
-# refuses every automatable parameter on a submix or VCA channel.
+# channel on import. Eight structural variants were tested, including one
+# matching Cubase's own DAWproject export in shape: the busses appear, the
+# automation does not. Pan, Send/Volume and Equalizer/OutputGain on a submix,
+# and Volume on a VCA, were tested too and none attach.
 #
 # What does work is a Track with contentType="audio" whose channel has
-# role="submix". Cubase then creates *two* things per metric: an audio track
-# carrying the automation, and a like-named group buss. Copy the automation
-# from the audio track to the group by hand in Cubase.
-#
-# So this is a deliberate workaround for a DAW limitation, not the structure
-# the format calls for. Revisit if a later Cubase imports group automation.
-TRACK_SHAPE = "audio track + submix channel per metric"
-
-# Busses are named after their metric plus this suffix, so a pair is
-# unambiguous rather than two tracks sharing one name.
-BUSS_SUFFIX = " BUS"
+# role="regular". So each metric is one audio track carrying the automation,
+# routed straight to the master. Earlier versions also emitted a like-named
+# "<metric> BUS" group for the track to feed, with the automation copied onto
+# it by hand; that was dropped as not worth the extra tracks.
+TRACK_SHAPE = "one audio track per metric"
 
 MASTER_NAME = "Stereo Out"
-
-# The group/buss role. The mixerRole enumeration is
-# regular|master|effect|submix|vca -- there is no "group", and an invalid value
-# is imported by Cubase as an ordinary audio track rather than rejected, so the
-# generated XML is schema-validated on every write.
-GROUP_ROLE = "submix"
 
 PROJECT_XSD = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "schema", "dawproject", "Project.xsd")
@@ -104,19 +86,19 @@ FRAME_COLUMN = "frame_count_list"
 # wrong, and harmless; omitting it is not an option.
 DEFAULT_TEMPO_BPM = 120.0
 
-# Each column costs two Cubase tracks (the audio/buss pair), so a full
-# unfiltered CSV would be thousands. Refuse rather than emit something
-# unopenable; the fix is always to narrow metrics_processing.
-DEFAULT_MAX_COLUMNS = 64
+# Each column is one Cubase track, so a full unfiltered CSV would be
+# thousands. Refuse rather than emit something unopenable; the fix is to
+# narrow metrics_processing or raise dawproject.max_columns.
+DEFAULT_MAX_COLUMNS = 200
 
 
 def build_project_xml(times, columns, values, tempo_bpm, time_signature,
                       interpolation):
     """
-    Build the project.xml tree: one group buss per column, plus a master.
+    Build the project.xml tree: one audio track per column, plus a master.
 
     :param times: sequence of automation times in seconds
-    :param columns: list of column names, one group track each
+    :param columns: list of column names, one audio track each
     :param values: DataFrame holding the metric columns (0-1 linear gain)
     """
     ids = IdFactory()
@@ -152,15 +134,9 @@ def build_project_xml(times, columns, values, tempo_bpm, time_signature,
     master_channel.set("name", MASTER_NAME)
     master_channel_id = master_channel.get("id")
 
-    # Each metric emits a pair: an audio Track carrying the automation, and a
-    # separate submix Channel named "<metric> BUS" for it to feed. The audio
-    # track is routed into its own buss, so the signal path is already wired
-    # on import. See TRACK_SHAPE above for why the automation cannot simply
-    # live on the buss.
-    #
-    # Cubase collects all submix channels into its Group folder, so the pairs
-    # never appear adjacent in the track list however they are ordered here.
-    group_tracks = []
+    # Each metric is one audio Track carrying the automation, routed to the
+    # master. See TRACK_SHAPE above for why it cannot be a group.
+    audio_tracks = []
     volume_ids = []
     for column in columns:
         track = ET.SubElement(structure, "Track")
@@ -169,13 +145,9 @@ def build_project_xml(times, columns, values, tempo_bpm, time_signature,
         track.set("id", ids.next())
         track.set("name", column)
 
-        buss, _ = build_channel(structure, ids, GROUP_ROLE, VOLUME_MAX,
-                                destination=master_channel_id)
-        buss.set("name", column + BUSS_SUFFIX)
-
         _, volume = build_channel(track, ids, "regular", VOLUME_MAX,
-                                  destination=buss.get("id"))
-        group_tracks.append(track)
+                                  destination=master_channel_id)
+        audio_tracks.append(track)
         volume_ids.append(volume.get("id"))
 
     arrangement = ET.SubElement(root, "Arrangement")
@@ -184,9 +156,8 @@ def build_project_xml(times, columns, values, tempo_bpm, time_signature,
     outer_lanes.set("timeUnit", "seconds")
     outer_lanes.set("id", ids.next())
 
-    # The busses are empty by design: no Clips, only automation. Sources are
-    # routed into them by hand in the DAW.
-    for track, column, volume_id in zip(group_tracks, columns, volume_ids):
+    # The tracks are empty by design: no Clips, only automation.
+    for track, column, volume_id in zip(audio_tracks, columns, volume_ids):
         track_id = track.get("id")
         track_lanes = ET.SubElement(outer_lanes, "Lanes")
         track_lanes.set("track", track_id)
@@ -268,8 +239,8 @@ def render_metrics_dawproject(values_csv, output_path, max_columns,
     if len(columns) > max_columns:
         raise ValueError(
             f"{values_csv} holds {len(columns)} metric columns, which would "
-            f"make {2 * len(columns)} Cubase tracks (each column is an audio "
-            f"track plus a buss). The limit is {max_columns}; narrow "
+            f"make {len(columns)} Cubase tracks. The limit is "
+            f"{max_columns}; narrow "
             f"metrics_processing (color_channels, metrics, rank_types, "
             f"inversions, filter_seconds, stretch_*) or raise "
             f"dawproject.max_columns."
@@ -290,11 +261,7 @@ def render_metrics_dawproject(values_csv, output_path, max_columns,
         f"Volume automation for {len(columns)} metrics from "
         f"{os.path.basename(values_csv)}")
 
-    print(f"  {len(columns)} audio tracks (automation) + {len(columns)} group "
-          f"busses, {len(times)} points each")
-    print(f"  Each audio track is routed into its own \"<metric>{BUSS_SUFFIX}\".")
-    print("  Cubase will not import automation onto a group: copy each lane")
-    print("  from the audio track to its buss by hand.")
+    print(f"  {len(columns)} audio tracks, {len(times)} points each")
     print(f"  Time range: 0.000 to {times.iloc[-1]:.3f} seconds")
     print(f"  Transport: {tempo_bpm:g} bpm, "
           f"time signature {time_signature[0]:d}/{time_signature[1]:d}")

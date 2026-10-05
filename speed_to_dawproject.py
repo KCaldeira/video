@@ -37,9 +37,8 @@ positional depends on tempo.
 Values are written as linear gain: 0 is -infinity dB and 1.0 is 0 dB.
 
 Cubase will not accept automation on a group channel, so -- exactly as in
-write_dawproject.py -- each series emits an audio track carrying the
-automation plus a like-named "<track> BUS" it feeds. Copy the lane onto the
-buss by hand in Cubase.
+write_dawproject.py -- each series is an audio track carrying the
+automation, routed to the master.
 
 Usage:
     python speed_to_dawproject.py data/input/N50_speed.py --tempo 108
@@ -200,11 +199,7 @@ def main():
         os.path.splitext(os.path.basename(output_path))[0],
         f"{quantity} automation from {os.path.basename(args.input_file)}")
 
-    print(f"  {len(columns)} audio tracks (automation) + {len(columns)} group "
-          f"busses, {len(times)} points each")
-    print(f"  Each audio track is routed into its own \"<track> BUS\".")
-    print("  Cubase will not import automation onto a group: copy each lane")
-    print("  from the audio track to its buss by hand.")
+    print(f"  {len(columns)} audio tracks, {len(times)} points each")
     print(f"  Time range: 0.000 to {times[-1]:.3f} seconds")
     print(f"  Clip fraction: {args.clip_fraction:g} of each tail "
           f"(all tracks)")

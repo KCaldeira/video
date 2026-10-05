@@ -101,6 +101,17 @@ def add_derived_columns(csv):
         # cza = abs(czd) - zoom speed regardless of direction
         csv[f"{base_name}_cza"] = np.abs(csv[czd_col])
 
+    # Chromaticity: each primary's share of R + G + B, from the frame means.
+    # Independent of brightness (scaling every pixel leaves it unchanged),
+    # and a ratio of means, so each pixel counts in proportion to its
+    # brightness and dark noisy pixels count for little. Neutral is 1/3, and
+    # the three always sum to 1. An all-black frame has no colour, so it is
+    # given the neutral 1/3.
+    rgb_sum = csv["R_avg"] + csv["G_avg"] + csv["B_avg"]
+    for color_channel in ["R", "G", "B"]:
+        csv[f"{color_channel}n_avg"] = np.where(
+            rgb_sum != 0, csv[f"{color_channel}_avg"] / rgb_sum, 1.0 / 3.0)
+
     return csv
 
 def percentile_data(data):

@@ -333,7 +333,7 @@ python run_video_processing.py N29_3M2pM6dispA7_config.json
   "dawproject": {
     "tempo": 120,
     "time_signature": [4, 4],
-    "max_columns": 64,
+    "max_columns": 200,
     "interpolation": "linear"
   }
 }
@@ -479,7 +479,7 @@ That is 4 channels × 4 metrics (two of them Gray-only) × 1 rank × 1 filter ×
 | `process_metrics` | bool | `true` | Run metrics processing (derive metrics, write values CSV) |
 | `process_clusters` | bool | `true` | Run clustering analysis |
 | `write_midi` | bool | `true` | Write MIDI files (the only tempo-aware stage; renders metrics and cluster CSVs to `.mid`) |
-| `write_dawproject` | bool | `false` | Write a `.dawproject` of volume-automated group busses (tempo-free; see below) |
+| `write_dawproject` | bool | `false` | Write a `.dawproject` of volume-automated audio tracks (tempo-free; see below) |
 
 **Example - Reprocess metrics only**:
 ```json
@@ -633,6 +633,18 @@ These are pseudo-channels keyed on distance from a target hue. They produce `_st
 **Monochromaticity channel** — `Hmon`:
 - **`_std`** - Negative circular standard deviation of hue weighted by saturation (larger = more monochromatic). No `_int` variant is emitted.
 
+#### Chromaticity Channels
+
+`Rn`, `Gn`, `Bn` are added by `process_metrics.py` from the frame means, so they
+need no re-analysis of the video. Each has one metric, `_avg`:
+
+- **`Rn_avg`** = `R_avg / (R_avg + G_avg + B_avg)`, and likewise `Gn_avg`, `Bn_avg`.
+
+Each is that primary's share of the frame's light: unchanged by brightening
+or darkening, neutral at 1/3, and the three always sum to 1. With the `i`
+inversion each gives a colour-opposite pair (red/cyan, green/magenta,
+blue/yellow). An all-black frame is given the neutral 1/3.
+
 ### Color Channels Analyzed
 
 Each row of the basic CSV is `{channel}_{metric}` for every (channel, metric) pair listed below.
@@ -783,7 +795,7 @@ Created in `data/output/{video_name}_{preset}/`:
 
 ### Overview
 
-Renders selected metric curves as **volume automation on group (buss) tracks**
+Renders metric curves as **volume automation on audio tracks**
 in a single `.dawproject` file, as an alternative to the MIDI CC output.
 
 Unlike `write_midi.py`, this stage is **tempo-free**. Automation times are
@@ -798,14 +810,13 @@ a ZIP holding `project.xml` and `metadata.xml`. No audio is embedded, so the
 file is small.
 
 Inside:
-- One **empty group buss per listed column**, named after the column, each
-  routed to a master track. The busses carry automation only, with no clips;
-  route your own sources into them in the DAW.
-- A `Points` envelope per buss with `timeUnit="seconds"`, targeting that
-  buss's `Volume` parameter, with one `RealPoint` per CSV row.
+- One **empty audio track per values-CSV column**, named after the column,
+  each routed to the master. The tracks carry automation only, with no clips.
+- A `Points` envelope per track with `timeUnit="seconds"`, targeting that
+  track's `Volume` parameter, with one `RealPoint` per CSV row.
 - A `Transport` tempo, which is cosmetic — nothing positional depends on it.
 
-Group busses use `Channel role="submix"`. The `mixerRole` enumeration is
+The tracks use `Channel role="regular"`. The `mixerRole` enumeration is
 `regular | master | effect | submix | vca` — **there is no `group`**, and
 Cubase silently imports an invalid role as an ordinary audio track rather than
 reporting an error. Every generated file is therefore validated against the
@@ -818,9 +829,10 @@ the write.
 Confirmed on both 14.0.41 and 15.0.30. Decisively, Cubase 15 cannot reimport
 its *own* exported group automation, so this is a Cubase limitation rather
 than a defect in the generated XML.
-Each metric therefore produces a *pair*: an audio track carrying the
-automation, and a like-named group buss. Copy each lane from the audio track
-to its buss by hand in Cubase.
+Each metric is therefore an audio track carrying the automation, routed
+straight to the master. Earlier versions also emitted a like-named
+`"<metric> BUS"` group for each track to feed, with the lane copied onto it by
+hand; that was dropped as not worth doubling the track count.
 
 This is a workaround for a DAW limitation, not the structure the format calls
 for. It was established by testing eight structural variants:
@@ -848,11 +860,11 @@ failed too. So Cubase refuses **all** automation on a submix or VCA channel,
 not merely `Volume`. Channel-level automatable parameters are `Volume`, `Pan`,
 `Mute`, `Send/Volume`, `Send/Pan`, `Send/Enable` and device parameters — that
 is the whole list, and none of them attach. There is no remaining structural
-workaround; the paired audio track is the only route until Cubase changes.
+workaround; an audio track is the only route until Cubase changes.
 
-Track order is likewise outside our control: Cubase collects submix channels
-into its Group folder, so emitting an audio track immediately followed by its
-buss does not interleave them in the track list. Tested and ignored.
+When busses were emitted, track order was likewise outside our control: Cubase
+collects submix channels into its Group folder, so an audio track immediately
+followed by its buss did not interleave them in the track list.
 
 The round-trip test is the one to repeat after a Cubase update: put volume
 automation on a group, export a `.dawproject`, reimport it. Until the
@@ -898,23 +910,22 @@ parameter is `unit="linear"` with `min=0` and `max=1.0`, so:
 
 ### Configuration
 
-The number of group busses is set **only** by `dawproject.columns`, so it is
-independent of how many columns the values CSV holds:
+Every column of the values CSV becomes one track; there is no column list.
+To get fewer tracks, narrow `metrics_processing` (`color_channels`, `metrics`,
+`rank_types`, `inversions`, `filter_seconds`, `stretch_*`).
 
 ```json
 "dawproject": {
-  "columns": [
-    "Gray_avg_v_f065_s1-0.5_o",
-    "Gray_std_v_f065_s1-0.5_o",
-    "Gray_avg_v_f065_s1-0.5_i"
-  ],
+  "tempo": 108,
+  "time_signature": [4, 4],
+  "max_columns": 200,
   "interpolation": "linear"
 }
 ```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `columns` | list | `[]` | Values-CSV column names to export, one group buss each. Required when `write_dawproject` is true |
+| `max_columns` | int | `200` | Refuse to write a file with more columns (tracks) than this |
 | `interpolation` | string | `"linear"` | Interpolation written on each `RealPoint` |
 
 #### Transport: Set Tempo and Time Signature to Match the Target Project
@@ -1202,8 +1213,8 @@ python run_video_processing.py my_video.json
 }
 ```
 
-> Every combination multiplies the column count, and each column costs two
-> Cubase tracks. `dawproject.max_columns` (default 64) refuses a project that
+> Every combination multiplies the column count, and each column is one
+> Cubase track. `dawproject.max_columns` (default 200) refuses a project that
 > would be unopenable rather than emitting it.
 
 ### Different Optical Flow Preset
@@ -1759,9 +1770,8 @@ If the filename contains `rot`, the tracks are labelled `Rotation` and the value
 are, not inverted: rotation is signed, so it has no meaningful reciprocal. Positive is
 counter-clockwise.
 
-As in `write_dawproject.py`, each track is an audio track carrying the automation, routed into its
-own `"<track> BUS"` group channel. Cubase will not import automation onto a group, so copy each lane
-onto its buss by hand. Import with `File > Import > DAWproject` from Cubase 15 (see `CLAUDE.md`).
+As in `write_dawproject.py`, each track is an audio track carrying the automation, routed to the
+master (Cubase will not import automation onto a group). Import with `File > Import > DAWproject` from Cubase 15 (see `CLAUDE.md`).
 
 **Example**:
 ```bash

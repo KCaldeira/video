@@ -74,12 +74,12 @@ line — that string is accurate and names the binary that wrote the file.
   variants, including Cubase's own export shape. Cubase 15 also fails to
   reimport its *own* exported group automation, so this is a Cubase
   limitation, not a problem with the generated XML. Settled approach in
-  `write_dawproject.py`, verified importing on 15.0.30: each metric emits an
-  explicit pair -- an audio `Track` whose channel is `role="regular"` and
-  carries the automation, plus a separate `role="submix"` Channel named
-  `"<metric> BUS"` that the audio track is routed into. The automation is
-  copied from the audio track to its buss by hand. Do not redesign this
-  without first re-running the round-trip test.
+  `write_dawproject.py`: each metric is an audio `Track` whose channel is
+  `role="regular"`, carries the automation and routes to the master. The
+  audio track carrying automation was verified importing on 15.0.30 when it
+  fed a paired `"<metric> BUS"` submix channel; those busses were dropped on
+  2026-10-04 as unhelpful, and the bus-free shape awaits a Cubase import. Do not redesign this without
+  first re-running the round-trip test.
 - **`contentType` is required** on a `Track`, or Cubase creates no track.
 - **`Transport/Tempo` is required**, or Cubase silently loads nothing.
 - **`Transport/TimeSignature` is required**, or Cubase imposes 4/4 on the
@@ -87,10 +87,9 @@ line — that string is accurate and names the binary that wrote the file.
 - Importing into an existing project **overwrites its initial tempo marking
   and time signature**, so set `dawproject.tempo` and
   `dawproject.time_signature` to match that project (N48: 75 bpm, 1/4).
-- **Track order is not controllable.** Cubase collects every submix channel
-  into its own Group folder, so audio tracks and their busses cannot be
-  interleaved no matter what order the `Structure` element lists them in.
-  Tested with explicit interleaved Track/Channel pairs; ignored.
+- **Submix channels cannot be interleaved with tracks.** Cubase collects
+  every submix channel into its own Group folder, whatever order the
+  `Structure` element lists them in.
 - `contentType`, `Tempo` and `TimeSignature` are all optional in the schema
   and all required in practice: **schema-valid is not the same as loadable**,
   and an optional element is not safe to omit. Confirm every structural
