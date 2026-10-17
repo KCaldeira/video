@@ -36,12 +36,44 @@ positional depends on tempo.
 
 Values are written as linear gain: 0 is -infinity dB and 1.0 is 0 dB.
 
+Binned mode
+-----------
+With --segment-bars (or --segment-beats) and --bin-fractions, the script
+writes a separate, bar-quantized file instead of the six continuous tracks.
+The video is cut into segments of that many bars at the constant --tempo and
+--time-signature, with video time 0 on bar 1, beat 1. A trailing partial
+segment is kept. Each segment's value is the median, over its frames, of the
+per-frame percentile rank of speed, so the result does not change under any
+monotonic transform of the metric. Segments are ranked by that value and
+split into bins holding the given fractions of the segments: with
+--bin-fractions 0.5 0.2 0.3, the slowest 50% go to bin 0, the next 20% to
+bin 1 and the fastest 30% to bin 2.
+
+Each bin is an empty audio track at unity gain (1.0) during its segments and
+0 otherwise. Cubase ignores hold interpolation on import, so each change is
+a pair of linear points one tick (1/480 quarter note) apart, which is a step
+in practice. An
+inverted set ("inv") ranks the segments the other way, so its bin 0 holds the
+fastest segments. Each track (trailing " o") is followed by its complement
+(trailing " i"), which is at unity exactly when the track is silent: 4 x bins
+tracks in all. Names are short: "Sp 4 B0 50% o" is speed, 4-bar segments,
+bin 0 holding 50% of them; then "Sp 4 B0 50% i", ..., "Sp inv 4 B0 50% o".
+Rotation is "Ro", a segment in beats reads "4bt", and the percent is rounded
+to an integer. Every change after the first sits
+--lead-ms before its bar line, so Cubase's de-click ramp has finished when a
+note starting on the bar sounds. The first segment starts at time 0.
+
+A segments CSV beside the .dawproject records each segment's times, median
+percentile and bins.
+
 Cubase will not accept automation on a group channel, so -- exactly as in
 write_dawproject.py -- each series is an audio track carrying the
 automation, routed to the master.
 
 Usage:
     python speed_to_dawproject.py data/input/N50_speed.py --tempo 108
+    python speed_to_dawproject.py data/input/N50_speed.py --tempo 108 \
+        --segment-bars 4 --bin-fractions 0.5 0.2 0.3
 """
 
 import argparse
@@ -62,6 +94,24 @@ from write_dawproject import (
 )
 
 DEFAULT_FPS = 30.0
+DEFAULT_CLIP_FRACTION = 0.0
+DEFAULT_EVERY_NTH_FRAME = 1
+DEFAULT_INTERPOLATION = "linear"
+
+# Binned tracks switch between these two linear gains: unity (0 dB) and silence.
+BIN_ON = 1.0
+BIN_OFF = 0.0
+
+# Cubase 15.0.30 ignores interpolation="hold" on import and ramps linearly
+# from one point to the next, across the whole segment. So each change is
+# written as two linear points one tick apart: the old value, then the new
+# one. Ticks are Cubase's display resolution, 480 per quarter note, so the
+# step is 60 / tempo / 480 seconds (1.3 ms at 96 bpm): a step for musical
+# purposes.
+TICKS_PER_QUARTER = 480
+
+# Short quantity names for the binned track names.
+QUANTITY_ABBREVIATION = {"Speed": "Sp", "Rotation": "Ro"}
 
 
 def scale_unit(values, clip_fraction=0.0):
@@ -100,6 +150,184 @@ def build_series(speed, quantity, clip_fraction):
     }
 
 
+def segment_seconds(segment_bars, segment_beats, tempo, numerator, denominator):
+    """Length of one segment in seconds at a constant tempo.
+
+    A beat is a 1/denominator note and a bar is `numerator` beats; the tempo
+    counts quarter notes per minute.
+    """
+    beats = segment_beats if segment_bars is None else segment_bars * numerator
+    return beats * (4.0 / denominator) * 60.0 / tempo
+
+
+def bin_counts(fractions, n_segments):
+    """Segments per bin: fractions x n_segments, rounded by largest remainder."""
+    raw = np.asarray(fractions) * n_segments
+    counts = np.floor(raw).astype(int)
+    # Hand the leftover segments to the bins with the largest remainders;
+    # a stable sort breaks ties toward the lower bin.
+    order = np.argsort(-(raw - counts), kind="stable")
+    counts[order[:n_segments - counts.sum()]] += 1
+    empty = np.flatnonzero(counts == 0)
+    if empty.size:
+        raise ValueError(
+            f"bin(s) {list(empty)} receive no segments: {n_segments} segments "
+            f"cannot be split as {list(fractions)}; use longer --bin-fractions "
+            f"entries or shorter segments")
+    return counts
+
+
+def assign_bins(order, counts):
+    """Bin of each segment, given segment indices ordered from bin 0 upward."""
+    bins = np.empty(len(order), dtype=int)
+    bins[order] = np.repeat(np.arange(len(counts)), counts)
+    return bins
+
+
+def build_binned_series(speed, fps, segment_length, fractions):
+    """Assign each segment to a bin, normally and inverted.
+
+    Returns a DataFrame with one row per segment: start time, frame count,
+    median frame percentile, bin and inverted bin.
+    """
+    percentile = percentile_data(speed)
+    segment = np.floor(np.arange(len(speed)) / fps / segment_length).astype(int)
+    frames_per_segment = np.bincount(segment)
+    if np.any(frames_per_segment == 0):
+        raise ValueError(
+            f"segments of {segment_length:.6f} s are shorter than a frame at "
+            f"{fps:g} fps, so some hold no frames")
+
+    median = np.array([np.median(percentile[segment == s])
+                       for s in range(len(frames_per_segment))])
+    counts = bin_counts(fractions, len(median))
+
+    # Stable sorts break ties in segment order, in both directions.
+    ascending = np.argsort(median, kind="stable")
+    descending = np.argsort(-median, kind="stable")
+
+    return pd.DataFrame({
+        "segment": np.arange(len(median)),
+        "start_seconds": np.arange(len(median)) * segment_length,
+        "frames": frames_per_segment,
+        "median_percentile": median,
+        "bin": assign_bins(ascending, counts),
+        "inverted_bin": assign_bins(descending, counts),
+    })
+
+
+def binned_tag(segment_bars, segment_beats, fractions, lead_ms):
+    """Filename tag encoding the binning settings, e.g. s4bar_b50-20-30_lead10ms."""
+    size = (f"s{segment_bars:g}bar" if segment_bars is not None
+            else f"s{segment_beats:g}beat")
+    shares = "-".join(f"{100 * f:g}" for f in fractions)
+    return f"{size}_b{shares}_lead{lead_ms:g}ms"
+
+
+def write_binned(args, speed, quantity, numerator, denominator):
+    """Write the bar-quantized binned .dawproject and its segments CSV."""
+    fractions = args.bin_fractions
+    if any(f <= 0 for f in fractions):
+        raise ValueError(f"--bin-fractions must all be > 0, got {fractions}")
+    if abs(sum(fractions) - 1.0) > 1e-6:
+        raise ValueError(
+            f"--bin-fractions must sum to 1, got {fractions} "
+            f"(sum {sum(fractions):g})")
+    if args.clip_fraction != DEFAULT_CLIP_FRACTION:
+        raise ValueError("--clip-fraction does not apply in binned mode")
+    if args.every_nth_frame != DEFAULT_EVERY_NTH_FRAME:
+        raise ValueError("--every-nth-frame does not apply in binned mode")
+    if args.interpolation != DEFAULT_INTERPOLATION:
+        raise ValueError("--interpolation does not apply in binned mode; "
+                         "binned changes are always written as 1-tick steps")
+    size = args.segment_bars if args.segment_bars is not None else args.segment_beats
+    if size <= 0:
+        raise ValueError(f"segment length must be > 0, got {size}")
+
+    segment_length = segment_seconds(
+        args.segment_bars, args.segment_beats, args.tempo, numerator, denominator)
+    lead = args.lead_ms / 1000.0
+    step = 60.0 / args.tempo / TICKS_PER_QUARTER
+    # Each step starts one tick before its change time, and the first
+    # step must still come after time 0.
+    if not 0.0 <= lead < segment_length - step:
+        raise ValueError(
+            f"--lead-ms must be in [0, segment length - 1 tick = "
+            f"{1000 * (segment_length - step):g} ms), "
+            f"got {args.lead_ms:g}")
+
+    segments = build_binned_series(speed, args.fps, segment_length, fractions)
+
+    # The first value starts at 0; every later change leads its bar line.
+    change = segments["start_seconds"] - lead
+    change.iloc[0] = 0.0
+    segments.insert(2, "change_seconds", change)
+
+    # Each bin track (" o") is followed by its complement (" i"), which is
+    # silent exactly when the bin is on. Names are kept short for Cubase's
+    # track list: "Sp 4 B0 50% o" is speed, 4-bar segments, bin 0 holding
+    # 50% of them. A segment given in beats reads "4bt" instead of "4".
+    short = QUANTITY_ABBREVIATION[quantity]
+    segment_label = (f"{args.segment_bars:g}" if args.segment_bars is not None
+                     else f"{args.segment_beats:g}bt")
+    tracks = {}
+    for label, bin_column in ((f"{short} {segment_label}", "bin"),
+                              (f"{short} inv {segment_label}", "inverted_bin")):
+        for k, fraction in enumerate(fractions):
+            on = segments[bin_column].to_numpy() == k
+            name = f"{label} B{k} {round(100 * fraction)}%"
+            tracks[f"{name} o"] = np.where(on, BIN_ON, BIN_OFF)
+            tracks[f"{name} i"] = np.where(on, BIN_OFF, BIN_ON)
+    values = pd.DataFrame(tracks)
+    columns = list(values.columns)
+    if len(columns) > DEFAULT_MAX_COLUMNS:
+        raise ValueError(f"{len(columns)} columns exceeds {DEFAULT_MAX_COLUMNS}")
+
+    # Point list: segment 0's value at time 0, then for each later segment
+    # the previous segment's value one tick before its change time and
+    # its own value at the change time.
+    later = segments["change_seconds"].to_numpy()[1:]
+    point_times = np.concatenate(
+        [[0.0], np.column_stack([later - step, later]).ravel()])
+    n_segments = len(segments)
+    point_segment = np.concatenate(
+        [[0], np.column_stack([np.arange(n_segments - 1),
+                               np.arange(1, n_segments)]).ravel()])
+    point_values = values.iloc[point_segment].reset_index(drop=True)
+
+    tag = binned_tag(args.segment_bars, args.segment_beats, fractions, args.lead_ms)
+    stem = os.path.splitext(os.path.basename(args.input_file))[0]
+    output_path = args.output or os.path.join(
+        "data", "output", f"{stem}_{tag}.dawproject")
+    segments_csv = os.path.splitext(output_path)[0] + "_segments.csv"
+
+    project_xml = serialize(build_project_xml(
+        point_times, columns, point_values, args.tempo,
+        [numerator, denominator], "linear"))
+    validate_project_xml(project_xml)
+    render_archive(
+        output_path, project_xml,
+        os.path.splitext(os.path.basename(output_path))[0],
+        f"Binned {quantity.lower()} automation from "
+        f"{os.path.basename(args.input_file)}")
+    segments.to_csv(segments_csv, index=False)
+    print(f"Wrote {segments_csv}")
+
+    print(f"  Segment: {size:g} {'bars' if args.segment_bars is not None else 'beats'}"
+          f" = {segment_length:.6f} s at {args.tempo:g} bpm, "
+          f"{numerator}/{denominator}; lead {args.lead_ms:g} ms")
+    print(f"  {len(segments)} segments "
+          f"(last holds {segments['frames'].iloc[-1]} frames)")
+    counts = segments["bin"].value_counts().sort_index()
+    for k in range(len(fractions)):
+        print(f"  Bin {k}: {counts[k]} segments "
+              f"({counts[k] / len(segments):.3f}, asked {fractions[k]:g})")
+    print(f"  {len(columns)} audio tracks, {len(point_times)} points each "
+          f"(1-tick steps of {1000 * step:.3f} ms)")
+    print("Import in Cubase with File > Import > DAWproject.")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="speed_to_dawproject.py",
@@ -129,11 +357,11 @@ def main():
              "overwrites the target project's initial signature on import "
              "(default: %(default)s)")
     parser.add_argument(
-        "--every-nth-frame", type=int, default=1,
+        "--every-nth-frame", type=int, default=DEFAULT_EVERY_NTH_FRAME,
         help="keep only every Nth frame, to thin the automation. 1 keeps the "
              "full per-frame resolution (default: %(default)s)")
     parser.add_argument(
-        "--clip-fraction", type=float, default=0.0,
+        "--clip-fraction", type=float, default=DEFAULT_CLIP_FRACTION,
         help="fraction of each tail to clip before scaling each track to "
              "0-1: 0.05 maps the 5th and 95th percentiles "
              "to 0 and 1 and clips everything beyond them, so a brief "
@@ -141,9 +369,31 @@ def main():
              "min and max. On the percentile tracks, percentile 0.05 "
              "maps to 0 and 0.95 to 1 (default: %(default)s)")
     parser.add_argument(
-        "--interpolation", default="linear",
+        "--interpolation", default=DEFAULT_INTERPOLATION,
         help="interpolation written on each point (default: %(default)s)")
+    segment = parser.add_mutually_exclusive_group()
+    segment.add_argument(
+        "--segment-bars", type=float,
+        help="binned mode: segment length in bars at the constant --tempo "
+             "and --time-signature")
+    segment.add_argument(
+        "--segment-beats", type=float,
+        help="binned mode: segment length in beats (1/denominator notes)")
+    parser.add_argument(
+        "--bin-fractions", type=float, nargs="+",
+        help="binned mode: fraction of segments in each bin, slowest first; "
+             "must sum to 1, e.g. 0.5 0.2 0.3")
+    parser.add_argument(
+        "--lead-ms", type=float, default=10.0,
+        help="binned mode: how far before each bar line a change sits, in "
+             "milliseconds; the first segment starts at 0 "
+             "(default: %(default)s)")
     args = parser.parse_args()
+
+    binned = args.segment_bars is not None or args.segment_beats is not None
+    if binned != (args.bin_fractions is not None):
+        raise ValueError(
+            "--bin-fractions and --segment-bars/--segment-beats go together")
 
     numerator, denominator = (int(x) for x in args.time_signature.split("/"))
 
@@ -167,6 +417,9 @@ def main():
         speed = 1.0 / data
         print(f"Treating file values as inverse speed; speed = 1/value "
               f"(min={speed.min():.6f}, max={speed.max():.6f})")
+
+    if binned:
+        return write_binned(args, speed, quantity, numerator, denominator)
 
     if not 0.0 <= args.clip_fraction < 0.5:
         raise ValueError(

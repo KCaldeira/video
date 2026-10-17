@@ -1679,7 +1679,7 @@ See `example_config.json` for a working example with a specific video.
 - **`find_extrema.py`** - Finds local maxima/minima in time series data
 - **`create_group_channel.py`** - MIDI channel grouping utility
 - **`speed_to_cc.py`** - Converts speed data into a fixed-tempo MIDI with CC1 tracks
-- **`speed_to_dawproject.py`** - Converts an inverse-speed file into `.dawproject` volume automation (six tracks)
+- **`speed_to_dawproject.py`** - Converts an inverse-speed file into `.dawproject` volume automation (six continuous tracks, or bar-quantized bins)
 - **`frame_similarity.py`** - Measures how much each video frame differs from the next, as CSV
 - **`audio_smoothing.py`** - Smoothing kernels parameterized by mean weighting distance (library, used by `audio_level_curve.py`)
 - **`audio_level_curve.py`** - Builds a loudness-leveling gain curve from an audio file
@@ -1736,6 +1736,7 @@ way round. Any value `<= 0` in an inverse-speed file is an error.
 python speed_to_dawproject.py <input_file> [-o OUTPUT] [--fps 30] [--tempo 120]
        [--time-signature 4/4] [--every-nth-frame 1] [--clip-fraction 0]
        [--interpolation linear]
+       [--segment-bars N | --segment-beats N --bin-fractions F0 F1 ... [--lead-ms 10]]
 ```
 
 **Arguments**:
@@ -1776,6 +1777,51 @@ master (Cubase will not import automation onto a group). Import with `File > Imp
 **Example**:
 ```bash
 python speed_to_dawproject.py data/input/N50_speed.py --tempo 108 --time-signature 4/4 --clip-fraction 0.05
+```
+
+#### Binned mode: bar-quantized switches
+
+`--segment-bars` (or `--segment-beats`) with `--bin-fractions` writes a separate file in which
+volume changes only on bar lines. The video is cut into segments of that many bars at the
+constant `--tempo` and `--time-signature`, with video time 0 on bar 1, beat 1. A trailing partial
+segment is kept. Each segment's value is the **median of the per-frame percentile rank** of speed,
+so the result does not change under any monotonic transform of the metric. The segments are
+ranked and split so that each bin holds its given fraction of them, using largest-remainder
+rounding. Bin 0 is the slowest.
+
+Each bin is an empty audio track at unity gain (0 dB) during its segments and silent otherwise.
+Cubase ignores `hold` interpolation on import and ramps across the whole segment, so each change
+is written as two linear points one tick (1/480 quarter note, 1.3 ms at 96 bpm) apart (old
+value, then new), which acts as a step. An inverted set ranks the segments the other way, so its
+`inv Bin 0` holds the fastest segments. Each track (trailing ` o`) is followed by its complement
+(trailing ` i`), which is at 0 dB exactly when the track is silent and vice versa. Track names carry
+the segment length in bars (`4bt` if given in beats), the bin and its fraction as a whole percent.
+`Sp`/`Ro` abbreviate the quantity:
+
+| Track | On (0 dB) during |
+|-------|------------------|
+| `Sp 4 B0 50% o` | the slowest 50% of segments |
+| `Sp 4 B0 50% i` | every segment except those |
+| `Sp inv 4 B0 50% o` | the fastest 50% of segments |
+| `Sp inv 4 B0 50% i` | every segment except those |
+
+With K bins there are 4K tracks. Among the ` o` tracks of one set, exactly one
+is on at any time.
+
+- `--segment-bars N` / `--segment-beats N` - Segment length. A beat is a 1/denominator note and
+  the tempo counts quarter notes. The project tempo must match, or the steps miss the bar lines
+- `--bin-fractions F0 F1 ...` - Fraction of segments per bin, slowest first; each > 0, summing to 1
+- `--lead-ms` - How far before each bar line a change sits, so Cubase's de-click ramp has finished
+  when a note starting on the bar sounds. The first segment starts at 0 (default 10)
+
+`--clip-fraction`, `--every-nth-frame` and `--interpolation` do not apply in this mode. Outputs
+go to `data/output/<input stem>_<tag>.dawproject`, plus `<...>_segments.csv` with each segment's
+start time, change time, frame count, median percentile, bin and inverted bin. The tag encodes the
+settings, e.g. `s4bar_b50-25-25_lead10ms`.
+
+```bash
+python speed_to_dawproject.py N52_speed.py --tempo 96 --time-signature 4/4 \
+    --segment-bars 4 --bin-fractions 0.5 0.25 0.25
 ```
 
 ---

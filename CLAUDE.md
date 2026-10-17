@@ -24,6 +24,11 @@ This file provides coding guidance to Claude Code when working with code in this
   seconds: `_f{width}s`, where the integer part is zero-padded to three digits
   (`_f032s`, `_f004.75s`). `width_tag()` in `process_metrics.py` is the single
   source of that format. Block averages use `_b{width}s`.
+- **Short names only for Cubase tracks**: Cubase shows only a few characters
+  of a track name, so DAWproject track names are abbreviated (`Sp 4 B0 50% o`,
+  `Sp`/`Ro` for speed/rotation, `inv`, `B0`). File names have no such limit:
+  keep them long and descriptive (`N46_rot_...`, `_speed_`), and do not carry
+  track-name abbreviations into them.
 
 ## Output Location
 
@@ -94,6 +99,10 @@ line — that string is accurate and names the binary that wrote the file.
   and all required in practice: **schema-valid is not the same as loadable**,
   and an optional element is not safe to omit. Confirm every structural
   change with a real import.
+- **`interpolation="hold"` is ignored on import.** Cubase 15.0.30 ramps
+  linearly between points regardless, so a step must be written as two
+  linear points close together (old value, then new). `speed_to_dawproject.py`
+  binned mode uses one tick (1/480 quarter).
 - **Track time base is not in the DAWproject schema.** Cubase applies
   *Preferences > Editing > Default Track Time Type* at import; set it to
   **Linear** or seconds-based automation will still move with tempo.
