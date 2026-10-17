@@ -1680,6 +1680,7 @@ See `example_config.json` for a working example with a specific video.
 - **`create_group_channel.py`** - MIDI channel grouping utility
 - **`speed_to_cc.py`** - Converts speed data into a fixed-tempo MIDI with CC1 tracks
 - **`speed_to_dawproject.py`** - Converts an inverse-speed file into `.dawproject` volume automation (six continuous tracks, or bar-quantized bins)
+- **`speed_distribution.py`** - Plots and tabulates the distribution of speed in an inverse-speed file
 - **`frame_similarity.py`** - Measures how much each video frame differs from the next, as CSV
 - **`audio_smoothing.py`** - Smoothing kernels parameterized by mean weighting distance (library, used by `audio_level_curve.py`)
 - **`audio_level_curve.py`** - Builds a loudness-leveling gain curve from an audio file
@@ -1834,6 +1835,27 @@ settings, e.g. `s4bar_b50-25-25_lead10ms`.
 python speed_to_dawproject.py N52_speed.py --tempo 96 --time-signature 4/4 \
     --segment-bars 4 --bin-fractions 0.5 0.25 0.25
 ```
+
+---
+
+### `speed_distribution.py` - Distribution of Speed
+
+Reads the same inverse-speed files as `speed_to_dawproject.py`, takes speed as `1/value`, and
+shows how it is distributed, which helps when choosing `--bin-fractions`.
+
+```bash
+python speed_distribution.py <input_file> [-o OUTPUT_STEM] [--fps 30] [--thresholds S1 S2 ...]
+```
+
+- **`<stem>_distribution.csv`**: one row per frame, with `frame`, `seconds`, `inverse_speed`,
+  `speed` and `percentile`. The percentile is the rank the binned mode uses, so ties are visible.
+- **`<stem>_distribution.png` and `.pdf`**: four panels, showing speed over time, a histogram of
+  speed, a histogram of log₂(speed), and the cumulative distribution.
+- **Printed**: quantiles, the range, the share of frames at the maximum speed (on N52, 21% sit at a
+  cap and tie in rank), and the fraction of time below and above each `--thresholds` speed.
+
+Outputs go to `data/output/<input stem>_distribution.*`. Rotation files are refused, because
+rotation is signed.
 
 ---
 
