@@ -1786,8 +1786,11 @@ volume changes only on bar lines. The video is cut into segments of that many ba
 constant `--tempo` and `--time-signature`, with video time 0 on bar 1, beat 1. A trailing partial
 segment is kept. Each segment's value is the **median of the per-frame percentile rank** of speed,
 so the result does not change under any monotonic transform of the metric. The segments are
-ranked and split so that each bin holds its given fraction of them, using largest-remainder
-rounding. Bin 0 is the slowest.
+ranked and split so that each bin holds its given fraction of them. Bin 0 is the slowest.
+Rounding is applied to the boundaries between bins, not to each bin's count, so a palindromic
+split stays symmetric and the middle bins absorb the rounding (79 segments at `0.4 0.2 0.4` give
+32 / 15 / 32). A boundary exactly on a half segment gives the extra segment to the more central
+neighbouring bin.
 
 Each bin is an empty audio track at unity gain (0 dB) during its segments and silent otherwise.
 Cubase ignores `hold` interpolation on import and ramps across the whole segment, so each change
@@ -1805,8 +1808,15 @@ the segment length in bars (`4bt` if given in beats), the bin and its fraction a
 | `Sp inv 4 B0 50% o` | the fastest 50% of segments |
 | `Sp inv 4 B0 50% i` | every segment except those |
 
-With K bins there are 4K tracks. With two bins the ` i` tracks are not written, since each would
-duplicate the other bin's ` o` track, leaving 4 tracks. Among the ` o` tracks of one set, exactly one
+With K bins there are up to 4K tracks. Sets that would repeat other tracks are not written:
+
+- **Two bins:** each ` i` track would equal the other bin's ` o` track, so the ` i` tracks are dropped.
+- **Palindromic fractions** (the same reversed, e.g. `0.4 0.2 0.4`): the counts split
+  symmetrically, so `inv B`*k* mirrors `B`*(K-1-k)* and the `inv` set is dropped. Ties between equal
+  segment medians, or an even number of bins with an odd number of segments, can leave the mirror
+  off by a segment.
+
+So `0.4 0.2 0.4` gives 6 tracks, `0.75 0.25` gives 4 and `0.5 0.5` gives 2. Among the ` o` tracks of one set, exactly one
 is on at any time.
 
 - `--segment-bars N` / `--segment-beats N` - Segment length. A beat is a 1/denominator note and

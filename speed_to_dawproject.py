@@ -56,8 +56,10 @@ in practice. An
 inverted set ("inv") ranks the segments the other way, so its bin 0 holds the
 fastest segments. Each track (trailing " o") is followed by its complement
 (trailing " i"), which is at unity exactly when the track is silent: 4 x bins
-tracks in all, or 2 x bins with two bins, where a complement is just the
-other bin and is not written. Names are short: "Sp 4 B0 50% o" is speed, 4-bar segments,
+tracks in all, less any redundant set: with two bins a complement is just
+the other bin, so the " i" tracks are not written; with palindromic fractions
+(e.g. 0.4 0.2 0.4) the inv set mirrors the plain one, so it is not written.
+Names are short: "Sp 4 B0 50% o" is speed, 4-bar segments,
 bin 0 holding 50% of them; then "Sp 4 B0 50% i", ..., "Sp inv 4 B0 50% o".
 Rotation is "Ro", a segment in beats reads "4bt", and the percent is rounded
 to an integer. Every change after the first sits
@@ -162,19 +164,39 @@ def segment_seconds(segment_bars, segment_beats, tempo, numerator, denominator):
 
 
 def bin_counts(fractions, n_segments):
-    """Segments per bin: fractions x n_segments, rounded by largest remainder."""
-    raw = np.asarray(fractions) * n_segments
-    counts = np.floor(raw).astype(int)
-    # Hand the leftover segments to the bins with the largest remainders;
-    # a stable sort breaks ties toward the lower bin.
-    order = np.argsort(-(raw - counts), kind="stable")
-    counts[order[:n_segments - counts.sum()]] += 1
+    """Segments per bin, from the bin boundaries rounded to whole segments.
+
+    Boundary k sits at the cumulative fraction of bins 0..k times
+    n_segments, rounded to the nearest segment. Rounding the boundaries
+    rather than each bin's count keeps palindromic fractions symmetric
+    (79 segments at 0.4 0.2 0.4 give 32 15 32), so the rounding is absorbed
+    by the middle bins. A boundary exactly on a half segment gives the extra
+    segment to whichever neighbouring bin is more central; when both are
+    equally central (an even number of bins, an odd number of segments,
+    symmetric fractions) it goes to the lower bin.
+    """
+    cumulative = np.cumsum(fractions)
+    position = cumulative[:-1] * n_segments
+    whole = np.floor(position)
+    remainder = position - whole
+
+    # Distance of each bin's midpoint, in cumulative fraction, from the centre.
+    starts = np.concatenate([[0.0], cumulative[:-1]])
+    centrality = np.abs((starts + cumulative) / 2 - 0.5)
+    lower_more_central = centrality[:-1] <= centrality[1:]
+
+    # Rounding a boundary up gives the half segment to the bin below it.
+    on_half = np.isclose(remainder, 0.5, rtol=0.0, atol=1e-9)
+    round_up = np.where(on_half, lower_more_central, remainder > 0.5)
+    boundaries = (whole + round_up).astype(int)
+
+    counts = np.diff(np.concatenate([[0], boundaries, [n_segments]]))
     empty = np.flatnonzero(counts == 0)
     if empty.size:
         raise ValueError(
             f"bin(s) {list(empty)} receive no segments: {n_segments} segments "
-            f"cannot be split as {list(fractions)}; use longer --bin-fractions "
-            f"entries or shorter segments")
+            f"cannot be split as {list(fractions)}; use larger fractions or "
+            f"shorter segments")
     return counts
 
 
@@ -271,12 +293,20 @@ def write_binned(args, speed, quantity, numerator, denominator):
     short = QUANTITY_ABBREVIATION[quantity]
     segment_label = (f"{args.segment_bars:g}" if args.segment_bars is not None
                      else f"{args.segment_beats:g}bt")
-    # With two bins, a bin's complement is exactly the other bin of the same
-    # set, so the " i" tracks would only duplicate " o" tracks.
+    # Redundant sets are not written. With two bins, a bin's complement is
+    # exactly the other bin of the same set, so the " i" tracks would only
+    # duplicate " o" tracks. With palindromic fractions (e.g. 0.4 0.2 0.4),
+    # bin_counts splits symmetrically, so inv bin k mirrors bin K-1-k and the
+    # inv set is dropped. Ties between equal segment medians, or an even
+    # number of bins with an odd number of segments, can leave the mirror
+    # off by a segment.
     write_complements = len(fractions) > 2
+    palindromic = np.allclose(fractions, fractions[::-1], rtol=0.0, atol=1e-6)
+    sets = [(f"{short} {segment_label}", "bin")]
+    if not palindromic:
+        sets.append((f"{short} inv {segment_label}", "inverted_bin"))
     tracks = {}
-    for label, bin_column in ((f"{short} {segment_label}", "bin"),
-                              (f"{short} inv {segment_label}", "inverted_bin")):
+    for label, bin_column in sets:
         for k, fraction in enumerate(fractions):
             on = segments[bin_column].to_numpy() == k
             name = f"{label} B{k} {round(100 * fraction)}%"
