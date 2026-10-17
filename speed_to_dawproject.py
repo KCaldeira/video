@@ -54,8 +54,10 @@ Each bin is an empty audio track at unity gain (1.0) during its segments and
 a pair of linear points one tick (1/480 quarter note) apart, which is a step
 in practice. An
 inverted set ("inv") ranks the segments the other way, so its bin 0 holds the
-fastest segments. Each track (trailing " o") is followed by its complement
-(trailing " i"), which is at unity exactly when the track is silent: 4 x bins
+fastest segments. Each track (trailing " o") has a complement (trailing
+" i"), which is at unity exactly when the track is silent. All " o" tracks
+come first, then all " i" tracks; within each, the plain set comes before
+inv, then bin number: 4 x bins
 tracks in all, less any redundant set: with two bins a complement is just
 the other bin, so the " i" tracks are not written; with palindromic fractions
 (e.g. 0.4 0.2 0.4) the inv set mirrors the plain one, so it is not written.
@@ -69,6 +71,15 @@ note starting on the bar sounds. The first segment starts at time 0.
 A segments CSV beside the .dawproject records each segment's times, median
 percentile and bins.
 
+With --midi-in, a MIDI file exported from Cubase is split the same way: each
+track with notes becomes one track per bin track, named "<track> <bin track>",
+holding only the notes that start in that bin track's on segments. Notes are
+never moved or shortened, so they ring to their natural end. A note's segment
+is decided by its start snapped to the nearest --grid step, so a note played
+up to half a step early still counts as on the bar line. Notes starting after
+the video ends, and zero-length notes, are dropped. The file must have the same single tempo and time
+signature as --tempo and --time-signature.
+
 Cubase will not accept automation on a group channel, so -- exactly as in
 write_dawproject.py -- each series is an audio track carrying the
 automation, routed to the master.
@@ -77,12 +88,16 @@ Usage:
     python speed_to_dawproject.py data/input/N50_speed.py --tempo 108
     python speed_to_dawproject.py data/input/N50_speed.py --tempo 108 \
         --segment-bars 4 --bin-fractions 0.5 0.2 0.3
+    python speed_to_dawproject.py /mnt/d/N52/N52_speed.py --tempo 96 \
+        --segment-bars 4 --bin-fractions 0.25 0.5 0.25 \
+        --midi-in /mnt/d/N52/test.mid --grid 1/16
 """
 
 import argparse
 import os
 import sys
 
+import mido
 import numpy as np
 import pandas as pd
 
@@ -247,6 +262,128 @@ def binned_tag(segment_bars, segment_beats, fractions, lead_ms):
     return f"{size}_b{shares}_lead{lead_ms:g}ms"
 
 
+def read_notes(track):
+    """Pair a track's note-ons and note-offs into (start, end, channel, note, velocity).
+
+    Times are absolute ticks. A note-on with velocity 0 is a note-off, and
+    repeated notes on the same key and channel close first-in, first-out.
+    Any other channel message (controllers, pitch bend, program change) is
+    returned separately with its absolute tick, to be copied unchanged.
+    """
+    notes, other, sounding = [], [], {}
+    tick = 0
+    for message in track:
+        tick += message.time
+        if message.type == "note_on" and message.velocity > 0:
+            sounding.setdefault((message.channel, message.note), []).append(
+                (tick, message.velocity))
+        elif message.type in ("note_on", "note_off"):
+            start, velocity = sounding[(message.channel, message.note)].pop(0)
+            notes.append((start, tick, message.channel, message.note, velocity))
+        elif not message.is_meta:
+            other.append((tick, message))
+    hanging = [key for key, starts in sounding.items() if starts]
+    if hanging:
+        raise ValueError(f"notes with no note-off (channel, key): {hanging}")
+    return notes, other
+
+
+def build_track(name, notes, other):
+    """A MIDI track holding the given notes and other channel messages."""
+    # Order at equal ticks: note-offs first, so a repeated key re-strikes
+    # cleanly; then other messages; then note-ons. Zero-length notes were
+    # dropped by the caller, so no note's off can precede its own on.
+    events = [(tick, 1, message) for tick, message in other]
+    for start, end, channel, note, velocity in notes:
+        events.append((start, 2, mido.Message(
+            "note_on", channel=channel, note=note, velocity=velocity)))
+        events.append((end, 0, mido.Message(
+            "note_off", channel=channel, note=note, velocity=0)))
+    events.sort(key=lambda e: (e[0], e[1]))
+
+    track = mido.MidiTrack([mido.MetaMessage("track_name", name=name, time=0)])
+    previous = 0
+    for tick, _, message in events:
+        track.append(message.copy(time=tick - previous))
+        previous = tick
+    return track
+
+
+def write_binned_midi(args, values, numerator, denominator, segment_quarters,
+                      duration, output_path):
+    """Split each track of --midi-in into one track per bin track.
+
+    A note goes on the bin tracks that are on in its segment and is never
+    moved or shortened, so it rings to its natural end. Its segment is
+    decided by its start snapped to the nearest --grid step, so a note
+    played up to half a step early or late counts as being on the bar line.
+    Notes starting after the video ends are dropped. Tracks with no notes
+    (disabled or automation-only tracks in Cubase) are skipped.
+    """
+    source = mido.MidiFile(args.midi_in)
+    if source.type != 1:
+        raise ValueError(f"{args.midi_in} is MIDI type {source.type}; expected 1")
+    quarter = source.ticks_per_beat
+    conductor = source.tracks[0]
+
+    # The bins are laid out at --tempo and --time-signature; a file at any
+    # other tempo, or with a tempo or signature change, would not line up.
+    tempos = [m for m in conductor if m.type == "set_tempo"]
+    signatures = [m for m in conductor if m.type == "time_signature"]
+    if len(tempos) != 1 or not np.isclose(mido.tempo2bpm(tempos[0].tempo), args.tempo):
+        raise ValueError(
+            f"{args.midi_in} must hold one tempo equal to --tempo {args.tempo:g}; "
+            f"found {[round(mido.tempo2bpm(m.tempo), 3) for m in tempos]}")
+    if (len(signatures) != 1 or (signatures[0].numerator, signatures[0].denominator)
+            != (numerator, denominator)):
+        raise ValueError(
+            f"{args.midi_in} must hold one time signature equal to "
+            f"--time-signature {numerator}/{denominator}; found "
+            f"{[(m.numerator, m.denominator) for m in signatures]}")
+
+    grid_numerator, grid_denominator = (int(x) for x in args.grid.split("/"))
+    grid = quarter * 4 * grid_numerator / grid_denominator
+    segment_ticks = quarter * segment_quarters
+    seconds_per_tick = 60.0 / args.tempo / quarter
+
+    output = mido.MidiFile(type=1, ticks_per_beat=quarter)
+    output.tracks.append(conductor)
+    print(f"MIDI: {args.midi_in}, grid {args.grid} = {grid:g} ticks, "
+          f"segment = {segment_ticks:g} ticks")
+    sources = []
+    for track in source.tracks[1:]:
+        notes, other = read_notes(track)
+        # A zero-length note (on and off on the same tick) makes no sound.
+        total = len(notes)
+        zero_length = sum(1 for n in notes if n[1] == n[0])
+        notes = [n for n in notes if n[1] > n[0]]
+        if not notes:
+            continue
+        name = track.name
+        starts = np.array([n[0] for n in notes])
+        snapped = np.floor(starts / grid + 0.5) * grid
+        segment = np.floor(snapped / segment_ticks).astype(int)
+        in_video = starts * seconds_per_tick < duration
+        print(f"  {name}: {total} notes, "
+              f"{int(np.sum(~in_video))} after the video and {zero_length} "
+              f"zero-length dropped, "
+              f"{int(np.sum(snapped != starts))} off the grid")
+        sources.append((name, notes, other, segment, in_video))
+
+    # Tracks sharing a partition stay together: bin tracks in the order of
+    # values' columns, and within each every source track in file order.
+    for column in values.columns:
+        for name, notes, other, segment, in_video in sources:
+            on = np.zeros(len(notes), dtype=bool)
+            on[in_video] = values[column].to_numpy()[segment[in_video]] == BIN_ON
+            output.tracks.append(build_track(
+                f"{name} {column}", [n for n, keep in zip(notes, on) if keep],
+                other))
+
+    output.save(output_path)
+    print(f"Wrote {output_path} ({len(output.tracks) - 1} tracks)")
+
+
 def write_binned(args, speed, quantity, numerator, denominator):
     """Write the bar-quantized binned .dawproject and its segments CSV."""
     fractions = args.bin_fractions
@@ -305,15 +442,18 @@ def write_binned(args, speed, quantity, numerator, denominator):
     sets = [(f"{short} {segment_label}", "bin")]
     if not palindromic:
         sets.append((f"{short} inv {segment_label}", "inverted_bin"))
-    tracks = {}
+    # Track order, used by both the .dawproject and the --midi-in output:
+    # every " o" track before every " i" track, then the plain set before
+    # inv, then bin number.
+    originals, complements = {}, {}
     for label, bin_column in sets:
         for k, fraction in enumerate(fractions):
             on = segments[bin_column].to_numpy() == k
             name = f"{label} B{k} {round(100 * fraction)}%"
-            tracks[f"{name} o"] = np.where(on, BIN_ON, BIN_OFF)
+            originals[f"{name} o"] = np.where(on, BIN_ON, BIN_OFF)
             if write_complements:
-                tracks[f"{name} i"] = np.where(on, BIN_OFF, BIN_ON)
-    values = pd.DataFrame(tracks)
+                complements[f"{name} i"] = np.where(on, BIN_OFF, BIN_ON)
+    values = pd.DataFrame(originals | complements)
     columns = list(values.columns)
     if len(columns) > DEFAULT_MAX_COLUMNS:
         raise ValueError(f"{len(columns)} columns exceeds {DEFAULT_MAX_COLUMNS}")
@@ -347,6 +487,13 @@ def write_binned(args, speed, quantity, numerator, denominator):
         f"{os.path.basename(args.input_file)}")
     segments.to_csv(segments_csv, index=False)
     print(f"Wrote {segments_csv}")
+    if args.midi_in is not None:
+        midi_stem = os.path.splitext(os.path.basename(args.midi_in))[0]
+        write_binned_midi(
+            args, values, numerator, denominator,
+            segment_length * args.tempo / 60.0, len(speed) / args.fps,
+            os.path.join(os.path.dirname(output_path),
+                         f"{midi_stem}_{stem}_{tag}.mid"))
 
     print(f"  Segment: {size:g} {'bars' if args.segment_bars is not None else 'beats'}"
           f" = {segment_length:.6f} s at {args.tempo:g} bpm, "
@@ -423,12 +570,24 @@ def main():
         help="binned mode: how far before each bar line a change sits, in "
              "milliseconds; the first segment starts at 0 "
              "(default: %(default)s)")
+    parser.add_argument(
+        "--midi-in",
+        help="binned mode: a MIDI file exported from Cubase. Each track is "
+             "split into one track per bin track, holding only the notes that "
+             "start in that track's on segments")
+    parser.add_argument(
+        "--grid", default="1/16",
+        help="with --midi-in: the note grid the music was played to. Notes "
+             "are not moved; a note starting within half a grid step of a "
+             "bar line counts as being on it (default: %(default)s)")
     args = parser.parse_args()
 
     binned = args.segment_bars is not None or args.segment_beats is not None
     if binned != (args.bin_fractions is not None):
         raise ValueError(
             "--bin-fractions and --segment-bars/--segment-beats go together")
+    if args.midi_in is not None and not binned:
+        raise ValueError("--midi-in needs the binned mode")
 
     numerator, denominator = (int(x) for x in args.time_signature.split("/"))
 

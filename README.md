@@ -1797,8 +1797,8 @@ Each bin is an empty audio track at unity gain (0 dB) during its segments and si
 Cubase ignores `hold` interpolation on import and ramps across the whole segment, so each change
 is written as two linear points one tick (1/480 quarter note, 1.3 ms at 96 bpm) apart (old
 value, then new), which acts as a step. An inverted set ranks the segments the other way, so its
-`inv Bin 0` holds the fastest segments. Each track (trailing ` o`) is followed by its complement
-(trailing ` i`), which is at 0 dB exactly when the track is silent and vice versa. Track names carry
+`inv B0` holds the fastest segments. Each track (trailing ` o`) has a complement (trailing ` i`),
+which is at 0 dB exactly when the track is silent and vice versa. Track names carry
 the segment length in bars (`4bt` if given in beats), the bin and its fraction as a whole percent.
 `Sp`/`Ro` abbreviate the quantity:
 
@@ -1817,8 +1817,12 @@ With K bins there are up to 4K tracks. Sets that would repeat other tracks are n
   segment medians, or an even number of bins with an odd number of segments, can leave the mirror
   off by a segment.
 
-So `0.4 0.2 0.4` gives 6 tracks, `0.75 0.25` gives 4 and `0.5 0.5` gives 2. Among the ` o` tracks of one set, exactly one
-is on at any time.
+So `0.4 0.2 0.4` gives 6 tracks, `0.75 0.25` gives 4 and `0.5 0.5` gives 2. Among the ` o` tracks of
+one set, exactly one is on at any time.
+
+**Track order:** all ` o` tracks first, then all ` i` tracks. Within each, the plain set comes
+before `inv`, and then the tracks run in bin order: `B0 o`, `B1 o`, `B2 o`, `inv B0 o`, …, `B0 i`, …
+The `--midi-in` output uses the same order, with each bin track's source tracks kept together.
 
 - `--segment-bars N` / `--segment-beats N` - Segment length. A beat is a 1/denominator note and
   the tempo counts quarter notes. The project tempo must match, or the steps miss the bar lines
@@ -1834,6 +1838,31 @@ settings, e.g. `s4bar_b50-25-25_lead10ms`.
 ```bash
 python speed_to_dawproject.py N52_speed.py --tempo 96 --time-signature 4/4 \
     --segment-bars 4 --bin-fractions 0.5 0.25 0.25
+```
+
+#### Splitting MIDI notes by bin (`--midi-in`)
+
+Switching volume cuts off reverb tails and long decays. To avoid that, the same bins can sort the
+notes themselves, so a note either plays in full or is absent. Export the MIDI from Cubase
+(*File > Export > MIDI File*, 480 ticks per quarter, with Export Inserts on), then add:
+
+- `--midi-in FILE` - the exported MIDI file. Each track that has notes becomes one track per bin
+  track, named `<track> <bin track>` (e.g. `Piano A melody Sp 4 B0 25% o`). Each holds only the
+  notes that start in that bin track's on segments. The ` i` and `inv` tracks follow the same
+  redundancy rules as the volume tracks.
+- `--grid` - the grid the music was played to (default `1/16`). **Notes are never moved or
+  shortened.** The grid only decides which segment a note belongs to: its start is snapped to the
+  nearest grid step, so a note played up to half a step (60 ticks for 1/16) early counts as being
+  on the bar line.
+
+Notes starting after the video ends and zero-length notes are dropped, and tracks with no notes
+are skipped. The file
+must have one tempo and one time signature, equal to `--tempo` and `--time-signature`. The output
+is `data/output/<midi stem>_<input stem>_<tag>.mid`; import it with *File > Import > MIDI File*.
+
+```bash
+python speed_to_dawproject.py /mnt/d/N52/N52_speed.py --tempo 96 --time-signature 4/4 \
+    --segment-bars 4 --bin-fractions 0.25 0.5 0.25 --midi-in /mnt/d/N52/test.mid --grid 1/16
 ```
 
 ---
