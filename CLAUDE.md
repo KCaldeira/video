@@ -82,6 +82,17 @@ shortcut opened 15. Import with `File > Import > DAWproject` from inside
 Cubase. To confirm which version wrote a file, export any `.dawproject` from
 it and read the `<Application version="...">` line.
 
+### Cubase MIDI conventions
+
+- **Note names: Cubase calls MIDI note 60 C3**, not C4. Use Cubase's names
+  when describing notes to the user.
+- **MIDI export (`File > Export > MIDI File`) applies Play Probability.** A
+  note with probability below 100% is randomly kept or dropped on each
+  export, so two exports of the same track can differ. Standard MIDI files
+  have no probability field, so the roll is baked in.
+- **Muted and disabled tracks are left out of a MIDI export.** Tracks that
+  appear in the file with no notes are genuinely empty tracks.
+
 ### Known Cubase DAWproject limitations
 
 - **Automation will not import onto a group (`role="submix"`) channel.**
