@@ -60,17 +60,27 @@ The processing uses separate dictionaries for each transformation stage:
 
 - **DAW: Cubase 15.0.30** (Windows). Assume this version for any DAWproject or
   MIDI question; do not ask which DAW or version.
-- Windows drives visible from WSL: `C:` and `D:` only, as `/mnt/c` and
-  `/mnt/d`. `E:` is not mounted. To hand a file to Cubase, write it under
-  `/mnt/d/`.
+- **Two machines: a laptop and a desktop (a tower).** The user tries to keep
+  them aligned, but installed software and drive layouts can differ. Check
+  which one you are on (`hostname`) before assuming a path or an installed
+  program, and record facts here per machine.
+  - **Laptop (`ProLaptopCompact`):** Windows drives visible from WSL are `C:` and `D:` only, as
+    `/mnt/c` and `/mnt/d`; `E:` is not mounted. Each piece has a Cubase
+    project folder at `/mnt/d/<piece>/` (e.g. `/mnt/d/N52/`), holding the
+    `.cpr` files, the video and the `<piece>_speed.py` input. After
+    generating a `.dawproject` for a piece, also copy it into that folder,
+    so it is ready for `File > Import > DAWproject`.
+  - **Desktop (tower):** project folders are on a different drive. Hostname,
+    folder location and installed Cubase versions not yet recorded (to be
+    added).
 
-**Two Cubase versions are installed (14 and 15).** The Windows file
-association for `.dawproject` and `.cpr` opens **14**, while the desktop
-shortcut launches **15**. Always start Cubase from the shortcut and use
-`File > Import > DAWproject` from inside it; never double-click the file, or
-the test runs against the wrong version. To confirm which version is running,
-export any `.dawproject` from it and read the `<Application version="...">`
-line — that string is accurate and names the binary that wrote the file.
+**Only Cubase 15 is installed on the laptop** (checked 2026-10-17; desktop
+not yet checked). Cubase 14 was installed alongside it until
+it was uninstalled in October 2026. While both were present, some early tests ran
+on 14 by accident, because the Windows file association opened 14 and the
+shortcut opened 15. Import with `File > Import > DAWproject` from inside
+Cubase. To confirm which version wrote a file, export any `.dawproject` from
+it and read the `<Application version="...">` line.
 
 ### Known Cubase DAWproject limitations
 

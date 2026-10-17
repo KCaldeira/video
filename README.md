@@ -1805,7 +1805,8 @@ the segment length in bars (`4bt` if given in beats), the bin and its fraction a
 | `Sp inv 4 B0 50% o` | the fastest 50% of segments |
 | `Sp inv 4 B0 50% i` | every segment except those |
 
-With K bins there are 4K tracks. Among the ` o` tracks of one set, exactly one
+With K bins there are 4K tracks. With two bins the ` i` tracks are not written, since each would
+duplicate the other bin's ` o` track, leaving 4 tracks. Among the ` o` tracks of one set, exactly one
 is on at any time.
 
 - `--segment-bars N` / `--segment-beats N` - Segment length. A beat is a 1/denominator note and

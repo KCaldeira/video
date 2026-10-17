@@ -56,7 +56,8 @@ in practice. An
 inverted set ("inv") ranks the segments the other way, so its bin 0 holds the
 fastest segments. Each track (trailing " o") is followed by its complement
 (trailing " i"), which is at unity exactly when the track is silent: 4 x bins
-tracks in all. Names are short: "Sp 4 B0 50% o" is speed, 4-bar segments,
+tracks in all, or 2 x bins with two bins, where a complement is just the
+other bin and is not written. Names are short: "Sp 4 B0 50% o" is speed, 4-bar segments,
 bin 0 holding 50% of them; then "Sp 4 B0 50% i", ..., "Sp inv 4 B0 50% o".
 Rotation is "Ro", a segment in beats reads "4bt", and the percent is rounded
 to an integer. Every change after the first sits
@@ -270,6 +271,9 @@ def write_binned(args, speed, quantity, numerator, denominator):
     short = QUANTITY_ABBREVIATION[quantity]
     segment_label = (f"{args.segment_bars:g}" if args.segment_bars is not None
                      else f"{args.segment_beats:g}bt")
+    # With two bins, a bin's complement is exactly the other bin of the same
+    # set, so the " i" tracks would only duplicate " o" tracks.
+    write_complements = len(fractions) > 2
     tracks = {}
     for label, bin_column in ((f"{short} {segment_label}", "bin"),
                               (f"{short} inv {segment_label}", "inverted_bin")):
@@ -277,7 +281,8 @@ def write_binned(args, speed, quantity, numerator, denominator):
             on = segments[bin_column].to_numpy() == k
             name = f"{label} B{k} {round(100 * fraction)}%"
             tracks[f"{name} o"] = np.where(on, BIN_ON, BIN_OFF)
-            tracks[f"{name} i"] = np.where(on, BIN_OFF, BIN_ON)
+            if write_complements:
+                tracks[f"{name} i"] = np.where(on, BIN_OFF, BIN_ON)
     values = pd.DataFrame(tracks)
     columns = list(values.columns)
     if len(columns) > DEFAULT_MAX_COLUMNS:
