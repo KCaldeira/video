@@ -1844,7 +1844,20 @@ python speed_to_dawproject.py N52_speed.py --tempo 96 --time-signature 4/4 \
 
 Switching volume cuts off reverb tails and long decays. To avoid that, the same bins can sort the
 notes themselves, so a note either plays in full or is absent. Export the MIDI from Cubase
-(*File > Export > MIDI File*, 480 ticks per quarter, with Export Inserts on), then add:
+(*File > Export > MIDI File*, 480 ticks per quarter, with Export Inserts on), then add the
+flags below.
+
+Notes on the Cubase export:
+
+- **Choosing tracks:** solo the tracks you want before exporting, and only those are written.
+  Muted and disabled tracks are always left out.
+- **Play Probability is applied at export.** A note set below 100% is randomly kept or dropped each
+  time, so two exports can differ. Set it to 100% first, unless one random roll is what you want.
+- **Inserts:** Export Inserts writes the effect of MIDI insert plug-ins into the notes, so turn
+  those inserts off on the tracks you import into, or they act twice.
+- **Note names:** Cubase calls MIDI note 60 C3, not C4.
+
+The flags:
 
 - `--midi-in FILE` - the exported MIDI file. Each track that has notes becomes one track per bin
   track, named `<track> <bin track>` (e.g. `Piano A melody Sp 4 B0 25% o`). Each holds only the
