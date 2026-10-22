@@ -179,7 +179,8 @@ Renders harmonic tones from a run's raw `*_basic.csv`, either one drone note
 t=0 = video t=0); both go through `render_note()`. Harmonic n of the note has
 amplitude `n**strength_exponent * odd/even_gain * rank(expr)`,
 linearly interpolated between rows, divided by the sum of strengths. The listed
-expressions cycle up to `max_hz` (harmonic L+1 reuses entry 1). Random phases,
+expressions cycle up to `max_hz` (harmonic L+1 reuses entry 1) when `cycle` is
+true; with `cycle` false exactly the listed n sound (e.g. octave thinning). Random phases,
 optional per-harmonic pitch jitter (`jitter_cents`), and a `fade_s` fade on
 every note. Expressions
 allow only `*`, `/` and parentheses. Output is a 32-bit float WAV next to the CSV.

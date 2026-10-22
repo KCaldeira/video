@@ -1650,7 +1650,11 @@ y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 (t - t_start) + phi_n + drift_n(t))  
   octaves.
 - **`m_n(t)`, metric weight**: the harmonic's expression, rank-normalized (see
   below), linearly interpolated between CSV rows.
-- **Cycling**: the listed expressions repeat up to `max_hz`. With L listed
+- **Which harmonics** (`cycle`): with `"cycle": true` the list must be
+  n = 1…L and is cycled (below); every harmonic up to `max_hz` sounds. With
+  `"cycle": false` exactly the listed `n` sound, in any increasing set, each
+  with its own expression (see [Octave Thinning](#octave-thinning)).
+- **Cycling** (`"cycle": true`): the listed expressions repeat up to `max_hz`. With L listed
   entries, harmonic *n* uses entry `((n - 1) mod L) + 1`, so harmonic L + 1
   follows the same metric as harmonic 1, L + 2 the same as 2, and so on. A
   short list therefore still fills the spectrum: 37 entries at 55 Hz with
@@ -1712,6 +1716,37 @@ unchanged (0.42 vs 0.41). Jitter does not remove the beating between
 neighbouring harmonics, it makes it **irregular**: the pulse rate wanders
 instead of locking to f0. Whether that reads as less buzzy is a listening
 judgement.
+
+### Octave Thinning
+
+The buzz lives above about 500 Hz: with every harmonic present, neighbours
+there are f0 apart, several share one critical band, and they beat at f0.
+With `"cycle": false` the harmonic set can be thinned so that above some
+point only **octave doublings of lower harmonics** remain, the way organ
+ranks and Hammond drawbars build a tone. The gaps then double every octave
+(110, 220, 440 Hz, ...), too fast to be heard as pulsing.
+
+`json/N52_drone_B_r055_flat_oct8.json` keeps harmonics 1-8, then every
+doubling of 4, 5, 6 and 7 (n whose odd part is at most 7), up to 20 kHz:
+
+```
+1 2 3 4 5 6 7 8 | 10 12 14 16 | 20 24 28 32 | 40 48 56 64 | 80 ... 320
+```
+
+That is 29 harmonics instead of 363, with the same four-note shape (root,
+major third, fifth, harmonic seventh) in each octave above harmonic 8. Its
+expressions are the first 29 of the 37 in `N52_drone_B_r055_flat.json`, in
+order. Rendering is about ten times faster.
+
+Measured on N52 (envelope of everything above 500 Hz, four 2-second windows):
+
+| Render | Pulse at 55 Hz | All pulsing, 30-90 Hz |
+|---|---|---|
+| `B_r055_flat` (all harmonics) | 0.35 | 0.37 |
+| `B_r055_flat_j4` (4 cents jitter) | 0.06 | 0.29 |
+| `B_r055_flat_oct8` (octave thinning) | 0.03 | 0.04 |
+
+Jitter makes the beating irregular, while thinning removes it.
 
 ### MIDI Notes
 
@@ -1790,6 +1825,7 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
   "sample_rate": 48000,
   "root_hz": 55.0,
   "max_hz": 20000.0,
+  "cycle": true,
   "strength_exponent": -1.0,
   "odd_gain": 1.0,
   "even_gain": 1.0,
@@ -1814,7 +1850,8 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
 | `sample_rate` | Output sample rate in Hz |
 | `root_hz` | Drone: fundamental frequency (55 Hz = A1). Not with `midi_file` |
 | `midi_file` | MIDI: path to a monophonic MIDI file. Not with `root_hz` |
-| `max_hz` | Highest harmonic frequency; listed expressions cycle up to it. Must be below Nyquist |
+| `max_hz` | Highest harmonic frequency; nothing above it sounds. Must be below Nyquist |
+| `cycle` | `true`: list is n = 1…L, cycled up to `max_hz`. `false`: exactly the listed n |
 | `strength_exponent` | `w_n = n ** exponent`; -1 by convention |
 | `odd_gain`, `even_gain` | Extra multipliers on odd / even harmonics |
 | `phases` | `"zero"` (all harmonics start at 0; buzzy) or `"random"` |
@@ -1822,7 +1859,7 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
 | `fade_s` | Raised-cosine fade length at the start and end of every note, in seconds (e.g. 0.01 for MIDI, 0.05 for a drone) |
 | `jitter_cents` | Standard deviation of each harmonic's random pitch drift, in cents; 0 = exact harmonics |
 | `jitter_s` | Spacing in seconds of the drift's random points (how slowly it moves) |
-| `harmonics` | List of `{n, expr}`, `n` = 1, 2, … in order: the metric expression for each harmonic in one cycle |
+| `harmonics` | List of `{n, expr}` in increasing `n`: the metric expression for each harmonic (one cycle when `cycle` is true) |
 
 The N52 configs in `json/` are a grid named
 `N52_drone_{R|G|B}_r{055|110|220}_{flat|odd4|even4}.json`: color channel

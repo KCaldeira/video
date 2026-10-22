@@ -16,14 +16,18 @@ on the raw metrics CSV (`*_basic.csv`):
 
     y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 (t - t_start) + phi_n)  /  sum_n w_n
 
-    w_n    = n ** strength_exponent * (odd_gain if n is odd else even_gain)
+    w_n    = n ** strength_exponent * gain_n   (gain_n from the harmonic's row)
     m_n(t) = rank of the expression's value, mapped so the lowest row is 0
              and the highest is 1, linearly interpolated between rows
 
-The listed expressions are cycled up to `max_hz`: with L entries, harmonic n
-uses entry ((n - 1) mod L) + 1, so harmonic L + 1 follows the same metric as
-harmonic 1. The sum runs over every harmonic of the note up to `max_hz`, so
-higher notes have fewer harmonics. The weights m_n(t) follow the video's
+Which harmonics sound is set by `cycle`:
+  true   the list must be n = 1..L, and it is cycled up to `max_hz`: harmonic
+         n uses entry ((n - 1) mod L) + 1, so harmonic L + 1 follows the same
+         metric as harmonic 1. Every harmonic up to `max_hz` sounds.
+  false  exactly the listed n sound (any increasing set, e.g. 1..8 then only
+         octave doublings 10, 12, 14, 16, 20, ...), each with its own
+         expression; listed harmonics above `max_hz` are skipped.
+Higher notes therefore have fewer harmonics. The weights m_n(t) follow the video's
 timeline; after the last CSV row they hold the last row's values.
 
 Each harmonic has a fixed starting phase phi_n: 0 for every harmonic
@@ -89,9 +93,8 @@ def rank_normalize(values, expr):
     return (ranks - ranks.min()) / span
 
 
-def harmonic_strength(n, config):
-    parity_gain = config["odd_gain"] if n % 2 == 1 else config["even_gain"]
-    return n ** config["strength_exponent"] * parity_gain
+def harmonic_strength(n, gain, config):
+    return n ** config["strength_exponent"] * gain
 
 
 def midi_note_hz(note):
@@ -161,17 +164,26 @@ def render_note(start_s, end_s, f0, entries, control_times, config, rng):
     }
     # phases[n] is harmonic n's starting phase; index 0 is unused.
     phases = phase_draws[config["phases"]]()
-    total_strength = sum(harmonic_strength(n, config) for n in range(1, n_max + 1))
+
+    member_rules = {
+        True: lambda entry: range(entry["n"], n_max + 1, len(entries)),
+        False: lambda entry: [n for n in (entry["n"],) if n <= n_max],
+    }
+    members = [list(member_rules[config["cycle"]](entry)) for entry in entries]
+    sounding = sorted((n, entry["gain"]) for entry, group in zip(entries, members) for n in group)
+    if not sounding:
+        raise ValueError(f"Note at {start_s:.4f} s ({f0:.2f} Hz) has no listed harmonic below max_hz")
+    total_strength = sum(harmonic_strength(n, gain, config) for n, gain in sounding)
 
     t = (i0 + np.arange(i1 - i0)) / sample_rate  # video time, for the weights
     tau = t - i0 / sample_rate                   # note time, for the sines
     jittered = config["jitter_cents"] > 0
     samples = np.zeros(i1 - i0)
-    for entry in entries:
+    for entry, group in zip(entries, members):
         carrier = np.zeros(i1 - i0)
-        for n in range(entry["n"], n_max + 1, len(entries)):
+        for n in group:
             drift = jitter_phase(n, f0, tau, config, rng) if jittered else 0.0
-            carrier += harmonic_strength(n, config) * np.sin(2 * np.pi * n * f0 * tau + phases[n] + drift)
+            carrier += harmonic_strength(n, entry["gain"], config) * np.sin(2 * np.pi * n * f0 * tau + phases[n] + drift)
         samples += np.interp(t, control_times, entry["weight"]) * carrier
     samples /= total_strength
 
@@ -237,15 +249,18 @@ def main():
         raise ValueError("No notes to render")
 
     listed_n = [entry["n"] for entry in config["harmonics"]]
-    if listed_n != list(range(1, len(listed_n) + 1)):
-        raise ValueError(f"Harmonics must be listed as n = 1, 2, ... in order; got {listed_n}")
+    if listed_n[0] < 1 or any(b <= a for a, b in zip(listed_n, listed_n[1:])):
+        raise ValueError(f"Harmonic numbers must be positive and strictly increasing; got {listed_n}")
+    if config["cycle"] and listed_n != list(range(1, len(listed_n) + 1)):
+        raise ValueError(f"With cycle true, harmonics must be listed as n = 1, 2, ... in order; got {listed_n}")
     entries = []
     for entry in config["harmonics"]:
         values = evaluate_expression(df, entry["expr"])
         entries.append({
             "n": entry["n"],
             "expr": entry["expr"],
-            "strength": harmonic_strength(entry["n"], config),
+            "gain": entry["gain"],
+            "strength": harmonic_strength(entry["n"], entry["gain"], config),
             "weight": rank_normalize(values, entry["expr"]),
         })
 
@@ -261,11 +276,11 @@ def main():
         print(f"          {config['midi_file']}")
         print(f"          {len(overlaps)} overlaps (longest {max(overlaps, default=0) * 1000:.1f} ms), "
               f"{pitch_bends} pitch-bend messages ignored")
-    print(f"Harmonics: up to {config['max_hz']} Hz, cycling {len(entries)} listed expressions")
+    print(f"Harmonics: up to {config['max_hz']} Hz, {len(entries)} listed, cycle {config['cycle']}")
     print(f"Phases:   {config['phases']} (seed {config['random_seed']}), fade {config['fade_s']} s")
     print(f"Jitter:   {config['jitter_cents']} cents every {config['jitter_s']} s")
-    print(f"Strength: exponent {config['strength_exponent']}, "
-          f"odd {config['odd_gain']}, even {config['even_gain']}")
+    print(f"Strength: exponent {config['strength_exponent']}, per-row gains "
+          f"{sorted(set(entry['gain'] for entry in entries))}")
 
     signal = np.zeros(int(round(duration * sample_rate)))
     rng = np.random.default_rng(config["random_seed"])
