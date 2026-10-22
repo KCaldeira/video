@@ -1942,7 +1942,8 @@ See `example_config.json` for a working example with a specific video.
 - **`find_extrema.py`** - Finds local maxima/minima in time series data
 - **`create_group_channel.py`** - MIDI channel grouping utility
 - **`speed_to_cc.py`** - Converts speed data into a fixed-tempo MIDI with CC1 tracks
-- **`speed_to_dawproject.py`** - Converts an inverse-speed file into `.dawproject` volume automation (six tracks)
+- **`speed_to_dawproject.py`** - Converts an inverse-speed file into `.dawproject` volume automation (six continuous tracks, or bar-quantized bins)
+- **`speed_distribution.py`** - Plots and tabulates the distribution of speed in an inverse-speed file
 - **`frame_similarity.py`** - Measures how much each video frame differs from the next, as CSV
 - **`audio_smoothing.py`** - Smoothing kernels parameterized by mean weighting distance (library, used by `audio_level_curve.py`)
 - **`audio_level_curve.py`** - Builds a loudness-leveling gain curve from an audio file
@@ -1999,6 +2000,7 @@ way round. Any value `<= 0` in an inverse-speed file is an error.
 python speed_to_dawproject.py <input_file> [-o OUTPUT] [--fps 30] [--tempo 120]
        [--time-signature 4/4] [--every-nth-frame 1] [--clip-fraction 0]
        [--interpolation linear]
+       [--segment-bars N | --segment-beats N --bin-fractions F0 F1 ... [--lead-ms 10]]
 ```
 
 **Arguments**:
@@ -2040,6 +2042,125 @@ master (Cubase will not import automation onto a group). Import with `File > Imp
 ```bash
 python speed_to_dawproject.py data/input/N50_speed.py --tempo 108 --time-signature 4/4 --clip-fraction 0.05
 ```
+
+#### Binned mode: bar-quantized switches
+
+`--segment-bars` (or `--segment-beats`) with `--bin-fractions` writes a separate file in which
+volume changes only on bar lines. The video is cut into segments of that many bars at the
+constant `--tempo` and `--time-signature`, with video time 0 on bar 1, beat 1. A trailing partial
+segment is kept. Each segment's value is the **median of the per-frame percentile rank** of speed,
+so the result does not change under any monotonic transform of the metric. The segments are
+ranked and split so that each bin holds its given fraction of them. Bin 0 is the slowest.
+Rounding is applied to the boundaries between bins, not to each bin's count, so a palindromic
+split stays symmetric and the middle bins absorb the rounding (79 segments at `0.4 0.2 0.4` give
+32 / 15 / 32). A boundary exactly on a half segment gives the extra segment to the more central
+neighbouring bin.
+
+Each bin is an empty audio track at unity gain (0 dB) during its segments and silent otherwise.
+Cubase ignores `hold` interpolation on import and ramps across the whole segment, so each change
+is written as two linear points one tick (1/480 quarter note, 1.3 ms at 96 bpm) apart (old
+value, then new), which acts as a step. An inverted set ranks the segments the other way, so its
+`inv B0` holds the fastest segments. Each track (trailing ` o`) has a complement (trailing ` i`),
+which is at 0 dB exactly when the track is silent and vice versa. Track names carry
+the segment length in bars (`4bt` if given in beats), the bin and its fraction as a whole percent.
+`Sp`/`Ro` abbreviate the quantity:
+
+| Track | On (0 dB) during |
+|-------|------------------|
+| `Sp 4 B0 50% o` | the slowest 50% of segments |
+| `Sp 4 B0 50% i` | every segment except those |
+| `Sp inv 4 B0 50% o` | the fastest 50% of segments |
+| `Sp inv 4 B0 50% i` | every segment except those |
+
+With K bins there are up to 4K tracks. Sets that would repeat other tracks are not written:
+
+- **Two bins:** each ` i` track would equal the other bin's ` o` track, so the ` i` tracks are dropped.
+- **Palindromic fractions** (the same reversed, e.g. `0.4 0.2 0.4`): the counts split
+  symmetrically, so `inv B`*k* mirrors `B`*(K-1-k)* and the `inv` set is dropped. Ties between equal
+  segment medians, or an even number of bins with an odd number of segments, can leave the mirror
+  off by a segment.
+
+So `0.4 0.2 0.4` gives 6 tracks, `0.75 0.25` gives 4 and `0.5 0.5` gives 2. Among the ` o` tracks of
+one set, exactly one is on at any time.
+
+**Track order:** all ` o` tracks first, then all ` i` tracks. Within each, the plain set comes
+before `inv`, and then the tracks run in bin order: `B0 o`, `B1 o`, `B2 o`, `inv B0 o`, …, `B0 i`, …
+The `--midi-in` output uses the same order, with each bin track's source tracks kept together.
+
+- `--segment-bars N` / `--segment-beats N` - Segment length. A beat is a 1/denominator note and
+  the tempo counts quarter notes. The project tempo must match, or the steps miss the bar lines
+- `--bin-fractions F0 F1 ...` - Fraction of segments per bin, slowest first; each > 0, summing to 1
+- `--lead-ms` - How far before each bar line a change sits, so Cubase's de-click ramp has finished
+  when a note starting on the bar sounds. The first segment starts at 0 (default 10)
+
+`--clip-fraction`, `--every-nth-frame` and `--interpolation` do not apply in this mode. Outputs
+go to `data/output/<input stem>_<tag>.dawproject`, plus `<...>_segments.csv` with each segment's
+start time, change time, frame count, median percentile, bin and inverted bin. The tag encodes the
+settings, e.g. `s4bar_b50-25-25_lead10ms`.
+
+```bash
+python speed_to_dawproject.py N52_speed.py --tempo 96 --time-signature 4/4 \
+    --segment-bars 4 --bin-fractions 0.5 0.25 0.25
+```
+
+#### Splitting MIDI notes by bin (`--midi-in`)
+
+Switching volume cuts off reverb tails and long decays. To avoid that, the same bins can sort the
+notes themselves, so a note either plays in full or is absent. Export the MIDI from Cubase
+(*File > Export > MIDI File*, 480 ticks per quarter, with Export Inserts on), then add the
+flags below.
+
+Notes on the Cubase export:
+
+- **Choosing tracks:** solo the tracks you want before exporting, and only those are written.
+  Muted and disabled tracks are always left out.
+- **Play Probability is applied at export.** A note set below 100% is randomly kept or dropped each
+  time, so two exports can differ. Set it to 100% first, unless one random roll is what you want.
+- **Inserts:** Export Inserts writes the effect of MIDI insert plug-ins into the notes, so turn
+  those inserts off on the tracks you import into, or they act twice.
+- **Note names:** Cubase calls MIDI note 60 C3, not C4.
+
+The flags:
+
+- `--midi-in FILE` - the exported MIDI file. Each track that has notes becomes one track per bin
+  track, named `<track> <bin track>` (e.g. `Piano A melody Sp 4 B0 25% o`). Each holds only the
+  notes that start in that bin track's on segments. The ` i` and `inv` tracks follow the same
+  redundancy rules as the volume tracks.
+- `--grid` - the grid the music was played to (default `1/16`). **Notes are never moved or
+  shortened.** The grid only decides which segment a note belongs to: its start is snapped to the
+  nearest grid step, so a note played up to half a step (60 ticks for 1/16) early counts as being
+  on the bar line.
+
+Notes starting after the video ends and zero-length notes are dropped, and tracks with no notes
+are skipped. The file
+must have one tempo and one time signature, equal to `--tempo` and `--time-signature`. The output
+is `data/output/<midi stem>_<input stem>_<tag>.mid`; import it with *File > Import > MIDI File*.
+
+```bash
+python speed_to_dawproject.py /mnt/d/N52/N52_speed.py --tempo 96 --time-signature 4/4 \
+    --segment-bars 4 --bin-fractions 0.25 0.5 0.25 --midi-in /mnt/d/N52/test.mid --grid 1/16
+```
+
+---
+
+### `speed_distribution.py` - Distribution of Speed
+
+Reads the same inverse-speed files as `speed_to_dawproject.py`, takes speed as `1/value`, and
+shows how it is distributed, which helps when choosing `--bin-fractions`.
+
+```bash
+python speed_distribution.py <input_file> [-o OUTPUT_STEM] [--fps 30] [--thresholds S1 S2 ...]
+```
+
+- **`<stem>_distribution.csv`**: one row per frame, with `frame`, `seconds`, `inverse_speed`,
+  `speed` and `percentile`. The percentile is the rank the binned mode uses, so ties are visible.
+- **`<stem>_distribution.png` and `.pdf`**: four panels, showing speed over time, a histogram of
+  speed, a histogram of log₂(speed), and the cumulative distribution.
+- **Printed**: quantiles, the range, the share of frames at the maximum speed (on N52, 21% sit at a
+  cap and tie in rank), and the fraction of time below and above each `--thresholds` speed.
+
+Outputs go to `data/output/<input stem>_distribution.*`. Rotation files are refused, because
+rotation is signed.
 
 ---
 

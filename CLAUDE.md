@@ -24,6 +24,11 @@ This file provides coding guidance to Claude Code when working with code in this
   seconds: `_f{width}s`, where the integer part is zero-padded to three digits
   (`_f032s`, `_f004.75s`). `width_tag()` in `process_metrics.py` is the single
   source of that format. Block averages use `_b{width}s`.
+- **Short names only for Cubase tracks**: Cubase shows only a few characters
+  of a track name, so DAWproject track names are abbreviated (`Sp 4 B0 50% o`,
+  `Sp`/`Ro` for speed/rotation, `inv`, `B0`). File names have no such limit:
+  keep them long and descriptive (`N46_rot_...`, `_speed_`), and do not carry
+  track-name abbreviations into them.
 
 ## Output Location
 
@@ -55,17 +60,45 @@ The processing uses separate dictionaries for each transformation stage:
 
 - **DAW: Cubase 15.0.30** (Windows). Assume this version for any DAWproject or
   MIDI question; do not ask which DAW or version.
-- **The repo is used on two machines (desktop and laptop).** Drive letters,
-  Cubase project folders and where to hand files to Cubase differ, and are
-  recorded per machine in `~/.claude/CLAUDE.md`, not here.
+- **Two machines: a laptop and a desktop (a tower).** The user tries to keep
+  them aligned, but installed software and drive layouts can differ. Check
+  which one you are on (`hostname`) before assuming a path or an installed
+  program, and record facts here per machine.
+  - **Laptop (`ProLaptopCompact`):** Windows drives visible from WSL are `C:` and `D:` only, as
+    `/mnt/c` and `/mnt/d`; `E:` is not mounted. Each piece has a Cubase
+    project folder at `/mnt/d/<piece>/` (e.g. `/mnt/d/N52/`), holding the
+    `.cpr` files, the video and the `<piece>_speed.py` input. After
+    generating a `.dawproject` for a piece, also copy it into that folder,
+    so it is ready for `File > Import > DAWproject`.
+  - **Desktop (`SmallPinkDot`, the tower):** Windows drives `C:` through `I:`
+    are visible from WSL (`/mnt/c` … `/mnt/i`). Each piece has a Cubase
+    project folder at `F:\Cubase Projects\<piece>\`, i.e.
+    `/mnt/f/Cubase Projects/<piece>/` (e.g. `N52`); copy generated files
+    there for Cubase. Windows refuses to overwrite a file Cubase has open
+    ("Permission denied" from WSL); release it in Cubase or use a new name.
 
-**Two Cubase versions are installed (14 and 15).** The Windows file
-association for `.dawproject` and `.cpr` opens **14**, while the desktop
-shortcut launches **15**. Always start Cubase from the shortcut and use
-`File > Import > DAWproject` from inside it; never double-click the file, or
-the test runs against the wrong version. To confirm which version is running,
-export any `.dawproject` from it and read the `<Application version="...">`
-line — that string is accurate and names the binary that wrote the file.
+**Only Cubase 15 is installed on the laptop** (checked 2026-10-17). Cubase 14 was installed alongside it until
+it was uninstalled in October 2026. While both were present, some early tests ran
+on 14 by accident, because the Windows file association opened 14 and the
+shortcut opened 15. Import with `File > Import > DAWproject` from inside
+Cubase. To confirm which version wrote a file, export any `.dawproject` from
+it and read the `<Application version="...">` line.
+
+**The desktop** has `C:\Program Files\Steinberg\` folders for Cubase 10.5,
+11, 12, 14 and 15, but only Cubase 15 in the Start menu (checked
+2026-10-22); some of those folders may be leftovers. As on the laptop, start
+Cubase 15 from its shortcut and import from inside it.
+
+### Cubase MIDI conventions
+
+- **Note names: Cubase calls MIDI note 60 C3**, not C4. Use Cubase's names
+  when describing notes to the user.
+- **MIDI export (`File > Export > MIDI File`) applies Play Probability.** A
+  note with probability below 100% is randomly kept or dropped on each
+  export, so two exports of the same track can differ. Standard MIDI files
+  have no probability field, so the roll is baked in.
+- **Muted and disabled tracks are left out of a MIDI export.** Tracks that
+  appear in the file with no notes are genuinely empty tracks.
 
 ### Known Cubase DAWproject limitations
 
@@ -94,6 +127,10 @@ line — that string is accurate and names the binary that wrote the file.
   and all required in practice: **schema-valid is not the same as loadable**,
   and an optional element is not safe to omit. Confirm every structural
   change with a real import.
+- **`interpolation="hold"` is ignored on import.** Cubase 15.0.30 ramps
+  linearly between points regardless, so a step must be written as two
+  linear points close together (old value, then new). `speed_to_dawproject.py`
+  binned mode uses one tick (1/480 quarter).
 - **Track time base is not in the DAWproject schema.** Cubase applies
   *Preferences > Editing > Default Track Time Type* at import; set it to
   **Linear** or seconds-based automation will still move with tempo.
