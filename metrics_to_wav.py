@@ -17,9 +17,15 @@ The listed expressions are cycled up to `max_hz`: with L entries, harmonic n
 uses entry ((n - 1) mod L) + 1, so harmonic L + 1 follows the same metric as
 harmonic 1. The sum runs over every harmonic up to `max_hz`.
 
-Every sine starts at phase 0 at t = 0 and only its amplitude changes, so the
-waveform is continuous. Dividing by sum(w_n) bounds |y| by 1 regardless of
-the data.
+Each harmonic has a fixed starting phase: 0 for every harmonic
+(`"phases": "zero"`), or drawn uniformly from [0, 2 pi) with `random_seed`
+(`"phases": "random"`). Zero phases align every harmonic once per period of the
+root, which the ear hears as a buzz at the root frequency; random phases keep
+the same spectrum without the pulse. Only amplitudes change over time, so the
+waveform is continuous. A raised-cosine fade of `fade_s` seconds at each end
+removes the step at the start and end of the file.
+
+Dividing by sum(w_n) bounds |y| by 1 regardless of the data.
 
 Usage:
     python metrics_to_wav.py CONFIG.json
@@ -133,10 +139,18 @@ def main():
         })
     total_strength = sum(harmonic_strength(n, config) for n in range(1, n_max + 1))
 
+    # phases[n] is harmonic n's starting phase; index 0 is unused.
+    phase_draws = {
+        "zero": lambda: np.zeros(n_max + 1),
+        "random": lambda: np.random.default_rng(config["random_seed"]).uniform(0, 2 * np.pi, n_max + 1),
+    }
+    phases = phase_draws[config["phases"]]()
+
     print(f"Input:    {config['input_csv']}")
     print(f"Rows:     {len(df)} every {step} frames at {fps} fps -> {duration:.3f} s")
     print(f"Root:     {root_hz} Hz, {n_max} harmonics up to {n_max * root_hz} Hz, "
           f"cycling {len(harmonics)} listed expressions")
+    print(f"Phases:   {config['phases']} (seed {config['random_seed']}), fade {config['fade_s']} s")
     print(f"Strength: exponent {config['strength_exponent']}, "
           f"odd {config['odd_gain']}, even {config['even_gain']}, sum {total_strength:.4f}")
 
@@ -145,9 +159,14 @@ def main():
     for h in harmonics:
         carrier = np.zeros(n_samples)
         for n in h["members"]:
-            carrier += harmonic_strength(n, config) * np.sin(2 * np.pi * n * root_hz * t)
+            carrier += harmonic_strength(n, config) * np.sin(2 * np.pi * n * root_hz * t + phases[n])
         signal += np.interp(t, control_times, h["weight"]) * carrier
     signal /= total_strength
+
+    n_fade = int(round(config["fade_s"] * sample_rate))
+    ramp = 0.5 - 0.5 * np.cos(np.pi * np.arange(n_fade) / n_fade)
+    signal[:n_fade] *= ramp
+    signal[n_samples - n_fade:] *= ramp[::-1]
 
     csv_stem = os.path.splitext(os.path.basename(config["input_csv"]))[0]
     if not csv_stem.endswith("_basic"):

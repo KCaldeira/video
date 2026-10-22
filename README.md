@@ -1651,8 +1651,18 @@ y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 t)  /  sum_n w_n
   short list therefore still fills the spectrum: 37 entries at 55 Hz with
   `max_hz` 20000 give 363 harmonics. The background strength `w_n` uses the
   actual *n*, so each cycle is quieter than the last.
-- **Phase**: every sine is 0 at t = 0, and only its amplitude changes over
-  time, so the waveform is continuous.
+- **Phase**: each harmonic has a fixed starting phase, and only its amplitude
+  changes over time, so the waveform is continuous. With `"phases": "zero"`
+  every harmonic starts at 0; because the frequencies are exact multiples,
+  they then crest together once per period of the root and the upper
+  harmonics fuse into a pulse train at the root frequency, heard as a
+  **buzz**. With `"phases": "random"` (uniform on [0, 2 pi), reproducible via
+  `random_seed`) the spectrum is unchanged but the pulse is broken up. On
+  N52 this halved the 55 Hz pulsing of the harmonics above 300 Hz (envelope
+  modulation depth 0.79 -> 0.41). Some pulsing remains whatever the phases,
+  because any two adjacent harmonics beat at the root frequency.
+- **Fades**: a raised-cosine fade of `fade_s` seconds at each end, so the
+  file starts and ends at zero (random phases do not start at zero).
 - **Scale**: dividing by `sum w_n` is a fixed, data-independent gain that
   guarantees |y| <= 1. The level is therefore comparable between videos, but
   usually well below full scale (the N52 test peaks at about -8 dBFS).
@@ -1713,6 +1723,9 @@ A JSON file, kept in `json/`. Every key is required.
   "strength_exponent": -1.0,
   "odd_gain": 1.0,
   "even_gain": 1.0,
+  "phases": "random",
+  "random_seed": 1,
+  "fade_s": 0.05,
   "harmonics": [
     {"n": 1, "expr": "B_avg"},
     {"n": 2, "expr": "B_std"},
@@ -1731,6 +1744,9 @@ A JSON file, kept in `json/`. Every key is required.
 | `max_hz` | Highest harmonic frequency; listed expressions cycle up to it. Must be below Nyquist |
 | `strength_exponent` | `w_n = n ** exponent`; -1 by convention |
 | `odd_gain`, `even_gain` | Extra multipliers on odd / even harmonics |
+| `phases` | `"zero"` (all harmonics start at 0; buzzy) or `"random"` |
+| `random_seed` | Seed for the random phases; same seed, same file |
+| `fade_s` | Raised-cosine fade length at each end, in seconds |
 | `harmonics` | List of `{n, expr}`, `n` = 1, 2, … in order: the metric expression for each harmonic in one cycle |
 
 `json/N52_drone.json` lists 37 expressions (`B_avg`, `B_std`, `B_avg/Gray_avg`,
@@ -1739,6 +1755,10 @@ and products of `B_avg` or `B_avg/Gray_avg` with Gray metrics), cycled to
 
 Rendering time grows with the number of harmonics: 363 harmonics over 394 s
 at 48 kHz takes about two minutes.
+
+Variants are separate config files: the output is named after the config
+file, so `json/N52_drone_odd2.json` writes `..._N52_drone_odd2.wav` beside
+`..._N52_drone.wav` without overwriting it.
 
 ### Output Files
 
@@ -1755,7 +1775,8 @@ machine you are on (see `CLAUDE.md`, Environment) and import it as audio.
 
 ### Roadmap
 
-Possible next iterations: smoothing the metric weights (rank first, then
+Possible next iterations: small random detuning per harmonic (`detune_cents`;
+adds slow, video-independent shimmer), smoothing the metric weights (rank first, then
 filter, the same order as the main pipeline), stereo placement, tempered or
 moving pitch, several voices, and a nonlinear map from weight to amplitude
 (e.g. in dB).

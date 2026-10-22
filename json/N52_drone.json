@@ -7,6 +7,9 @@
   "strength_exponent": -2.0,
   "odd_gain": 1.0,
   "even_gain": 1.0,
+  "phases": "random",
+  "random_seed": 1,
+  "fade_s": 0.05,
   "harmonics": [
     {"n": 1, "expr": "B_avg"},
     {"n": 2, "expr": "B_std"},
