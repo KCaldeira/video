@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """
-Render a harmonic drone whose timbre follows video metrics, as a WAV file.
+Render harmonic tones whose timbre follows video metrics, as a WAV file.
 
-One note is held for the length of the video. It is the sum of exact integer
-harmonics of a root frequency (no tempering). Each harmonic's amplitude is a
-fixed background strength times a time-varying weight taken from a metric
-expression evaluated on the raw metrics CSV (`*_basic.csv`):
+The notes come from one of two sources, chosen by which key the config has:
+  "root_hz"    one note at root_hz held for the length of the video (a drone)
+  "midi_file"  one tone per MIDI note, at the note's equal-tempered pitch
+               (A4 = 440 Hz), start time and duration. Time 0 of the MIDI file
+               is time 0 of the video; tempo changes are honoured. Velocity is
+               ignored. Overlapping notes simply sum.
 
-    y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 t)  /  sum_n w_n
+Each note is the sum of exact integer harmonics of its frequency f0 (no
+tempering of the harmonics). Each harmonic's amplitude is a fixed background
+strength times a time-varying weight taken from a metric expression evaluated
+on the raw metrics CSV (`*_basic.csv`):
+
+    y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 (t - t_start) + phi_n)  /  sum_n w_n
 
     w_n    = n ** strength_exponent * (odd_gain if n is odd else even_gain)
     m_n(t) = rank of the expression's value, mapped so the lowest row is 0
@@ -15,17 +22,31 @@ expression evaluated on the raw metrics CSV (`*_basic.csv`):
 
 The listed expressions are cycled up to `max_hz`: with L entries, harmonic n
 uses entry ((n - 1) mod L) + 1, so harmonic L + 1 follows the same metric as
-harmonic 1. The sum runs over every harmonic up to `max_hz`.
+harmonic 1. The sum runs over every harmonic of the note up to `max_hz`, so
+higher notes have fewer harmonics. The weights m_n(t) follow the video's
+timeline; after the last CSV row they hold the last row's values.
 
-Each harmonic has a fixed starting phase: 0 for every harmonic
+Each harmonic has a fixed starting phase phi_n: 0 for every harmonic
 (`"phases": "zero"`), or drawn uniformly from [0, 2 pi) with `random_seed`
-(`"phases": "random"`). Zero phases align every harmonic once per period of the
+(`"phases": "random"`, a fresh draw for each note). Zero phases align every harmonic once per period of the
 root, which the ear hears as a buzz at the root frequency; random phases keep
 the same spectrum without the pulse. Only amplitudes change over time, so the
 waveform is continuous. A raised-cosine fade of `fade_s` seconds at each end
-removes the step at the start and end of the file.
+of every note removes the click at note-on and note-off; a note shorter than
+2 * fade_s fades over half its length instead.
 
-Dividing by sum(w_n) bounds |y| by 1 regardless of the data.
+Optional pitch jitter breaks up the buzz that remains with random phases (any
+two neighbouring harmonics beat at f0, and with exact harmonics that beat is
+perfectly regular). Each harmonic of each note drifts independently: a random
+offset in cents, drawn with standard deviation `jitter_cents`, is placed every
+`jitter_s` seconds and linearly interpolated, and the resulting frequency
+n f0 2^(cents/1200) is integrated into phase so there are no discontinuities.
+Because the drift is in cents, upper harmonics move more Hz than the
+fundamental, so the pitch stays put while the upper harmonics slide in and out
+of alignment. `jitter_cents` 0 gives exact harmonics.
+
+Dividing by each note's sum(w_n) bounds |y| by 1 for a single note regardless
+of the data; overlapping notes can sum above 1.
 
 Usage:
     python metrics_to_wav.py CONFIG.json
@@ -37,6 +58,7 @@ import re
 import shutil
 import sys
 
+import mido
 import numpy as np
 import pandas as pd
 import soundfile as sf
@@ -72,16 +94,105 @@ def harmonic_strength(n, config):
     return n ** config["strength_exponent"] * parity_gain
 
 
-def write_plot(out_path, control_times, harmonics, title):
+def midi_note_hz(note):
+    return 440.0 * 2.0 ** ((note - 69) / 12)
+
+
+def read_midi_notes(path):
+    """
+    Return [(start_s, end_s, hz)] for every note in the file, sorted by start,
+    and the number of pitch-bend messages (which are ignored). Iterating a
+    MidiFile merges the tracks and gives message times in seconds with the
+    tempo map applied.
+    """
+    notes = []
+    sounding = {}
+    pitch_bends = 0
+    now = 0.0
+    for msg in mido.MidiFile(path):
+        now += msg.time
+        pitch_bends += msg.type == "pitchwheel"
+        is_on = msg.type == "note_on" and msg.velocity > 0
+        is_off = msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0)
+        if is_on:
+            key = (msg.channel, msg.note)
+            if key in sounding:
+                raise ValueError(f"Note {msg.note} on channel {msg.channel} restarted at {now:.3f} s "
+                                 f"before its note-off")
+            sounding[key] = now
+        if is_off:
+            start = sounding.pop((msg.channel, msg.note))
+            notes.append((start, now, midi_note_hz(msg.note)))
+    if sounding:
+        raise ValueError(f"Notes never turned off: {sorted(sounding)}")
+    return sorted(notes), pitch_bends
+
+
+def jitter_phase(n, f0, tau, config, rng):
+    """
+    Extra phase (radians) of harmonic n from an independent random drift in
+    cents: N(0, jitter_cents) knots every jitter_s seconds, linearly
+    interpolated, converted to a frequency offset and integrated.
+    """
+    jitter_s = config["jitter_s"]
+    knot_tau = np.arange(int(np.ceil(tau[-1] / jitter_s)) + 2) * jitter_s
+    cents = rng.normal(0.0, config["jitter_cents"], len(knot_tau))
+    offset_hz = n * f0 * (2.0 ** (np.interp(tau, knot_tau, cents) / 1200) - 1)
+    return 2 * np.pi * np.cumsum(offset_hz) / config["sample_rate"]
+
+
+def render_note(start_s, end_s, f0, entries, control_times, config, rng):
+    """
+    Render one note as an array of round(end_s * sr) - round(start_s * sr)
+    samples. Returns (samples, fade_was_shortened).
+    """
+    sample_rate = config["sample_rate"]
+    i0 = int(round(start_s * sample_rate))
+    i1 = int(round(end_s * sample_rate))
+    if i1 <= i0:
+        raise ValueError(f"Note at {start_s:.4f} s ({f0:.2f} Hz) is shorter than one sample")
+    n_max = int(config["max_hz"] // f0)
+    if n_max < 1:
+        raise ValueError(f"Note at {start_s:.4f} s ({f0:.2f} Hz) is above max_hz {config['max_hz']}")
+
+    phase_draws = {
+        "zero": lambda: np.zeros(n_max + 1),
+        "random": lambda: rng.uniform(0, 2 * np.pi, n_max + 1),
+    }
+    # phases[n] is harmonic n's starting phase; index 0 is unused.
+    phases = phase_draws[config["phases"]]()
+    total_strength = sum(harmonic_strength(n, config) for n in range(1, n_max + 1))
+
+    t = (i0 + np.arange(i1 - i0)) / sample_rate  # video time, for the weights
+    tau = t - i0 / sample_rate                   # note time, for the sines
+    jittered = config["jitter_cents"] > 0
+    samples = np.zeros(i1 - i0)
+    for entry in entries:
+        carrier = np.zeros(i1 - i0)
+        for n in range(entry["n"], n_max + 1, len(entries)):
+            drift = jitter_phase(n, f0, tau, config, rng) if jittered else 0.0
+            carrier += harmonic_strength(n, config) * np.sin(2 * np.pi * n * f0 * tau + phases[n] + drift)
+        samples += np.interp(t, control_times, entry["weight"]) * carrier
+    samples /= total_strength
+
+    n_fade_wanted = int(round(config["fade_s"] * sample_rate))
+    n_fade = min(n_fade_wanted, (i1 - i0) // 2)
+    ramp = 0.5 - 0.5 * np.cos(np.pi * np.arange(n_fade) / n_fade)
+    samples[:n_fade] *= ramp
+    samples[len(samples) - n_fade:] *= ramp[::-1]
+    return samples, n_fade < n_fade_wanted
+
+
+def write_plot(out_path, control_times, entries, title):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(14, 7))
     cmap = plt.get_cmap("viridis")
-    for i, h in enumerate(harmonics):
+    for i, h in enumerate(entries):
         ax.plot(control_times, h["strength"] * h["weight"],
-                color=cmap(i / max(len(harmonics) - 1, 1)), linewidth=0.9,
+                color=cmap(i / max(len(entries) - 1, 1)), linewidth=0.9,
                 label=f"{h['n']}: {h['expr']}")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Amplitude  w_n * m_n  (before / sum w_n)")
@@ -109,64 +220,62 @@ def main():
 
     fps = config["frames_per_second"]
     sample_rate = config["sample_rate"]
-    root_hz = config["root_hz"]
     control_times = frames / fps
-    duration = (frames[-1] + step) / fps
-    n_samples = int(round(duration * sample_rate))
-    max_hz = config["max_hz"]
-    if max_hz >= sample_rate / 2:
-        raise ValueError(f"max_hz {max_hz} is at or above Nyquist ({sample_rate / 2} Hz)")
-    n_max = int(max_hz // root_hz)
+    video_duration = (frames[-1] + step) / fps
+    if config["max_hz"] >= sample_rate / 2:
+        raise ValueError(f"max_hz {config['max_hz']} is at or above Nyquist ({sample_rate / 2} Hz)")
+
+    sources = [key for key in ("root_hz", "midi_file") if key in config]
+    if len(sources) != 1:
+        raise ValueError(f"Config needs exactly one of 'root_hz' or 'midi_file'; has {sources}")
+    note_sources = {
+        "root_hz": lambda: ([(0.0, video_duration, config["root_hz"])], 0),
+        "midi_file": lambda: read_midi_notes(config["midi_file"]),
+    }
+    notes, pitch_bends = note_sources[sources[0]]()
+    if not notes:
+        raise ValueError("No notes to render")
 
     listed_n = [entry["n"] for entry in config["harmonics"]]
     if listed_n != list(range(1, len(listed_n) + 1)):
         raise ValueError(f"Harmonics must be listed as n = 1, 2, ... in order; got {listed_n}")
-    if len(listed_n) > n_max:
-        raise ValueError(f"{len(listed_n)} harmonics listed but only {n_max} fit below {max_hz} Hz")
-
-    # One entry per listed expression; `members` are all harmonics n <= n_max
-    # that cycle onto it.
-    harmonics = []
+    entries = []
     for entry in config["harmonics"]:
         values = evaluate_expression(df, entry["expr"])
-        members = np.arange(entry["n"], n_max + 1, len(listed_n))
-        harmonics.append({
+        entries.append({
             "n": entry["n"],
             "expr": entry["expr"],
             "strength": harmonic_strength(entry["n"], config),
-            "members": members,
             "weight": rank_normalize(values, entry["expr"]),
         })
-    total_strength = sum(harmonic_strength(n, config) for n in range(1, n_max + 1))
 
-    # phases[n] is harmonic n's starting phase; index 0 is unused.
-    phase_draws = {
-        "zero": lambda: np.zeros(n_max + 1),
-        "random": lambda: np.random.default_rng(config["random_seed"]).uniform(0, 2 * np.pi, n_max + 1),
-    }
-    phases = phase_draws[config["phases"]]()
+    duration = max(video_duration, max(end for _, end, _ in notes))
+    overlaps = [prev[1] - nxt[0] for prev, nxt in zip(notes, notes[1:]) if nxt[0] < prev[1]]
+    freqs = [hz for _, _, hz in notes]
 
     print(f"Input:    {config['input_csv']}")
-    print(f"Rows:     {len(df)} every {step} frames at {fps} fps -> {duration:.3f} s")
-    print(f"Root:     {root_hz} Hz, {n_max} harmonics up to {n_max * root_hz} Hz, "
-          f"cycling {len(harmonics)} listed expressions")
+    print(f"Rows:     {len(df)} every {step} frames at {fps} fps -> video {video_duration:.3f} s")
+    print(f"Notes:    {sources[0]}: {len(notes)} notes, {min(freqs):.2f}-{max(freqs):.2f} Hz, "
+          f"output {duration:.3f} s")
+    if sources[0] == "midi_file":
+        print(f"          {config['midi_file']}")
+        print(f"          {len(overlaps)} overlaps (longest {max(overlaps, default=0) * 1000:.1f} ms), "
+              f"{pitch_bends} pitch-bend messages ignored")
+    print(f"Harmonics: up to {config['max_hz']} Hz, cycling {len(entries)} listed expressions")
     print(f"Phases:   {config['phases']} (seed {config['random_seed']}), fade {config['fade_s']} s")
+    print(f"Jitter:   {config['jitter_cents']} cents every {config['jitter_s']} s")
     print(f"Strength: exponent {config['strength_exponent']}, "
-          f"odd {config['odd_gain']}, even {config['even_gain']}, sum {total_strength:.4f}")
+          f"odd {config['odd_gain']}, even {config['even_gain']}")
 
-    t = np.arange(n_samples) / sample_rate
-    signal = np.zeros(n_samples)
-    for h in harmonics:
-        carrier = np.zeros(n_samples)
-        for n in h["members"]:
-            carrier += harmonic_strength(n, config) * np.sin(2 * np.pi * n * root_hz * t + phases[n])
-        signal += np.interp(t, control_times, h["weight"]) * carrier
-    signal /= total_strength
-
-    n_fade = int(round(config["fade_s"] * sample_rate))
-    ramp = 0.5 - 0.5 * np.cos(np.pi * np.arange(n_fade) / n_fade)
-    signal[:n_fade] *= ramp
-    signal[n_samples - n_fade:] *= ramp[::-1]
+    signal = np.zeros(int(round(duration * sample_rate)))
+    rng = np.random.default_rng(config["random_seed"])
+    shortened = 0
+    for start, end, hz in notes:
+        samples, was_shortened = render_note(start, end, hz, entries, control_times, config, rng)
+        i0 = int(round(start * sample_rate))
+        signal[i0:i0 + len(samples)] += samples
+        shortened += was_shortened
+    print(f"Fades:    {shortened} notes shorter than 2 x fade_s faded over half their length")
 
     csv_stem = os.path.splitext(os.path.basename(config["input_csv"]))[0]
     if not csv_stem.endswith("_basic"):
@@ -178,8 +287,7 @@ def main():
     wav_path = f"{out_base}.wav"
     sf.write(wav_path, signal, sample_rate, subtype=OUTPUT_SUBTYPE)
     shutil.copyfile(config_path, f"{out_base}_config.json")
-    write_plot(f"{out_base}_plot.png", control_times, harmonics,
-               f"{os.path.basename(out_base)}  (root {root_hz} Hz)")
+    write_plot(f"{out_base}_plot.png", control_times, entries, os.path.basename(out_base))
 
     peak = float(np.max(np.abs(signal)))
     print(f"Peak:     {peak:.4f} ({20 * np.log10(peak):.2f} dBFS)")

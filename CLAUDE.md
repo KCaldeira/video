@@ -137,10 +137,14 @@ invariants for this workflow:
 ```bash
 python metrics_to_wav.py json/N52_drone.json
 ```
-Renders a harmonic drone from a run's raw `*_basic.csv`: harmonic n of
-`root_hz` has amplitude `n**strength_exponent * odd/even_gain * rank(expr)`,
+Renders harmonic tones from a run's raw `*_basic.csv`, either one drone note
+(`root_hz`) or one tone per note of a monophonic MIDI file (`midi_file`; MIDI
+t=0 = video t=0); both go through `render_note()`. Harmonic n of the note has
+amplitude `n**strength_exponent * odd/even_gain * rank(expr)`,
 linearly interpolated between rows, divided by the sum of strengths. The listed
-expressions cycle up to `max_hz` (harmonic L+1 reuses entry 1). Expressions
+expressions cycle up to `max_hz` (harmonic L+1 reuses entry 1). Random phases,
+optional per-harmonic pitch jitter (`jitter_cents`), and a `fade_s` fade on
+every note. Expressions
 allow only `*`, `/` and parentheses. Output is a 32-bit float WAV next to the CSV.
 
 ### Directory Structure

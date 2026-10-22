@@ -10,6 +10,8 @@
   "phases": "random",
   "random_seed": 1,
   "fade_s": 0.05,
+  "jitter_cents": 0.0,
+  "jitter_s": 0.3,
   "harmonics": [
     {"n": 1, "expr": "R_avg"},
     {"n": 2, "expr": "R_std"},

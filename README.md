@@ -5,7 +5,7 @@ This repository contains tools for video analysis, tempo mapping, and audio leve
 1. **Visual Metrics Pipeline** (`run_video_processing.py`) - Extracts comprehensive visual metrics from videos and generates MIDI CC tracks
 2. **Tempo Mapping** (`calculate_tempo_from_inverse.py`) - Generates variable tempo maps from zoom/speed data
 3. **Audio Leveling** (`audio_level_curve.py` + `curve_to_dawproject.py`) - Computes a volume-riding curve from an audio file and delivers it to Cubase as a DAWproject automation envelope
-4. **Audio Synthesis** (`metrics_to_wav.py`) - Renders video metrics directly to a WAV file as a harmonic drone whose timbre follows the video
+4. **Audio Synthesis** (`metrics_to_wav.py`) - Renders video metrics directly to a WAV file as harmonic tones whose timbre follows the video: a held drone, or one tone per note of a monophonic MIDI file
 
 ---
 
@@ -1620,13 +1620,18 @@ Also covers the silence gate and the loess edge behavior.
 ### Overview
 
 A new direction, built up iteratively: instead of handing automation to a DAW,
-render the video's metrics directly as audio. The first iteration is a single
-note held for the length of the video, a **drone**, whose harmonic balance
-follows the picture.
+render the video's metrics directly as audio, as harmonic tones whose
+harmonic balance follows the picture. The notes come from one of two sources:
 
-The note is a sum of **exact integer harmonics** of a root frequency (no
-tempering): with the default root A1 = 55 Hz, harmonic *n* sits at *n* x 55 Hz.
-Each harmonic's loudness is driven by one metric expression.
+- **Drone** (`"root_hz"`): one note held for the length of the video.
+- **MIDI** (`"midi_file"`): one tone per note of a monophonic MIDI file, with
+  the note's pitch, start and duration (see [MIDI Notes](#midi-notes)).
+
+Each note is a sum of **exact integer harmonics** of its frequency (no
+tempering of the harmonics): with a root of A1 = 55 Hz, harmonic *n* sits at
+*n* x 55 Hz. Each harmonic's loudness is driven by one metric expression. Both
+sources go through the same per-note renderer (`render_note()`), so every
+setting below applies to both.
 
 No extra packages are needed: synthesis is NumPy, ranking is SciPy, and the
 WAV is written by SoundFile, all already in `requirements.txt`.
@@ -1634,7 +1639,7 @@ WAV is written by SoundFile, all already in `requirements.txt`.
 ### Signal
 
 ```
-y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 t)  /  sum_n w_n
+y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 (t - t_start) + phi_n + drift_n(t))  /  sum_n w_n
 ```
 
 - **`w_n`, background strength**: `n ** strength_exponent`, multiplied by
@@ -1660,12 +1665,76 @@ y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 t)  /  sum_n w_n
   `random_seed`) the spectrum is unchanged but the pulse is broken up. On
   N52 this halved the 55 Hz pulsing of the harmonics above 300 Hz (envelope
   modulation depth 0.79 -> 0.41). Some pulsing remains whatever the phases,
-  because any two adjacent harmonics beat at the root frequency.
-- **Fades**: a raised-cosine fade of `fade_s` seconds at each end, so the
-  file starts and ends at zero (random phases do not start at zero).
-- **Scale**: dividing by `sum w_n` is a fixed, data-independent gain that
-  guarantees |y| <= 1. The level is therefore comparable between videos, but
-  usually well below full scale (the N52 test peaks at about -8 dBFS).
+  because any two adjacent harmonics beat at the root frequency. Each MIDI
+  note gets a fresh draw.
+- **Jitter** (`drift_n`): see [Pitch Jitter](#pitch-jitter).
+- **Fades**: a raised-cosine fade of `fade_s` seconds at the start and end of
+  every note, so each note starts and ends at exactly zero (random phases do
+  not start at zero). A note shorter than `2 * fade_s` fades over half its
+  length instead; the run reports how many.
+- **Harmonic count**: every harmonic of the note up to `max_hz`, so higher
+  notes have fewer harmonics (55 Hz: 363; 220 Hz: 90).
+- **Scale**: dividing by the note's `sum w_n` is a fixed, data-independent
+  gain that guarantees |y| <= 1 for one note. The level is therefore
+  comparable between videos, but usually below full scale (N52 drones peak
+  between about -8 and -2 dBFS). Overlapping MIDI notes add, so they can
+  exceed 1; the float WAV keeps the value and the run reports the peak.
+
+### Pitch Jitter
+
+With exact harmonics the waveform repeats exactly once per period of f0, and
+neighbouring harmonics beat at exactly f0. Random phases change the shape of
+the repeating waveform but not the repetition, so a steady f0 buzz remains.
+Jitter makes each harmonic drift independently around its exact frequency so
+that the pattern never quite repeats:
+
+- For each harmonic of each note, a random offset in cents is drawn from a
+  normal distribution with standard deviation `jitter_cents` every `jitter_s`
+  seconds, and linearly interpolated between those points.
+- Harmonic *n* runs at `n * f0 * 2^(cents/1200)`. The frequency is integrated
+  into phase, so the drift never causes a discontinuity or click.
+- The drift is in **cents**, so it is proportionally the same for every
+  harmonic but larger in Hz for upper harmonics: 5 cents is about 0.16 Hz at
+  55 Hz but 3.2 Hz at harmonic 20. The pitch stays put while the upper
+  harmonics, where the buzz is, slide in and out of alignment.
+- The drift is **independent per harmonic**. A drift shared by all harmonics
+  would only wobble the pitch; the waveform would still repeat.
+- Slow drift only widens each harmonic by a few Hz; it adds no hiss. On N52
+  with 5 cents every 0.3 s, energy more than 15 Hz from any harmonic is
+  2e-6 of the total.
+- `jitter_cents` 0 gives exact harmonics, and output identical to a render
+  without the jitter feature. Jitter roughly doubles rendering time.
+
+What it does to the buzz, measured on `N52_drone_B_r055_flat` (envelope of the
+harmonics above 300 Hz, 2-second windows): the pulse **at exactly 55 Hz**
+drops from 0.41 to 0.18, but the total pulse energy between 50 and 60 Hz is
+unchanged (0.42 vs 0.41). Jitter does not remove the beating between
+neighbouring harmonics, it makes it **irregular**: the pulse rate wanders
+instead of locking to f0. Whether that reads as less buzzy is a listening
+judgement.
+
+### MIDI Notes
+
+With `"midi_file"` in place of `"root_hz"`, each note in the file becomes one
+tone:
+
+- **Pitch**: equal temperament, A4 (MIDI 69) = 440 Hz. Pitch bend is ignored
+  (the run reports how many pitch-bend messages it skipped).
+- **Timing**: MIDI time 0 is video time 0. Note-on and note-off times are read
+  in seconds with the file's tempo map applied (all tracks are merged), so
+  tempo changes are honoured. The metric weights follow the **video's**
+  timeline: a note at 100 s takes the harmonic balance at 100 s.
+- **After the video**: notes past the last CSV row hold the last row's
+  values. The WAV runs to `max(video length, last note-off)`.
+- **Velocity** is ignored for now: every note has the same level.
+- **Monophonic** input is expected, but overlaps are allowed: a legato
+  overlap simply sums the two notes. The run reports the number of overlaps
+  and the longest.
+- **Errors**: a note that restarts before its note-off, a note never turned
+  off, a note shorter than one sample, or a note above `max_hz`.
+
+Between notes the output is exactly zero.
+
 
 ### Rank Normalization
 
@@ -1711,7 +1780,8 @@ There is **no smoothing** in this iteration: the amplitudes follow the raw
 
 ### Configuration
 
-A JSON file, kept in `json/`. Every key is required.
+A JSON file, kept in `json/`. Every key is required, and exactly one of
+`root_hz` (drone) or `midi_file` (MIDI notes) must be present.
 
 ```json
 {
@@ -1726,6 +1796,8 @@ A JSON file, kept in `json/`. Every key is required.
   "phases": "random",
   "random_seed": 1,
   "fade_s": 0.05,
+  "jitter_cents": 0.0,
+  "jitter_s": 0.3,
   "harmonics": [
     {"n": 1, "expr": "B_avg"},
     {"n": 2, "expr": "B_std"},
@@ -1740,15 +1812,22 @@ A JSON file, kept in `json/`. Every key is required.
 | `input_csv` | The run's raw metrics, `*_basic.csv` |
 | `frames_per_second` | Video frame rate; the CSV holds frame numbers only |
 | `sample_rate` | Output sample rate in Hz |
-| `root_hz` | Fundamental frequency (55 Hz = A1) |
+| `root_hz` | Drone: fundamental frequency (55 Hz = A1). Not with `midi_file` |
+| `midi_file` | MIDI: path to a monophonic MIDI file. Not with `root_hz` |
 | `max_hz` | Highest harmonic frequency; listed expressions cycle up to it. Must be below Nyquist |
 | `strength_exponent` | `w_n = n ** exponent`; -1 by convention |
 | `odd_gain`, `even_gain` | Extra multipliers on odd / even harmonics |
 | `phases` | `"zero"` (all harmonics start at 0; buzzy) or `"random"` |
-| `random_seed` | Seed for the random phases; same seed, same file |
-| `fade_s` | Raised-cosine fade length at each end, in seconds |
+| `random_seed` | Seed for the random phases and jitter; same seed, same file |
+| `fade_s` | Raised-cosine fade length at the start and end of every note, in seconds (e.g. 0.01 for MIDI, 0.05 for a drone) |
+| `jitter_cents` | Standard deviation of each harmonic's random pitch drift, in cents; 0 = exact harmonics |
+| `jitter_s` | Spacing in seconds of the drift's random points (how slowly it moves) |
 | `harmonics` | List of `{n, expr}`, `n` = 1, 2, … in order: the metric expression for each harmonic in one cycle |
 
+The N52 configs in `json/` are a grid named
+`N52_drone_{R|G|B}_r{055|110|220}_{flat|odd4|even4}.json`: color channel
+(`B_avg`/`B_std` replaced by `R_` or `G_`), root frequency, and odd/even gain
+(1/1, 4/1, 1/4). `json/N52_drone_B_r055_flat_j5.json` adds 5 cents of jitter.
 `json/N52_drone.json` lists 37 expressions (`B_avg`, `B_std`, `B_avg/Gray_avg`,
 and products of `B_avg` or `B_avg/Gray_avg` with Gray metrics), cycled to
 20 kHz.
@@ -1757,7 +1836,7 @@ Rendering time grows with the number of harmonics: 363 harmonics over 394 s
 at 48 kHz takes about two minutes.
 
 Variants are separate config files: the output is named after the config
-file, so `json/N52_drone_odd2.json` writes `..._N52_drone_odd2.wav` beside
+file, so `json/N52_drone_B_r055_odd4.json` writes `..._N52_drone_B_r055_odd4.wav` beside
 `..._N52_drone.wav` without overwriting it.
 
 ### Output Files
@@ -1775,8 +1854,7 @@ machine you are on (see `CLAUDE.md`, Environment) and import it as audio.
 
 ### Roadmap
 
-Possible next iterations: small random detuning per harmonic (`detune_cents`;
-adds slow, video-independent shimmer), smoothing the metric weights (rank first, then
+Possible next iterations: velocity, smoothing the metric weights (rank first, then
 filter, the same order as the main pipeline), stereo placement, tempered or
 moving pitch, several voices, and a nonlinear map from weight to amplitude
 (e.g. in dB).
