@@ -5,6 +5,7 @@ This repository contains tools for video analysis, tempo mapping, and audio leve
 1. **Visual Metrics Pipeline** (`run_video_processing.py`) - Extracts comprehensive visual metrics from videos and generates MIDI CC tracks
 2. **Tempo Mapping** (`calculate_tempo_from_inverse.py`) - Generates variable tempo maps from zoom/speed data
 3. **Audio Leveling** (`audio_level_curve.py` + `curve_to_dawproject.py`) - Computes a volume-riding curve from an audio file and delivers it to Cubase as a DAWproject automation envelope
+4. **Audio Synthesis** (`metrics_to_wav.py`) - Renders video metrics directly to a WAV file as a harmonic drone whose timbre follows the video
 
 ---
 
@@ -13,6 +14,7 @@ This repository contains tools for video analysis, tempo mapping, and audio leve
 - [Quick Start: Visual Metrics Pipeline](#quick-start-visual-metrics-pipeline)
 - [Quick Start: Tempo Mapping](#quick-start-tempo-mapping)
 - [Quick Start: Audio Leveling](#quick-start-audio-leveling)
+- [Quick Start: Audio Synthesis](#quick-start-audio-synthesis)
 - [Entry Points](#entry-points)
   - [Visual Metrics Pipeline](#1-run_video_processingpy---visual-metrics-pipeline)
   - [Tempo Mapping](#2-calculate_tempo_from_inversepy---variable-tempo-mapping)
@@ -27,6 +29,7 @@ This repository contains tools for video analysis, tempo mapping, and audio leve
   - [Choosing the Mean Weighting Distance](#choosing-the-mean-weighting-distance)
   - [Choosing the Target](#choosing-the-target)
   - [Worked Example](#worked-example)
+- [Audio Synthesis: Metric-Driven Drone](#audio-synthesis-metric-driven-drone-metrics_to_wavpy)
 - [Future Integration](#future-integration-tempo-synchronized-visual-metrics)
 - [Additional Utilities](#additional-utilities)
 
@@ -131,6 +134,20 @@ Both stages document themselves:
 python audio_level_curve.py --help
 python curve_to_dawproject.py --help
 ```
+
+---
+
+## Quick Start: Audio Synthesis
+
+Render a video's metrics as a held harmonic drone, written straight to WAV.
+
+```bash
+# Needs the run's *_basic.csv (from process_video); the JSON names it
+python metrics_to_wav.py json/N52_drone.json
+# -> data/output/N52_..._default/N52_..._default_N52_drone.wav (+ _config.json, _plot.png)
+```
+
+See [Audio Synthesis: Metric-Driven Drone](#audio-synthesis-metric-driven-drone-metrics_to_wavpy).
 
 ---
 
@@ -1598,6 +1615,143 @@ Also covers the silence gate and the loess edge behavior.
 
 ---
 
+## Audio Synthesis: Metric-Driven Drone (metrics_to_wav.py)
+
+### Overview
+
+A new direction, built up iteratively: instead of handing automation to a DAW,
+render the video's metrics directly as audio. The first iteration is a single
+note held for the length of the video, a **drone**, whose harmonic balance
+follows the picture.
+
+The note is a sum of **exact integer harmonics** of a root frequency (no
+tempering): with the default root A1 = 55 Hz, harmonic *n* sits at *n* x 55 Hz.
+Each harmonic's loudness is driven by one metric expression.
+
+No extra packages are needed: synthesis is NumPy, ranking is SciPy, and the
+WAV is written by SoundFile, all already in `requirements.txt`.
+
+### Signal
+
+```
+y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 t)  /  sum_n w_n
+```
+
+- **`w_n`, background strength**: `n ** strength_exponent`, multiplied by
+  `odd_gain` for odd *n* (including the fundamental) or `even_gain` for even
+  *n*. Exponent -1 gives 1/n (sawtooth-like balance); -2 is darker; 0 makes all
+  harmonics equal. Raising `odd_gain` relative to `even_gain` moves the timbre
+  toward a hollow, clarinet/square-like sound, and the reverse emphasizes the
+  octaves.
+- **`m_n(t)`, metric weight**: the harmonic's expression, rank-normalized (see
+  below), linearly interpolated between CSV rows.
+- **Phase**: every sine is 0 at t = 0, and only its amplitude changes over
+  time, so the waveform is continuous.
+- **Scale**: dividing by `sum w_n` is a fixed, data-independent gain that
+  guarantees |y| <= 1. The level is therefore comparable between videos, but
+  usually well below full scale (the N52 test peaks at about -8 dBFS).
+
+### Rank Normalization
+
+Each expression is evaluated on every row of the CSV, then replaced by its
+**rank**: the lowest value maps to 0, the highest to 1, and everything else is
+spaced evenly by order (tied values share their average rank). Rank
+normalization ignores the metric's units and outliers, so every harmonic uses
+its full 0-1 range over the video. A constant expression cannot be ranked and
+is an error.
+
+### Metric Expressions
+
+Expressions combine **raw** metric columns from the run's `*_basic.csv` using
+only **multiplication, division, and parentheses**:
+
+```
+B_avg
+B_avg / Gray_avg
+(B_avg / Gray_avg) * Gray_cmv
+```
+
+Any other character (`+`, `-`, numbers with decimal points, functions) is
+rejected, and so are unknown column names. A result containing NaN or
+infinity, e.g. from dividing by zero, stops the run. The ranking happens
+**after** the expression is computed, so `B_avg / Gray_avg` ranks the ratio,
+not the two ranks.
+
+The processed `*_values.csv` is not used: its columns are already ranked,
+smoothed and stretched, and it lacks many raw metrics (e.g. `Gray_cmv`).
+
+### Timing
+
+The CSV's `frame_count_list` gives each row's frame; rows must be evenly
+spaced. Row *k* sits at `frame_k / frames_per_second` seconds. The file lasts
+`(last_frame + step) / frames_per_second`, so each row covers its whole
+interval and the last row's value is held to the end (394 rows every 30 frames
+at 30 fps = 394.000 s, the length of the N52 video). Between rows, each
+harmonic's amplitude is interpolated linearly at the audio sample rate, so
+there are no steps and no zipper noise.
+
+There is **no smoothing** in this iteration: the amplitudes follow the raw
+1-second rows, which can swing from 0 to 1 within a few seconds.
+
+### Configuration
+
+A JSON file, kept in `json/`. Every key is required.
+
+```json
+{
+  "input_csv": "data/output/N52_Sin2B-A1DpiB256k-f-C2-AN245_default/N52_Sin2B-A1DpiB256k-f-C2-AN245_default_basic.csv",
+  "frames_per_second": 30,
+  "sample_rate": 48000,
+  "root_hz": 55.0,
+  "strength_exponent": -1.0,
+  "odd_gain": 1.0,
+  "even_gain": 1.0,
+  "harmonics": [
+    {"n": 1, "expr": "B_avg"},
+    {"n": 2, "expr": "B_std"},
+    {"n": 3, "expr": "B_avg / Gray_avg"},
+    {"n": 4, "expr": "(B_avg / Gray_avg) * Gray_std"}
+  ]
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `input_csv` | The run's raw metrics, `*_basic.csv` |
+| `frames_per_second` | Video frame rate; the CSV holds frame numbers only |
+| `sample_rate` | Output sample rate in Hz |
+| `root_hz` | Fundamental frequency (55 Hz = A1) |
+| `strength_exponent` | `w_n = n ** exponent`; -1 by convention |
+| `odd_gain`, `even_gain` | Extra multipliers on odd / even harmonics |
+| `harmonics` | List of `{n, expr}`: harmonic number and its metric expression |
+
+`json/N52_drone.json` assigns 20 harmonics: `B_avg`, `B_std`, `B_avg/Gray_avg`,
+then `(B_avg/Gray_avg)` times each of `Gray_std`, `cmv`, `crc`, `czd`, `dcd`,
+`dcl`, `ed0`-`ed2`, `ee0`-`ee2`, `es0`-`es2`, `rad`, `rss`. A harmonic at or
+above the Nyquist frequency is an error.
+
+### Output Files
+
+Written next to the input CSV, named `{run}_{config_stem}`:
+
+| File | Contents |
+|---|---|
+| `{run}_{config_stem}.wav` | Mono, 32-bit float, at `sample_rate` |
+| `{run}_{config_stem}_config.json` | Copy of the config used |
+| `{run}_{config_stem}_plot.png` | Each harmonic's amplitude `w_n * m_n` over time |
+
+To hear it in Cubase, copy the WAV to the Cubase hand-off folder for the
+machine you are on (see `CLAUDE.md`, Environment) and import it as audio.
+
+### Roadmap
+
+Possible next iterations: smoothing the metric weights (rank first, then
+filter, the same order as the main pipeline), stereo placement, tempered or
+moving pitch, several voices, and a nonlinear map from weight to amplitude
+(e.g. in dB).
+
+---
+
 ## Dependencies
 
 Install via `pip install -r requirements.txt`:
@@ -1609,7 +1763,7 @@ Install via `pip install -r requirements.txt`:
 - **Matplotlib** - Plotting and PDF generation
 - **SciPy** - Statistical functions
 - **scikit-learn** - Machine learning (Gaussian mixture models)
-- **SoundFile** - Audio file reading and writing (audio leveling workflow)
+- **SoundFile** - Audio file reading and writing (audio leveling and audio synthesis)
 
 Optional:
 

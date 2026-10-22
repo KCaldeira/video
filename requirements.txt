@@ -27,7 +27,8 @@ openpyxl==3.1.5
 # schema/dawproject/Project.xsd on every write)
 xmlschema==4.3.2
 
-# Audio file reading and writing (audio leveling workflow)
+# Audio file reading and writing (audio leveling workflow; also writes the
+# metrics_to_wav.py synthesis output)
 # Wraps libsndfile; reads 24-bit WAV natively and MP3 via libsndfile >= 1.1
 soundfile==0.14.0
 

@@ -55,9 +55,9 @@ The processing uses separate dictionaries for each transformation stage:
 
 - **DAW: Cubase 15.0.30** (Windows). Assume this version for any DAWproject or
   MIDI question; do not ask which DAW or version.
-- Windows drives visible from WSL: `C:` and `D:` only, as `/mnt/c` and
-  `/mnt/d`. `E:` is not mounted. To hand a file to Cubase, write it under
-  `/mnt/d/`.
+- **The repo is used on two machines (desktop and laptop).** Drive letters,
+  Cubase project folders and where to hand files to Cubase differ, and are
+  recorded per machine in `~/.claude/CLAUDE.md`, not here.
 
 **Two Cubase versions are installed (14 and 15).** The Windows file
 association for `.dawproject` and `.cpr` opens **14**, while the desktop
@@ -132,6 +132,15 @@ invariants for this workflow:
   embeds the source audio byte for byte.
 - Outputs go directly in `data/output/` named `{input_stem}_{tag}_*`, where
   the tag encodes the curve-shaping settings (e.g. `c28_gau15`).
+
+### Audio Synthesis (separate from the video pipeline)
+```bash
+python metrics_to_wav.py json/N52_drone.json
+```
+Renders a harmonic drone from a run's raw `*_basic.csv`: harmonic n of
+`root_hz` has amplitude `n**strength_exponent * odd/even_gain * rank(expr)`,
+linearly interpolated between rows, divided by the sum of strengths. Expressions
+allow only `*`, `/` and parentheses. Output is a 32-bit float WAV next to the CSV.
 
 ### Directory Structure
 - Videos: `data/input/`
