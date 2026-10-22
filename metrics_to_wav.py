@@ -13,6 +13,10 @@ expression evaluated on the raw metrics CSV (`*_basic.csv`):
     m_n(t) = rank of the expression's value, mapped so the lowest row is 0
              and the highest is 1, linearly interpolated between rows
 
+The listed expressions are cycled up to `max_hz`: with L entries, harmonic n
+uses entry ((n - 1) mod L) + 1, so harmonic L + 1 follows the same metric as
+harmonic 1. The sum runs over every harmonic up to `max_hz`.
+
 Every sine starts at phase 0 at t = 0 and only its amplitude changes, so the
 waveform is continuous. Dividing by sum(w_n) bounds |y| by 1 regardless of
 the data.
@@ -103,32 +107,46 @@ def main():
     control_times = frames / fps
     duration = (frames[-1] + step) / fps
     n_samples = int(round(duration * sample_rate))
-    top_hz = root_hz * max(h["n"] for h in config["harmonics"])
-    if top_hz >= sample_rate / 2:
-        raise ValueError(f"Highest harmonic {top_hz} Hz is at or above Nyquist ({sample_rate / 2} Hz)")
+    max_hz = config["max_hz"]
+    if max_hz >= sample_rate / 2:
+        raise ValueError(f"max_hz {max_hz} is at or above Nyquist ({sample_rate / 2} Hz)")
+    n_max = int(max_hz // root_hz)
 
+    listed_n = [entry["n"] for entry in config["harmonics"]]
+    if listed_n != list(range(1, len(listed_n) + 1)):
+        raise ValueError(f"Harmonics must be listed as n = 1, 2, ... in order; got {listed_n}")
+    if len(listed_n) > n_max:
+        raise ValueError(f"{len(listed_n)} harmonics listed but only {n_max} fit below {max_hz} Hz")
+
+    # One entry per listed expression; `members` are all harmonics n <= n_max
+    # that cycle onto it.
     harmonics = []
     for entry in config["harmonics"]:
         values = evaluate_expression(df, entry["expr"])
+        members = np.arange(entry["n"], n_max + 1, len(listed_n))
         harmonics.append({
             "n": entry["n"],
             "expr": entry["expr"],
             "strength": harmonic_strength(entry["n"], config),
+            "members": members,
             "weight": rank_normalize(values, entry["expr"]),
         })
-    total_strength = sum(h["strength"] for h in harmonics)
+    total_strength = sum(harmonic_strength(n, config) for n in range(1, n_max + 1))
 
     print(f"Input:    {config['input_csv']}")
     print(f"Rows:     {len(df)} every {step} frames at {fps} fps -> {duration:.3f} s")
-    print(f"Root:     {root_hz} Hz, {len(harmonics)} harmonics (top {top_hz} Hz)")
+    print(f"Root:     {root_hz} Hz, {n_max} harmonics up to {n_max * root_hz} Hz, "
+          f"cycling {len(harmonics)} listed expressions")
     print(f"Strength: exponent {config['strength_exponent']}, "
           f"odd {config['odd_gain']}, even {config['even_gain']}, sum {total_strength:.4f}")
 
     t = np.arange(n_samples) / sample_rate
     signal = np.zeros(n_samples)
     for h in harmonics:
-        envelope = np.interp(t, control_times, h["weight"])
-        signal += h["strength"] * envelope * np.sin(2 * np.pi * h["n"] * root_hz * t)
+        carrier = np.zeros(n_samples)
+        for n in h["members"]:
+            carrier += harmonic_strength(n, config) * np.sin(2 * np.pi * n * root_hz * t)
+        signal += np.interp(t, control_times, h["weight"]) * carrier
     signal /= total_strength
 
     csv_stem = os.path.splitext(os.path.basename(config["input_csv"]))[0]

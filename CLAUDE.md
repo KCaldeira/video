@@ -139,7 +139,8 @@ python metrics_to_wav.py json/N52_drone.json
 ```
 Renders a harmonic drone from a run's raw `*_basic.csv`: harmonic n of
 `root_hz` has amplitude `n**strength_exponent * odd/even_gain * rank(expr)`,
-linearly interpolated between rows, divided by the sum of strengths. Expressions
+linearly interpolated between rows, divided by the sum of strengths. The listed
+expressions cycle up to `max_hz` (harmonic L+1 reuses entry 1). Expressions
 allow only `*`, `/` and parentheses. Output is a 32-bit float WAV next to the CSV.
 
 ### Directory Structure

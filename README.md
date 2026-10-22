@@ -1645,6 +1645,12 @@ y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 t)  /  sum_n w_n
   octaves.
 - **`m_n(t)`, metric weight**: the harmonic's expression, rank-normalized (see
   below), linearly interpolated between CSV rows.
+- **Cycling**: the listed expressions repeat up to `max_hz`. With L listed
+  entries, harmonic *n* uses entry `((n - 1) mod L) + 1`, so harmonic L + 1
+  follows the same metric as harmonic 1, L + 2 the same as 2, and so on. A
+  short list therefore still fills the spectrum: 37 entries at 55 Hz with
+  `max_hz` 20000 give 363 harmonics. The background strength `w_n` uses the
+  actual *n*, so each cycle is quieter than the last.
 - **Phase**: every sine is 0 at t = 0, and only its amplitude changes over
   time, so the waveform is continuous.
 - **Scale**: dividing by `sum w_n` is a fixed, data-independent gain that
@@ -1703,6 +1709,7 @@ A JSON file, kept in `json/`. Every key is required.
   "frames_per_second": 30,
   "sample_rate": 48000,
   "root_hz": 55.0,
+  "max_hz": 20000.0,
   "strength_exponent": -1.0,
   "odd_gain": 1.0,
   "even_gain": 1.0,
@@ -1721,14 +1728,17 @@ A JSON file, kept in `json/`. Every key is required.
 | `frames_per_second` | Video frame rate; the CSV holds frame numbers only |
 | `sample_rate` | Output sample rate in Hz |
 | `root_hz` | Fundamental frequency (55 Hz = A1) |
+| `max_hz` | Highest harmonic frequency; listed expressions cycle up to it. Must be below Nyquist |
 | `strength_exponent` | `w_n = n ** exponent`; -1 by convention |
 | `odd_gain`, `even_gain` | Extra multipliers on odd / even harmonics |
-| `harmonics` | List of `{n, expr}`: harmonic number and its metric expression |
+| `harmonics` | List of `{n, expr}`, `n` = 1, 2, … in order: the metric expression for each harmonic in one cycle |
 
-`json/N52_drone.json` assigns 20 harmonics: `B_avg`, `B_std`, `B_avg/Gray_avg`,
-then `(B_avg/Gray_avg)` times each of `Gray_std`, `cmv`, `crc`, `czd`, `dcd`,
-`dcl`, `ed0`-`ed2`, `ee0`-`ee2`, `es0`-`es2`, `rad`, `rss`. A harmonic at or
-above the Nyquist frequency is an error.
+`json/N52_drone.json` lists 37 expressions (`B_avg`, `B_std`, `B_avg/Gray_avg`,
+and products of `B_avg` or `B_avg/Gray_avg` with Gray metrics), cycled to
+20 kHz.
+
+Rendering time grows with the number of harmonics: 363 harmonics over 394 s
+at 48 kHz takes about two minutes.
 
 ### Output Files
 
@@ -1738,7 +1748,7 @@ Written next to the input CSV, named `{run}_{config_stem}`:
 |---|---|
 | `{run}_{config_stem}.wav` | Mono, 32-bit float, at `sample_rate` |
 | `{run}_{config_stem}_config.json` | Copy of the config used |
-| `{run}_{config_stem}_plot.png` | Each harmonic's amplitude `w_n * m_n` over time |
+| `{run}_{config_stem}_plot.png` | Amplitude `w_n * m_n` over time for the first cycle (the listed harmonics) |
 
 To hear it in Cubase, copy the WAV to the Cubase hand-off folder for the
 machine you are on (see `CLAUDE.md`, Environment) and import it as audio.
