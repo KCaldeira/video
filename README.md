@@ -1642,12 +1642,11 @@ WAV is written by SoundFile, all already in `requirements.txt`.
 y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 (t - t_start) + phi_n + drift_n(t))  /  sum_n w_n
 ```
 
-- **`w_n`, background strength**: `n ** strength_exponent`, multiplied by
-  `odd_gain` for odd *n* (including the fundamental) or `even_gain` for even
-  *n*. Exponent -1 gives 1/n (sawtooth-like balance); -2 is darker; 0 makes all
-  harmonics equal. Raising `odd_gain` relative to `even_gain` moves the timbre
-  toward a hollow, clarinet/square-like sound, and the reverse emphasizes the
-  octaves.
+- **`w_n`, background strength**: `n ** strength_exponent` times the
+  row's `gain`. Exponent -1 gives 1/n (sawtooth-like balance); -2 is darker; 0
+  makes all harmonics equal. The per-row `gain` shapes the spectrum by hand:
+  raising the odd rows (1, 3, 5, 7) moves the timbre toward a hollow,
+  clarinet/square-like sound, raising the even rows emphasizes the octaves.
 - **`m_n(t)`, metric weight**: the harmonic's expression, rank-normalized (see
   below), linearly interpolated between CSV rows.
 - **Which harmonics** (`cycle`): with `"cycle": true` the list must be
@@ -1726,25 +1725,26 @@ point only **octave doublings of lower harmonics** remain, the way organ
 ranks and Hammond drawbars build a tone. The gaps then double every octave
 (110, 220, 440 Hz, ...), too fast to be heard as pulsing.
 
-`json/N52_drone_B_r055_flat_oct8.json` keeps harmonics 1-8, then every
-doubling of 4, 5, 6 and 7 (n whose odd part is at most 7), up to 20 kHz:
+All N52 configs use this pattern: harmonics 1-8, then every doubling of 4,
+5, 6 and 7 (n whose odd part is at most 7):
 
 ```
-1 2 3 4 5 6 7 8 | 10 12 14 16 | 20 24 28 32 | 40 48 56 64 | 80 ... 320
+1 2 3 4 5 6 7 8 | 10 12 14 16 | 20 24 28 32 | 40 48 56 64 | 80 ... 1280
 ```
 
-That is 29 harmonics instead of 363, with the same four-note shape (root,
-major third, fifth, harmonic seventh) in each octave above harmonic 8. Its
-expressions are the first 29 of the 37 in `N52_drone_B_r055_flat.json`, in
-order. Rendering is about ten times faster.
+Above harmonic 8 each octave has the same four-note shape (root, major
+third, fifth, harmonic seventh). The 37 rows run to n = 1280 so that all 37
+expressions are kept; rows above `max_hz` are skipped, so at 55 Hz the top
+sounding harmonic is 320 (29 harmonics), at 110 Hz 160, at 220 Hz 80.
+Rendering is about ten times faster than with every harmonic.
 
 Measured on N52 (envelope of everything above 500 Hz, four 2-second windows):
 
 | Render | Pulse at 55 Hz | All pulsing, 30-90 Hz |
 |---|---|---|
-| `B_r055_flat` (all harmonics) | 0.35 | 0.37 |
-| `B_r055_flat_j4` (4 cents jitter) | 0.06 | 0.29 |
-| `B_r055_flat_oct8` (octave thinning) | 0.03 | 0.04 |
+| all 363 harmonics | 0.35 | 0.37 |
+| all 363 harmonics, 4 cents jitter | 0.06 | 0.29 |
+| octave thinning (first 29 expressions) | 0.03 | 0.04 |
 
 Jitter makes the beating irregular, while thinning removes it.
 
@@ -1825,20 +1825,23 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
   "sample_rate": 48000,
   "root_hz": 55.0,
   "max_hz": 20000.0,
-  "cycle": true,
-  "strength_exponent": -1.0,
-  "odd_gain": 1.0,
-  "even_gain": 1.0,
+  "cycle": false,
+  "strength_exponent": -2.0,
   "phases": "random",
   "random_seed": 1,
   "fade_s": 0.05,
   "jitter_cents": 0.0,
   "jitter_s": 0.3,
   "harmonics": [
-    {"n": 1, "expr": "B_avg"},
-    {"n": 2, "expr": "B_std"},
-    {"n": 3, "expr": "B_avg / Gray_avg"},
-    {"n": 4, "expr": "(B_avg / Gray_avg) * Gray_std"}
+    {"n": 1, "gain": 1.0, "expr": "B_avg"},
+    {"n": 2, "gain": 1.0, "expr": "B_std"},
+    {"n": 3, "gain": 1.0, "expr": "B_avg / Gray_avg"},
+    {"n": 4, "gain": 1.0, "expr": "(B_avg / Gray_avg) * Gray_std"},
+    {"n": 5, "gain": 1.0, "expr": "(B_avg / Gray_avg) * Gray_ed0"},
+    {"n": 6, "gain": 1.0, "expr": "(B_avg / Gray_avg) * Gray_ed1"},
+    {"n": 7, "gain": 1.0, "expr": "(B_avg / Gray_avg) * Gray_ed2"},
+    {"n": 8, "gain": 1.0, "expr": "(B_avg / Gray_avg) * Gray_ee0"},
+    {"n": 10, "gain": 1.0, "expr": "(B_avg / Gray_avg) * Gray_ee1"}
   ]
 }
 ```
@@ -1853,24 +1856,25 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
 | `max_hz` | Highest harmonic frequency; nothing above it sounds. Must be below Nyquist |
 | `cycle` | `true`: list is n = 1…L, cycled up to `max_hz`. `false`: exactly the listed n |
 | `strength_exponent` | `w_n = n ** exponent`; -1 by convention |
-| `odd_gain`, `even_gain` | Extra multipliers on odd / even harmonics |
 | `phases` | `"zero"` (all harmonics start at 0; buzzy) or `"random"` |
 | `random_seed` | Seed for the random phases and jitter; same seed, same file |
 | `fade_s` | Raised-cosine fade length at the start and end of every note, in seconds (e.g. 0.01 for MIDI, 0.05 for a drone) |
 | `jitter_cents` | Standard deviation of each harmonic's random pitch drift, in cents; 0 = exact harmonics |
 | `jitter_s` | Spacing in seconds of the drift's random points (how slowly it moves) |
-| `harmonics` | List of `{n, expr}` in increasing `n`: the metric expression for each harmonic (one cycle when `cycle` is true) |
+| `harmonics` | List of `{n, gain, expr}` in increasing `n`: harmonic number, its gain multiplier, and its metric expression (one cycle when `cycle` is true) |
 
 The N52 configs in `json/` are a grid named
 `N52_drone_{R|G|B}_r{055|110|220}_{flat|odd4|even4}.json`: color channel
-(`B_avg`/`B_std` replaced by `R_` or `G_`), root frequency, and odd/even gain
-(1/1, 4/1, 1/4). `json/N52_drone_B_r055_flat_j5.json` adds 5 cents of jitter.
-`json/N52_drone.json` lists 37 expressions (`B_avg`, `B_std`, `B_avg/Gray_avg`,
-and products of `B_avg` or `B_avg/Gray_avg` with Gray metrics), cycled to
-20 kHz.
+(`B_avg`/`B_std` replaced by `R_` or `G_`), root frequency, and row gains:
+`flat` all 1.0, `odd4` 4.0 on the odd rows (1, 3, 5, 7), `even4` 4.0 on the
+even rows. `json/N52_drone_B_r055_flat_j{1,2,4,5,8}.json` add 1-8 cents of
+jitter. `json/N52_drone.json` is the original B-channel config. All 37
+expressions are `B_avg`, `B_std`, `B_avg/Gray_avg`, and products of `B_avg`
+or `B_avg/Gray_avg` with Gray metrics.
 
-Rendering time grows with the number of harmonics: 363 harmonics over 394 s
-at 48 kHz takes about two minutes.
+Rendering time grows with the number of harmonics: every harmonic of 55 Hz
+(363) over 394 s at 48 kHz takes about two minutes; the 29-harmonic octave
+pattern about ten seconds.
 
 Variants are separate config files: the output is named after the config
 file, so `json/N52_drone_B_r055_odd4.json` writes `..._N52_drone_B_r055_odd4.wav` beside
