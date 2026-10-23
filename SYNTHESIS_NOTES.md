@@ -58,6 +58,12 @@ Configs: all `json/N52_drone_octave/N52_drone_*` (37 rows, octave pattern 1-8 th
 
 ## Ideas to try
 
+- **Template `000`** (rendered 2026-10-23, `json/N52_drone_000/`, 18 files:
+  R/G/B x 55/110 Hz x flat/odd4/even4): 6 harmonics, every one scaled by
+  `C_avg / Gray_avg` (1: the ratio alone; 2-5: times `Gray_std`, `Gray_es1`,
+  `Gray_ee1`, `Gray_ed1`; 6: times `C_std / Gray_std`), 4 cents jitter,
+  30 dB weights, exponent -1.
+
 - **Harmonics 1-6 only** (rendered 2026-10-22, `json/N52_drone_h6/`, same
   R/G/B x 55/110/220 x flat/odd4/even4 grid): octaves, fifths and the major
   third only; no 7th, nothing crowded up high. To get higher partials,

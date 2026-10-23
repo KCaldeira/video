@@ -1863,9 +1863,16 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
 | `jitter_s` | Spacing in seconds of the drift's random points (how slowly it moves) |
 | `harmonics` | List of `{n, gain, expr}` in increasing `n`: harmonic number, its gain multiplier, and its metric expression (one cycle when `cycle` is true) |
 
-The N52 configs are two sets, each a grid over color channel, root
-frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and `flat` all 1.0,
-`odd4` 4.0 on the odd rows, `even4` 4.0 on the even rows):
+The N52 configs are sets in subfolders of `json/`, each a grid over color
+channel, root frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and
+`flat` all 1.0, `odd4` 4.0 on the odd rows, `even4` 4.0 on the even rows):
+
+- **`json/N52_drone_000/N52_drone_*_000.json`**: 6 harmonics, roots 55 and
+  110 Hz only, 4 cents of jitter. Every harmonic is normalized by the
+  channel's brightness relative to gray: `C_avg / Gray_avg`, then that times
+  `Gray_std`, `Gray_es1`, `Gray_ee1`, `Gray_ed1`, and `(C_std / Gray_std)`
+  (C = the channel). Built from the template
+  `N52_drone_B_r055_flat_000.json`.
 
 - **`json/N52_drone_h6/N52_h6_*.json`**: harmonics 1-6 only, for layering
   several tracks rooted at different pitches instead of extending the
