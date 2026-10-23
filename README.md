@@ -143,8 +143,8 @@ Render a video's metrics as a held harmonic drone, written straight to WAV.
 
 ```bash
 # Needs the run's *_basic.csv (from process_video); the JSON names it
-python metrics_to_wav.py json/N52_drone.json
-# -> data/output/N52_..._default/N52_..._default_N52_drone.wav (+ _config.json, _plot.png)
+python metrics_to_wav.py json/N52_drone_h6/N52_h6_G_r110_flat.json
+# -> data/output/N52_..._default/N52_..._default_N52_h6_G_r110_flat.wav (+ _config.json, _plot.png)
 ```
 
 See [Audio Synthesis: Metric-Driven Drone](#audio-synthesis-metric-driven-drone-metrics_to_wavpy).
@@ -1863,21 +1863,27 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
 | `jitter_s` | Spacing in seconds of the drift's random points (how slowly it moves) |
 | `harmonics` | List of `{n, gain, expr}` in increasing `n`: harmonic number, its gain multiplier, and its metric expression (one cycle when `cycle` is true) |
 
-The N52 configs in `json/` are a grid named
-`N52_drone_{R|G|B}_r{055|110|220}_{flat|odd4|even4}.json`: color channel
-(`B_avg`/`B_std` replaced by `R_` or `G_`), root frequency, and row gains:
-`flat` all 1.0, `odd4` 4.0 on the odd rows (1, 3, 5, 7), `even4` 4.0 on the
-even rows. `json/N52_drone_B_r055_flat_j{1,2,4,5,8}.json` add 1-8 cents of
-jitter. `json/N52_drone.json` is the original B-channel config. All 37
-expressions are `B_avg`, `B_std`, `B_avg/Gray_avg`, and products of `B_avg`
-or `B_avg/Gray_avg` with Gray metrics.
+The N52 configs are two sets, each a grid over color channel, root
+frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and `flat` all 1.0,
+`odd4` 4.0 on the odd rows, `even4` 4.0 on the even rows):
+
+- **`json/N52_drone_h6/N52_h6_*.json`**: harmonics 1-6 only, for layering
+  several tracks rooted at different pitches instead of extending the
+  series. Expressions: `C_avg`, `C_std`, `C_avg / Gray_avg`, then
+  `(C_avg / Gray_avg)` times `Gray_ed1`, `Gray_ee1`, `Gray_es1` (C = the
+  channel).
+- **`json/N52_drone_octave/N52_drone_*.json`**: the 37-row octave pattern
+  (1-8, then 10, 12, 14, 16, 20, ...). Expressions: `C_avg`, `C_std`,
+  `C_avg/Gray_avg`, and products of `C_avg` or `C_avg/Gray_avg` with Gray
+  metrics. `N52_drone_B_r055_flat_j{1,2,4,5,8}.json` add 1-8 cents of
+  jitter; `N52_drone.json` is the original B-channel config.
 
 Rendering time grows with the number of harmonics: every harmonic of 55 Hz
 (363) over 394 s at 48 kHz takes about two minutes; the 29-harmonic octave
 pattern about ten seconds.
 
 Variants are separate config files: the output is named after the config
-file, so `json/N52_drone_B_r055_odd4.json` writes `..._N52_drone_B_r055_odd4.wav` beside
+file, so `json/N52_drone_octave/N52_drone_B_r055_odd4.json` writes `..._N52_drone_B_r055_odd4.wav` beside
 `..._N52_drone.wav` without overwriting it.
 
 ### Output Files
@@ -2258,6 +2264,7 @@ python frame_similarity.py data/input/N48 --max-frames 400 -o data/output/N48_sm
 
 - **`README.md`** (this file) - Main documentation and usage guide
 - **`CLAUDE.md`** - Coding guidelines and architecture principles for AI assistants
+- **`SYNTHESIS_NOTES.md`** - Listening notes, hypotheses and ideas for the audio synthesis (`metrics_to_wav.py`)
 - **`default_config.json`** - Configuration template with all parameters
 - **`example_config.json`** - Working example configuration
 

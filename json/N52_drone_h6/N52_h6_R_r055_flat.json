@@ -1,0 +1,23 @@
+{
+  "input_csv": "data/output/N52_Sin2B-A1DpiB256k-f-C2-AN245_default/N52_Sin2B-A1DpiB256k-f-C2-AN245_default_basic.csv",
+  "frames_per_second": 30,
+  "sample_rate": 48000,
+  "root_hz": 55.0,
+  "max_hz": 20000.0,
+  "cycle": false,
+  "strength_exponent": -1.0,
+  "weight_range_db": 30.0,
+  "phases": "random",
+  "random_seed": 1,
+  "fade_s": 0.05,
+  "jitter_cents": 0.0,
+  "jitter_s": 0.3,
+  "harmonics": [
+    {"n": 1, "gain": 1.0, "expr": "R_avg"},
+    {"n": 2, "gain": 1.0, "expr": "R_std"},
+    {"n": 3, "gain": 1.0, "expr": "R_avg / Gray_avg"},
+    {"n": 4, "gain": 1.0, "expr": "(R_avg / Gray_avg) * Gray_ed1"},
+    {"n": 5, "gain": 1.0, "expr": "(R_avg / Gray_avg) * Gray_ee1"},
+    {"n": 6, "gain": 1.0, "expr": "(R_avg / Gray_avg) * Gray_es1"}
+  ]
+}
