@@ -17,8 +17,14 @@ on the raw metrics CSV (`*_basic.csv`):
     y(t) = sum_n  w_n * m_n(t) * sin(2 pi n f0 (t - t_start) + phi_n)  /  sum_n w_n
 
     w_n    = n ** strength_exponent * gain_n   (gain_n from the harmonic's row)
-    m_n(t) = rank of the expression's value, mapped so the lowest row is 0
+    m_n(t) = 10 ** (weight_range_db * (r_n(t) - 1) / 20)
+    r_n(t) = rank of the expression's value, mapped so the lowest row is 0
              and the highest is 1, linearly interpolated between rows
+
+The rank fraction is spread evenly over `weight_range_db` decibels: the lowest
+row sits at -weight_range_db dB, the highest at 0 dB. Rank is uniform in
+time, so each harmonic spends equal time at every level in that range, which
+the ear (roughly logarithmic in amplitude) hears as evenly spread loudness.
 
 Which harmonics sound is set by `cycle`:
   true   the list must be n = 1..L, and it is cycled up to `max_hz`: harmonic
@@ -82,6 +88,11 @@ def evaluate_expression(df, expr):
     if not np.all(np.isfinite(values)):
         raise ValueError(f"Expression {expr!r} produced non-finite values")
     return values
+
+
+def db_weight(rank_fraction, config):
+    """Map a 0-1 rank fraction evenly onto [-weight_range_db, 0] dB, as amplitude."""
+    return 10.0 ** (config["weight_range_db"] * (rank_fraction - 1) / 20)
 
 
 def rank_normalize(values, expr):
@@ -184,7 +195,7 @@ def render_note(start_s, end_s, f0, entries, control_times, config, rng):
         for n in group:
             drift = jitter_phase(n, f0, tau, config, rng) if jittered else 0.0
             carrier += harmonic_strength(n, entry["gain"], config) * np.sin(2 * np.pi * n * f0 * tau + phases[n] + drift)
-        samples += np.interp(t, control_times, entry["weight"]) * carrier
+        samples += db_weight(np.interp(t, control_times, entry["rank"]), config) * carrier
     samples /= total_strength
 
     n_fade_wanted = int(round(config["fade_s"] * sample_rate))
@@ -195,7 +206,7 @@ def render_note(start_s, end_s, f0, entries, control_times, config, rng):
     return samples, n_fade < n_fade_wanted
 
 
-def write_plot(out_path, control_times, entries, title):
+def write_plot(out_path, control_times, entries, config, title):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -203,11 +214,11 @@ def write_plot(out_path, control_times, entries, title):
     fig, ax = plt.subplots(figsize=(14, 7))
     cmap = plt.get_cmap("viridis")
     for i, h in enumerate(entries):
-        ax.plot(control_times, h["strength"] * h["weight"],
+        ax.plot(control_times, 20 * np.log10(h["strength"] * db_weight(h["rank"], config)),
                 color=cmap(i / max(len(entries) - 1, 1)), linewidth=0.9,
                 label=f"{h['n']}: {h['expr']}")
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Amplitude  w_n * m_n  (before / sum w_n)")
+    ax.set_ylabel("Level  20 log10(w_n * m_n)  dB  (before / sum w_n)")
     ax.set_title(title)
     ax.legend(fontsize=7, ncol=2, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     fig.tight_layout()
@@ -261,7 +272,7 @@ def main():
             "expr": entry["expr"],
             "gain": entry["gain"],
             "strength": harmonic_strength(entry["n"], entry["gain"], config),
-            "weight": rank_normalize(values, entry["expr"]),
+            "rank": rank_normalize(values, entry["expr"]),
         })
 
     duration = max(video_duration, max(end for _, end, _ in notes))
@@ -279,6 +290,7 @@ def main():
     print(f"Harmonics: up to {config['max_hz']} Hz, {len(entries)} listed, cycle {config['cycle']}")
     print(f"Phases:   {config['phases']} (seed {config['random_seed']}), fade {config['fade_s']} s")
     print(f"Jitter:   {config['jitter_cents']} cents every {config['jitter_s']} s")
+    print(f"Weights:  rank spread evenly over {config['weight_range_db']} dB")
     print(f"Strength: exponent {config['strength_exponent']}, per-row gains "
           f"{sorted(set(entry['gain'] for entry in entries))}")
 
@@ -302,7 +314,7 @@ def main():
     wav_path = f"{out_base}.wav"
     sf.write(wav_path, signal, sample_rate, subtype=OUTPUT_SUBTYPE)
     shutil.copyfile(config_path, f"{out_base}_config.json")
-    write_plot(f"{out_base}_plot.png", control_times, entries, os.path.basename(out_base))
+    write_plot(f"{out_base}_plot.png", control_times, entries, config, os.path.basename(out_base))
 
     peak = float(np.max(np.abs(signal)))
     print(f"Peak:     {peak:.4f} ({20 * np.log10(peak):.2f} dBFS)")
