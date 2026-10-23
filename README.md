@@ -1748,6 +1748,39 @@ Measured on N52 (envelope of everything above 500 Hz, four 2-second windows):
 
 Jitter makes the beating irregular, while thinning removes it.
 
+### Speed-Driven Pitch
+
+WAV output is not limited to fixed MIDI pitches, so the pitch of every note
+can glide with the camera. With
+
+```json
+"pitch_mod": {"speed_file": "data/input/N52_speed.py", "min_fraction": 0.8333333333333334}
+```
+
+the speed file is read with `read_speed_data()` (one value per video frame,
+at `frames_per_second`). `*_speed.py` files hold **inverse** speed, so speed
+is `1 / value`. Speed is rank-normalized to 0-1, and the fundamental becomes
+
+```
+f(t) = f0 * min_fraction ** (1 - rank(t))
+```
+
+so the fastest moment plays at `f0` (`root_hz`, or the MIDI note) and the
+slowest at `f0 * min_fraction`. 5/6 is a just minor third (-315.6 cents),
+spread evenly in cents. On N52 the fastest value is shared by 21% of frames;
+that plateau sits exactly at `f0`. After the last frame the value is held.
+
+The frequency is turned into phase by summing it sample by sample (a running
+integral), and every harmonic n uses n times that phase, so all harmonics
+glide together and the tone stays exactly harmonic. The rank between frames
+is linearly interpolated, so the frequency is continuous and the phase is
+smooth: no clicks, even where the speed jumps. Jitter still applies on top.
+`max_hz` is never crossed, since the factor is at most 1. `"pitch_mod": null`
+keeps the pitch fixed and reproduces earlier output exactly.
+
+`json/N52_drone_001/` is `N52_drone_000` with this on (suffix `_001`). The
+plot gains a second panel showing the pitch in cents below the root.
+
 ### MIDI Notes
 
 With `"midi_file"` in place of `"root_hz"`, each note in the file becomes one
@@ -1861,12 +1894,19 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
 | `fade_s` | Raised-cosine fade length at the start and end of every note, in seconds (e.g. 0.01 for MIDI, 0.05 for a drone) |
 | `jitter_cents` | Standard deviation of each harmonic's random pitch drift, in cents; 0 = exact harmonics |
 | `jitter_s` | Spacing in seconds of the drift's random points (how slowly it moves) |
+| `pitch_mod` | `null`, or `{"speed_file", "min_fraction"}`: pitch glides with camera speed, fastest = f0, slowest = f0 * min_fraction |
 | `harmonics` | List of `{n, gain, expr}` in increasing `n`: harmonic number, its gain multiplier, and its metric expression (one cycle when `cycle` is true) |
 
 The N52 configs are sets in subfolders of `json/`, each a grid over color
 channel, root frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and
 `flat` all 1.0, `odd4` 4.0 on the odd rows, `even4` 4.0 on the even rows):
 
+- **`json/N52_drone_002/N52_drone_*_r052_*_002.json`**: subtler and lower:
+  root G#1 = 51.9130871975 Hz (`r052` in names), pitch gliding down at most
+  a just semitone (`min_fraction` 15/16 = 0.9375, -111.7 cents), so between
+  G#1 and about G1.
+- **`json/N52_drone_001/N52_drone_*_001.json`**: the `000` set with
+  speed-driven pitch (fastest = root, slowest a minor third lower).
 - **`json/N52_drone_000/N52_drone_*_000.json`**: 6 harmonics, roots 55 and
   110 Hz only, 4 cents of jitter. Every harmonic is normalized by the
   channel's brightness relative to gray: `C_avg / Gray_avg`, then that times

@@ -58,6 +58,17 @@ Configs: all `json/N52_drone_octave/N52_drone_*` (37 rows, octave pattern 1-8 th
 
 ## Ideas to try
 
+- **Set `002`** (rendered 2026-10-23, `json/N52_drone_002/`, 9 files: R/G/B
+  x flat/odd4/even4): more bass and a subtler glide. Root G#1 =
+  51.9130871975 Hz; slowest = 15/16 of it (a just semitone, -111.7 cents),
+  so the pitch moves between G#1 and about G1.
+
+- **Speed-driven pitch, set `001`** (rendered 2026-10-23,
+  `json/N52_drone_001/`): the `000` set with the fundamental gliding with
+  camera speed from `N52_speed.py`: fastest = root, slowest = root x 5/6 (a
+  minor third down), even in cents. The pitch curve shows many fast
+  excursions of 200-300 cents and long plateaus at the top (fastest).
+
 - **Template `000`** (rendered 2026-10-23, `json/N52_drone_000/`, 18 files:
   R/G/B x 55/110 Hz x flat/odd4/even4): 6 harmonics, every one scaled by
   `C_avg / Gray_avg` (1: the ratio alone; 2-5: times `Gray_std`, `Gray_es1`,

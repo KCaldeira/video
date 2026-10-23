@@ -55,6 +55,14 @@ Because the drift is in cents, upper harmonics move more Hz than the
 fundamental, so the pitch stays put while the upper harmonics slide in and out
 of alignment. `jitter_cents` 0 gives exact harmonics.
 
+Optional speed-driven pitch (`pitch_mod`, null to disable) glides every note's
+pitch with the camera's speed. The speed file (`*_speed.py`) holds inverse
+speed, one value per video frame; speed = 1 / value is rank-normalized, and the
+pitch is f0 * min_fraction ** (1 - rank): the fastest moment plays at f0, the
+slowest at f0 * min_fraction (5/6 = a minor third down), spread evenly in
+cents. The frequency is integrated into phase, and all harmonics move
+together, so the tone stays exactly harmonic and glides without clicks.
+
 Dividing by each note's sum(w_n) bounds |y| by 1 for a single note regardless
 of the data; overlapping notes can sum above 1.
 
@@ -73,6 +81,8 @@ import numpy as np
 import pandas as pd
 import soundfile as sf
 from scipy.stats import rankdata
+
+from speed_to_cc import read_speed_data
 
 OUTPUT_SUBTYPE = "FLOAT"
 FRAME_COLUMN = "frame_count_list"
@@ -142,6 +152,26 @@ def read_midi_notes(path):
     return sorted(notes), pitch_bends
 
 
+def load_pitch_curve(config):
+    """
+    Return (times_s, rank) of the speed driving the pitch, or None when
+    `pitch_mod` is null. The file holds inverse speed, one value per frame.
+    """
+    loaders = {
+        True: lambda: None,
+        False: lambda: speed_rank(config["pitch_mod"]["speed_file"], config["frames_per_second"]),
+    }
+    return loaders[config["pitch_mod"] is None]()
+
+
+def speed_rank(path, fps):
+    inverse_speed = np.asarray(read_speed_data(path), dtype="float64")
+    if np.any(inverse_speed <= 0):
+        raise ValueError(f"{path}: inverse-speed values must be > 0")
+    times = np.arange(len(inverse_speed)) / fps
+    return times, rank_normalize(1.0 / inverse_speed, f"speed from {path}")
+
+
 def jitter_phase(n, f0, tau, config, rng):
     """
     Extra phase (radians) of harmonic n from an independent random drift in
@@ -155,7 +185,7 @@ def jitter_phase(n, f0, tau, config, rng):
     return 2 * np.pi * np.cumsum(offset_hz) / config["sample_rate"]
 
 
-def render_note(start_s, end_s, f0, entries, control_times, config, rng):
+def render_note(start_s, end_s, f0, entries, control_times, pitch_curve, config, rng):
     """
     Render one note as an array of round(end_s * sr) - round(start_s * sr)
     samples. Returns (samples, fade_was_shortened).
@@ -188,13 +218,27 @@ def render_note(start_s, end_s, f0, entries, control_times, config, rng):
 
     t = (i0 + np.arange(i1 - i0)) / sample_rate  # video time, for the weights
     tau = t - i0 / sample_rate                   # note time, for the sines
+    # Phase of harmonic n before its starting phase and jitter, and the
+    # instantaneous fundamental (scalar when the pitch is fixed).
+    def glide():
+        times, rank = pitch_curve
+        ratio = config["pitch_mod"]["min_fraction"] ** (1 - np.interp(t, times, rank))
+        f_inst = f0 * ratio
+        cycles = np.concatenate(([0.0], np.cumsum(f_inst[:-1]))) / sample_rate
+        return f_inst, lambda n: 2 * np.pi * n * cycles
+    pitch_modes = {
+        True: lambda: (f0, lambda n: 2 * np.pi * n * f0 * tau),
+        False: glide,
+    }
+    f_inst, base_phase = pitch_modes[pitch_curve is None]()
+
     jittered = config["jitter_cents"] > 0
     samples = np.zeros(i1 - i0)
     for entry, group in zip(entries, members):
         carrier = np.zeros(i1 - i0)
         for n in group:
-            drift = jitter_phase(n, f0, tau, config, rng) if jittered else 0.0
-            carrier += harmonic_strength(n, entry["gain"], config) * np.sin(2 * np.pi * n * f0 * tau + phases[n] + drift)
+            drift = jitter_phase(n, f_inst, tau, config, rng) if jittered else 0.0
+            carrier += harmonic_strength(n, entry["gain"], config) * np.sin(base_phase(n) + phases[n] + drift)
         samples += db_weight(np.interp(t, control_times, entry["rank"]), config) * carrier
     samples /= total_strength
 
@@ -206,21 +250,28 @@ def render_note(start_s, end_s, f0, entries, control_times, config, rng):
     return samples, n_fade < n_fade_wanted
 
 
-def write_plot(out_path, control_times, entries, config, title):
+def write_plot(out_path, control_times, entries, pitch_curve, config, title):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(14, 7))
+    n_panels = 1 + (pitch_curve is not None)
+    fig, axes = plt.subplots(n_panels, 1, figsize=(14, 7 + 3 * (n_panels - 1)), sharex=True,
+                             squeeze=False, gridspec_kw={"height_ratios": [7, 3][:n_panels]})
+    ax = axes[0, 0]
     cmap = plt.get_cmap("viridis")
     for i, h in enumerate(entries):
         ax.plot(control_times, 20 * np.log10(h["strength"] * db_weight(h["rank"], config)),
                 color=cmap(i / max(len(entries) - 1, 1)), linewidth=0.9,
                 label=f"{h['n']}: {h['expr']}")
-    ax.set_xlabel("Time (s)")
     ax.set_ylabel("Level  20 log10(w_n * m_n)  dB  (before / sum w_n)")
     ax.set_title(title)
     ax.legend(fontsize=7, ncol=2, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    for times, rank in [pitch_curve] * (pitch_curve is not None):
+        cents = 1200 * np.log2(config["pitch_mod"]["min_fraction"]) * (1 - rank)
+        axes[1, 0].plot(times, cents, color="black", linewidth=0.8)
+        axes[1, 0].set_ylabel("Pitch, cents re root")
+    axes[-1, 0].set_xlabel("Time (s)")
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
@@ -290,6 +341,12 @@ def main():
     print(f"Harmonics: up to {config['max_hz']} Hz, {len(entries)} listed, cycle {config['cycle']}")
     print(f"Phases:   {config['phases']} (seed {config['random_seed']}), fade {config['fade_s']} s")
     print(f"Jitter:   {config['jitter_cents']} cents every {config['jitter_s']} s")
+    pitch_curve = load_pitch_curve(config)
+    for times, _ in [pitch_curve] * (pitch_curve is not None):
+        fraction = config["pitch_mod"]["min_fraction"]
+        print(f"Pitch:    speed from {config['pitch_mod']['speed_file']} ({len(times)} frames, "
+              f"{times[-1]:.1f} s); fastest x1, slowest x{fraction:.4f} "
+              f"({1200 * np.log2(fraction):.1f} cents)")
     print(f"Weights:  rank spread evenly over {config['weight_range_db']} dB")
     print(f"Strength: exponent {config['strength_exponent']}, per-row gains "
           f"{sorted(set(entry['gain'] for entry in entries))}")
@@ -298,7 +355,7 @@ def main():
     rng = np.random.default_rng(config["random_seed"])
     shortened = 0
     for start, end, hz in notes:
-        samples, was_shortened = render_note(start, end, hz, entries, control_times, config, rng)
+        samples, was_shortened = render_note(start, end, hz, entries, control_times, pitch_curve, config, rng)
         i0 = int(round(start * sample_rate))
         signal[i0:i0 + len(samples)] += samples
         shortened += was_shortened
@@ -314,7 +371,7 @@ def main():
     wav_path = f"{out_base}.wav"
     sf.write(wav_path, signal, sample_rate, subtype=OUTPUT_SUBTYPE)
     shutil.copyfile(config_path, f"{out_base}_config.json")
-    write_plot(f"{out_base}_plot.png", control_times, entries, config, os.path.basename(out_base))
+    write_plot(f"{out_base}_plot.png", control_times, entries, pitch_curve, config, os.path.basename(out_base))
 
     peak = float(np.max(np.abs(signal)))
     print(f"Peak:     {peak:.4f} ({20 * np.log10(peak):.2f} dBFS)")

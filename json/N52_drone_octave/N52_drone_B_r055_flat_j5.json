@@ -12,6 +12,7 @@
   "fade_s": 0.05,
   "jitter_cents": 5.0,
   "jitter_s": 0.3,
+  "pitch_mod": null,
   "harmonics": [
     {"n": 1, "gain": 1.0, "expr": "B_avg"},
     {"n": 2, "gain": 1.0, "expr": "B_std"},

@@ -182,7 +182,7 @@ linearly interpolated between rows, divided by the sum of strengths. The listed
 expressions cycle up to `max_hz` (harmonic L+1 reuses entry 1) when `cycle` is
 true; with `cycle` false exactly the listed n sound (e.g. octave thinning). Random phases,
 optional per-harmonic pitch jitter (`jitter_cents`), and a `fade_s` fade on
-every note. Expressions
+every note, optional speed-driven pitch glide (`pitch_mod`). Expressions
 allow only `*`, `/` and parentheses. Output is a 32-bit float WAV next to the CSV.
 
 ### Directory Structure
