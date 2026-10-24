@@ -58,6 +58,12 @@ Configs: all `json/N52_drone_octave/N52_drone_*` (37 rows, octave pattern 1-8 th
 
 ## Ideas to try
 
+- **Set `003`** (rendered 2026-10-23, `json/N52_drone_003/`, 9 files): as
+  `002` but root A0 = 27.5 Hz and n = 2, 3, 4, 5, 6, 8 (55, 82.5, 110, 137.5,
+  165, 220 Hz; no partial at 27.5 Hz), same expressions in row order, same
+  15/16 speed glide. Also rendered at roots 66 Hz (27.5 x 2 x 6/5, an
+  octave and a just minor third up), 110 and 220 Hz: 36 files in all.
+
 - **Set `002`** (rendered 2026-10-23, `json/N52_drone_002/`, 9 files: R/G/B
   x flat/odd4/even4): more bass and a subtler glide. Root G#1 =
   51.9130871975 Hz; slowest = 15/16 of it (a just semitone, -111.7 cents),

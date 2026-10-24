@@ -1901,6 +1901,12 @@ The N52 configs are sets in subfolders of `json/`, each a grid over color
 channel, root frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and
 `flat` all 1.0, `odd4` 4.0 on the odd rows, `even4` 4.0 on the even rows):
 
+- **`json/N52_drone_003/N52_drone_*_r{028|066|110|220}_*_003.json`**: as
+  `002` but root A0 = 27.5 Hz (`r028` in names; also 66 Hz = 27.5 x 2 x 6/5,
+  an octave and a just minor third up, and 110 and 220 Hz) with harmonics n = 2, 3, 4, 5, 6, 8 (rows
+  keep their `002` expressions in order), i.e. 55-220 Hz with no
+  fundamental: the 55 Hz series 1, 2, 3, 4 plus the fifths below and
+  between (82.5 and 137.5 Hz). `odd4` boosts n = 3, 5; `even4` n = 2, 4, 6, 8.
 - **`json/N52_drone_002/N52_drone_*_r052_*_002.json`**: subtler and lower:
   root G#1 = 51.9130871975 Hz (`r052` in names), pitch gliding down at most
   a just semitone (`min_fraction` 15/16 = 0.9375, -111.7 cents), so between
