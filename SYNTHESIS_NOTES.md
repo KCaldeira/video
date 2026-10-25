@@ -9,6 +9,16 @@ means, and what to try next. Newest entries at the top of each section.
 
 ## Listening log
 
+### 2026-10-24: "rattle" at 16.8 s in `B_r028_odd4_004` was clipping
+
+A buzzing rattle at 16.8 s was not in the file: the channel fader sat at
++6 dB, and 16.8 s is where the file's peak first passes 0.5 (-5.75 dBFS),
+so the boosted signal crossed 0 dBFS. The fader back at 0 dB fixed it.
+These drones peak up to about -3 dBFS and are bass-heavy (55 Hz partial
+up to -9 dBFS), so faders above +3 dB, or two tracks summed (peaks can add
+6 dB), can clip at the output. Turn down the Stereo Out fader rather than
+limiting each track.
+
 ### 2026-10-22: octave pattern, 30 dB weights, exponent -1
 
 Configs: all `json/N52_drone_octave/N52_drone_*` (37 rows, octave pattern 1-8 then 10, 12,
@@ -57,6 +67,27 @@ Configs: all `json/N52_drone_octave/N52_drone_*` (37 rows, octave pattern 1-8 th
 ---
 
 ## Ideas to try
+
+- **Set `006`** (rendered 2026-10-24, `json/N52_drone_006/`, 54 files: 6
+  channel orderings x roots 27.5, 55, 110 Hz x flat/odd4/even4): the
+  user's template (renamed `N52_drone_BGR_r055_flat_006.json`) mixes R, G,
+  B and Gray rows in one tone. The five other orderings of R, G, B are each
+  tagged by the channel at n = 2, 3, 5, to hear whether it matters which
+  colour drives which partial.
+
+- **Set `005`** (2026-10-24, `json/N52_drone_005/`, 27 configs: R/G/B x
+  roots 27.5, 55, 110 Hz x flat/odd4/even4; **only the 9 B configs
+  rendered**): the user's template `N52_drone_B_r055_flat_005.json`, the
+  `004` harmonic numbers with the expressions reassigned to rows. Gains
+  alternate by row position as in `004`.
+
+- **Set `004`** (rendered 2026-10-24, `json/N52_drone_004/`, 45 files: R/G/B
+  x roots 27.5, 55, 66, 110, 220 Hz x flat/odd4/even4), from the user's
+  template `N52_drone_B_r028_flat_004.json`: 14 rows, n = 2, 3, 4, 5, 6, 8,
+  10, 12, 16, 18, 20, 24, 27, 32, mostly even. Gains 4.0 and 1.0 alternate
+  down the rows (`odd4` starts with 4.0, `even4` with 1.0) rather than
+  following odd/even n. No pitch glide (`min_fraction` 1.0). The 55 Hz
+  series was added after the others.
 
 - **Set `003`** (rendered 2026-10-23, `json/N52_drone_003/`, 9 files): as
   `002` but root A0 = 27.5 Hz and n = 2, 3, 4, 5, 6, 8 (55, 82.5, 110, 137.5,

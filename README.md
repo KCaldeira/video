@@ -73,34 +73,27 @@ This repository contains tools for video analysis, tempo mapping, and audio leve
 
 ## Quick Start: Tempo Mapping
 
-1. **Prepare speed/zoom data**:
-   - Create a Python file with speed values (e.g., `data/input/N32_speed.py`)
-   - File should contain either `y_values = [...]` or `s = [...]`
+Turn a speed file into a MIDI tempo map in which faster camera motion means a
+faster tempo.
 
-2. **Edit parameters** in `calculate_tempo_from_inverse.py`:
-   ```python
-   # At bottom of file (around lines 875-910)
-   y_values_path = "data/input/N32_speed.py"
-   mean_tempo_bpm = 108.0
+```bash
+python calculate_tempo_from_inverse.py data/input/N52_speed.py \
+    -t 96 --log-scale -s 20 \
+    -o data/output/N52_tempo.mid --csv data/output/N52_tempo.csv
+```
 
-   # Choose mode:
-   use_log_scale = False  # False=LINEAR (inverse), True=LOG (symmetric)
-   scaling_param = 0.1    # LINEAR: 0.1=10% blend; LOG: 20.0=±20 BPM per octave
-   ```
+- The input is a `.py` file holding `s = [...]` or `y_values = [...]`: one
+  **inverse-speed** value per video frame (large = slow).
+- `-t` sets the average tempo; `--log-scale -s 20` changes it by 20 BPM each
+  time the speed doubles or halves.
+- Without `-o` / `--csv`, the outputs are written **next to the input file**
+  as `<input>_tempo.mid` and `<input>_tempo.csv` (e.g. in `data/input/`), so
+  pass both to keep them in `data/output/`.
+- Import the `.mid` into Cubase; its tempo events go to the Tempo Track.
 
-3. **Run tempo mapping**:
-   ```bash
-   python calculate_tempo_from_inverse.py
-   ```
-
-4. **Find outputs** in `data/output/`:
-   - `beat_tempos_inverse_108bpm.csv` - Frame-level tempo data
-   - `tempo_map_inverse_108bpm.mid` - MIDI with tempo changes and CC tracks
-
-**Example Configurations**:
-- **Constant tempo** (no zoom influence): `scaling_param = 0.0`
-- **Linear 10% blend**: `use_log_scale = False, scaling_param = 0.1`
-- **Log ±20 BPM per doubling**: `use_log_scale = True, scaling_param = 20.0`
+```bash
+python calculate_tempo_from_inverse.py --help
+```
 
 ---
 
@@ -175,54 +168,56 @@ python run_video_processing.py <config_file.json>
 
 ### 2. `calculate_tempo_from_inverse.py` - Variable Tempo Mapping
 
-Generates variable tempo maps where tempo is controlled by zoom/speed data. Supports two modes:
+Builds a MIDI tempo map, plus a per-frame CSV, in which tempo follows the
+camera's speed.
 
 **Usage**:
 ```bash
-# Edit the main section at bottom of file to configure paths and mode
-python calculate_tempo_from_inverse.py
+python calculate_tempo_from_inverse.py INPUT_FILE [-t MEAN_TEMPO] [-o OUTPUT]
+       [--csv CSV] [-s SCALING_PARAM] [--log-scale] [--fps 30]
+       [--division 480] [--cc-subsample 30]
 ```
 
-**What it does**:
-- Reads zoom/speed values from Python files (e.g., `N32_speed.py`)
-- Calculates frame-level tempo based on zoom rate (linear or log mode)
-- Generates tempo map CSV with per-frame tempo data
-- Creates MIDI file with:
-  - Frame-by-frame tempo changes
-  - Beat notes at variable intervals
-  - Multiple CC1 tracks representing zoom depth (Normal, Inverted, Deep/Medium/Shallow variants)
+| Argument | Default | Meaning |
+|---|---|---|
+| `input_file` | required | `.py` file with `s = [...]` or `y_values = [...]`, one inverse-speed value per frame (e.g. `data/input/N52_speed.py`). Only `.py` is accepted |
+| `-t`, `--mean-tempo` | 64.0 | Average tempo in BPM |
+| `-o`, `--output` | `<input>_tempo.mid` | MIDI output path. The default sits next to the input, not in `data/output/` |
+| `--csv` | `<input>_tempo.csv` | CSV output path, same caveat |
+| `-s`, `--scaling-param` | 1.0 | Strength of the effect; meaning depends on the mode (below) |
+| `--log-scale` | off | Use LOG mode instead of LINEAR |
+| `--fps` | 30.0 | Video frame rate; one input value per frame |
+| `--division` | 480 | MIDI ticks per beat |
+| `--cc-subsample` | 30 | Frames between points on the CC tracks |
 
-**Two Modes Available**:
+**Two modes**. The input holds inverse speed `y`, so speed is `1/y`. In both
+modes tempo **rises with speed**.
 
-1. **LINEAR Mode** (`use_log_scale=False`, default):
-   - Tempo inversely proportional to zoom rate
-   - **Algorithm**: `tempo = mean_tempo + scaling_param × ((k / zoom_rate) - mean_tempo)`
-   - **`scaling_param`**: Blend fraction (0-1), e.g., 0.1 = 10% zoom influence
-   - **Behavior**: Doubling zoom rate → tempo halves; Halving → tempo doubles
-   - **Use case**: Traditional inverse relationship
+1. **LINEAR** (default): tempo is a blend of a constant and a value
+   proportional to speed:
+   `tempo = mean + s * (k / y - mean)`, with `k` chosen so the total number
+   of beats matches `mean` over the whole video. `s` is the blend fraction:
+   0 = constant tempo, 1 (default) = tempo fully proportional to speed (twice
+   the speed, twice the tempo). Where a tempo would fall outside 3.58-300 BPM,
+   the speed is averaged over a longer window until it fits.
+2. **LOG** (`--log-scale`): tempo moves the same number of BPM for each
+   doubling of speed:
+   `tempo = mean + s * (log2(1/y) - mean(log2(1/y)))`, so `s` is BPM per
+   octave of speed (e.g. `-s 20` = +/-20 BPM per doubling or halving). The
+   average equals `mean` exactly; tempos are clipped to 3.58-300 BPM.
 
-2. **LOG Mode** (`use_log_scale=True`):
-   - Tempo varies symmetrically with log of zoom rate
-   - **Algorithm**: `tempo = mean_tempo + tempo_change_per_octave × (log₂(zoom) - mean(log₂(zoom)))`
-   - **`scaling_param`**: BPM change per octave, e.g., 20.0 = ±20 BPM per doubling/halving
-   - **Behavior**: Doubling or halving zoom rate → ±same BPM change (symmetric)
-   - **Use case**: Perceptually uniform zoom scaling
-   - **Guarantee**: Average tempo exactly equals `mean_tempo_bpm` (no rescaling needed)
+**Outputs**:
+- **MIDI** (`-o`):
+  - Track 1 "Tempo Map": a tempo change on every frame, 4/4, and a C3 note
+    (MIDI 60) on every beat, so you can hear the beat.
+  - Eight CC1 tracks that follow the speed itself, not the tempo: Normal,
+    Inverted, Deep/Medium/Shallow Zoom and their inverses (percentile
+    bands). Speed in LINEAR mode, log2 speed in LOG mode.
+- **CSV** (`--csv`): one row per frame, with columns `frame`, `time` (m:ss.ss)
+  and `tempo_bpm`.
 
-**Key Feature - Independent CC Tracks**:
-- **IMPORTANT**: CC tracks represent zoom depth directly, NOT tempo
-- This means you can set `scaling_param=0` for constant tempo while still getting zoom variation in CC tracks
-- **LINEAR mode**: CC values based on `1/zoom_rate` (zoom depth)
-- **LOG mode**: CC values based on `log₂(zoom_rate)` (log zoom depth)
-- Tracks include: Normal, Inverted, Deep/Medium/Shallow zoom (based on percentiles)
-
-**Example Use Case**:
-```python
-# Constant 108 BPM tempo, but CC tracks still show zoom variation
-mean_tempo_bpm = 108.0
-scaling_param = 0.0  # No tempo variation
-use_log_scale = False  # or True, doesn't matter for constant tempo
-```
+Because the CC tracks follow speed rather than tempo, `-s 0` gives a constant
+tempo while the CC tracks still carry the speed variation.
 
 ---
 
@@ -1901,6 +1896,25 @@ The N52 configs are sets in subfolders of `json/`, each a grid over color
 channel, root frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and
 `flat` all 1.0, `odd4` 4.0 on the odd rows, `even4` 4.0 on the even rows):
 
+- **`json/N52_drone_006/N52_drone_{XYZ}_r{028|055|110}_{flat|odd4|even4}_006.json`**:
+  the 14 harmonic numbers of `004` with all three color channels mixed in
+  one tone (plus Gray-only rows n = 18, 27); `odd4`/`even4` by row position
+  as in `004`. The six channel tags are the orderings of R, G and B,
+  swapped throughout every row; the tag names the channel of the
+  `C_avg / Gray_avg` rows n = 2, 3, 5. `BGR` is the user's template
+  (originally `N52_drone_r055_flat_006.json`). 54 files.
+- **`json/N52_drone_005/N52_drone_*_r{028|055|110}_*_005.json`**: same 14
+  harmonic numbers, settings and row-position `odd4`/`even4` as `004`, with
+  the expressions reassigned (e.g. n = 3 is `C_avg * C_std`, n = 4 `C_avg`,
+  n = 32 `C_avg * (C_std / Gray_std)`). Roots 27.5, 55 and 110 Hz; 27
+  configs, built from the template `N52_drone_B_r055_flat_005.json`.
+- **`json/N52_drone_004/N52_drone_*_r{028|055|066|110|220}_*_004.json`**:
+  14 rows, n = 2, 3, 4, 5, 6, 8, 10, 12, 16, 18, 20, 24, 27, 32 (top partial
+  32 x root), each with its own channel expression; no pitch glide
+  (`min_fraction` 1.0), 4 cents of jitter. Here `odd4` and `even4` go by
+  **row position**, not by n: `odd4` puts 4.0 on rows 1, 3, 5, ... (n = 2, 4,
+  6, 10, 16, 20, 27), `even4` on rows 2, 4, 6, ... (n = 3, 5, 8, 12, 18, 24,
+  32). Roots 27.5, 55, 66, 110 and 220 Hz; 45 files.
 - **`json/N52_drone_003/N52_drone_*_r{028|066|110|220}_*_003.json`**: as
   `002` but root A0 = 27.5 Hz (`r028` in names; also 66 Hz = 27.5 x 2 x 6/5,
   an octave and a just minor third up, and 110 and 220 Hz) with harmonics n = 2, 3, 4, 5, 6, 8 (rows

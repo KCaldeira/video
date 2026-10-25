@@ -1,0 +1,32 @@
+ {
+  "input_csv": "data/output/N52_Sin2B-A1DpiB256k-f-C2-AN245_default/N52_Sin2B-A1DpiB256k-f-C2-AN245_default_basic.csv",
+  "frames_per_second": 30,
+  "sample_rate": 48000,
+  "root_hz": 110.0,
+  "max_hz": 20000.0,
+  "cycle": false,
+  "strength_exponent": -1.0,
+  "weight_range_db": 30.0,
+  "phases": "random",
+  "random_seed": 1,
+  "fade_s": 0.05,
+  "jitter_cents": 4.0,
+  "jitter_s": 0.3,
+  "pitch_mod": {"speed_file": "data/input/N52_speed.py", "min_fraction": 1.0},
+  "harmonics": [
+    {"n": 2, "gain": 4.0, "expr": "B_avg / Gray_avg"},
+    {"n": 3, "gain": 1.0, "expr": "G_avg / Gray_avg"},
+    {"n": 4, "gain": 4.0, "expr": "B_std / Gray_std"},
+    {"n": 5, "gain": 1.0, "expr": "R_avg / Gray_avg"},
+    {"n": 6, "gain": 4.0, "expr": "G_std / Gray_std"},
+    {"n": 8, "gain": 1.0, "expr":  "(B_avg / Gray_avg) * Gray_ee1"},
+    {"n": 10, "gain": 4.0, "expr": "(R_avg / Gray_avg) * Gray_ee1"},
+    {"n": 12, "gain": 1.0, "expr": "(G_avg / Gray_avg) * Gray_ee1"},
+    {"n": 16, "gain": 4.0, "expr": "B_avg * Gray_std"},
+    {"n": 18, "gain": 1.0, "expr": "Gray_avg * Gray_es1"},
+    {"n": 20, "gain": 4.0, "expr": "R_avg * Gray_ed1"},
+    {"n": 24, "gain": 1.0, "expr": "G_avg * Gray_es1"},
+    {"n": 27, "gain": 4.0, "expr": "Gray_avg * Gray_std"},
+    {"n": 32, "gain": 1.0, "expr": "B_avg * (B_std / Gray_std) "}
+  ]
+}
