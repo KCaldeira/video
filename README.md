@@ -136,8 +136,8 @@ Render a video's metrics as a held harmonic drone, written straight to WAV.
 
 ```bash
 # Needs the run's *_basic.csv (from process_video); the JSON names it
-python metrics_to_wav.py json/N52_drone_h6/N52_h6_G_r110_flat.json
-# -> data/output/N52_..._default/N52_..._default_N52_h6_G_r110_flat.wav (+ _config.json, _plot.png)
+python metrics_to_wav.py json/N52_drone_006/N52_drone_BGR_r055_flat_006.json
+# -> data/output/N52_..._default/N52_..._default_N52_drone_BGR_r055_flat_006.wav (+ _config.json, _plot.png)
 ```
 
 See [Audio Synthesis: Metric-Driven Drone](#audio-synthesis-metric-driven-drone-metrics_to_wavpy).
@@ -1773,7 +1773,7 @@ smooth: no clicks, even where the speed jumps. Jitter still applies on top.
 `max_hz` is never crossed, since the factor is at most 1. `"pitch_mod": null`
 keeps the pitch fixed and reproduces earlier output exactly.
 
-`json/N52_drone_001/` is `N52_drone_000` with this on (suffix `_001`). The
+The `004`-`006` sets have it on with `min_fraction` 1.0 (no glide). The
 plot gains a second panel showing the pitch in cents below the root.
 
 ### MIDI Notes
@@ -1893,8 +1893,9 @@ A JSON file, kept in `json/`. Every key is required, and exactly one of
 | `harmonics` | List of `{n, gain, expr}` in increasing `n`: harmonic number, its gain multiplier, and its metric expression (one cycle when `cycle` is true) |
 
 The N52 configs are sets in subfolders of `json/`, each a grid over color
-channel, root frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and
-`flat` all 1.0, `odd4` 4.0 on the odd rows, `even4` 4.0 on the even rows):
+channel, root frequency and row gains (`{R|G|B}` or a channel ordering,
+`r{028|055|110|...}` for the root in Hz, and `flat` all 1.0, `odd4`/`even4`
+4.0 alternating with 1.0 down the rows):
 
 - **`json/N52_drone_006/N52_drone_{XYZ}_r{028|055|110}_{flat|odd4|even4}_006.json`**:
   the 14 harmonic numbers of `004` with all three color channels mixed in
@@ -1915,43 +1916,18 @@ channel, root frequency and row gains (`{R|G|B}`, `r{055|110|220}`, and
   **row position**, not by n: `odd4` puts 4.0 on rows 1, 3, 5, ... (n = 2, 4,
   6, 10, 16, 20, 27), `even4` on rows 2, 4, 6, ... (n = 3, 5, 8, 12, 18, 24,
   32). Roots 27.5, 55, 66, 110 and 220 Hz; 45 files.
-- **`json/N52_drone_003/N52_drone_*_r{028|066|110|220}_*_003.json`**: as
-  `002` but root A0 = 27.5 Hz (`r028` in names; also 66 Hz = 27.5 x 2 x 6/5,
-  an octave and a just minor third up, and 110 and 220 Hz) with harmonics n = 2, 3, 4, 5, 6, 8 (rows
-  keep their `002` expressions in order), i.e. 55-220 Hz with no
-  fundamental: the 55 Hz series 1, 2, 3, 4 plus the fifths below and
-  between (82.5 and 137.5 Hz). `odd4` boosts n = 3, 5; `even4` n = 2, 4, 6, 8.
-- **`json/N52_drone_002/N52_drone_*_r052_*_002.json`**: subtler and lower:
-  root G#1 = 51.9130871975 Hz (`r052` in names), pitch gliding down at most
-  a just semitone (`min_fraction` 15/16 = 0.9375, -111.7 cents), so between
-  G#1 and about G1.
-- **`json/N52_drone_001/N52_drone_*_001.json`**: the `000` set with
-  speed-driven pitch (fastest = root, slowest a minor third lower).
-- **`json/N52_drone_000/N52_drone_*_000.json`**: 6 harmonics, roots 55 and
-  110 Hz only, 4 cents of jitter. Every harmonic is normalized by the
-  channel's brightness relative to gray: `C_avg / Gray_avg`, then that times
-  `Gray_std`, `Gray_es1`, `Gray_ee1`, `Gray_ed1`, and `(C_std / Gray_std)`
-  (C = the channel). Built from the template
-  `N52_drone_B_r055_flat_000.json`.
-
-- **`json/N52_drone_h6/N52_h6_*.json`**: harmonics 1-6 only, for layering
-  several tracks rooted at different pitches instead of extending the
-  series. Expressions: `C_avg`, `C_std`, `C_avg / Gray_avg`, then
-  `(C_avg / Gray_avg)` times `Gray_ed1`, `Gray_ee1`, `Gray_es1` (C = the
-  channel).
-- **`json/N52_drone_octave/N52_drone_*.json`**: the 37-row octave pattern
-  (1-8, then 10, 12, 14, 16, 20, ...). Expressions: `C_avg`, `C_std`,
-  `C_avg/Gray_avg`, and products of `C_avg` or `C_avg/Gray_avg` with Gray
-  metrics. `N52_drone_B_r055_flat_j{1,2,4,5,8}.json` add 1-8 cents of
-  jitter; `N52_drone.json` is the original B-channel config.
+Older sets (`000`-`003`, `h6`, `octave`) were deleted on 2026-10-25; they
+are in git history up to commit `0299300` (`git show 0299300:json/N52_drone_h6/...`).
+Their listening notes stay in `SYNTHESIS_NOTES.md`.
 
 Rendering time grows with the number of harmonics: every harmonic of 55 Hz
 (363) over 394 s at 48 kHz takes about two minutes; the 29-harmonic octave
 pattern about ten seconds.
 
 Variants are separate config files: the output is named after the config
-file, so `json/N52_drone_octave/N52_drone_B_r055_odd4.json` writes `..._N52_drone_B_r055_odd4.wav` beside
-`..._N52_drone.wav` without overwriting it.
+file, so `json/N52_drone_006/N52_drone_BGR_r055_odd4_006.json` writes
+`..._N52_drone_BGR_r055_odd4_006.wav` beside the `flat` render without
+overwriting it.
 
 ### Output Files
 

@@ -172,7 +172,7 @@ invariants for this workflow:
 
 ### Audio Synthesis (separate from the video pipeline)
 ```bash
-python metrics_to_wav.py json/N52_drone_h6/N52_h6_G_r110_flat.json
+python metrics_to_wav.py json/N52_drone_006/N52_drone_BGR_r055_flat_006.json
 ```
 Renders harmonic tones from a run's raw `*_basic.csv`, either one drone note
 (`root_hz`) or one tone per note of a monophonic MIDI file (`midi_file`; MIDI
