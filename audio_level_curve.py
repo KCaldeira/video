@@ -94,7 +94,6 @@ examples:
   python audio_level_curve.py "data/input/N47 2026-09-17-04.wav"
 
   # ride harder, and let the curve move faster
-  python audio_level_curve.py song.wav --target-fraction 0.4 --mean-distance 5
 
   # anchor to an absolute level instead of deriving one from the audio
   python audio_level_curve.py song.mp3 --target-lufs -16 --mean-distance 30
