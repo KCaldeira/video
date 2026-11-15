@@ -30,6 +30,16 @@ Linear before importing, or switch the tracks afterwards.
 Metric values are 0-1 and are written as linear gain directly: 0 is -infinity
 dB and 1.0 is 0 dB (unity, fader top).
 
+Tracks are ordered by fader travel, most first: the mean absolute change
+between successive rows, expressed per minute of video -- how far the volume
+fader moves per minute. For a smooth series this is proportional to
+std * sqrt(1 - lag-1 autocorrelation), so it favours tracks that swing widely
+and often over ones that drift slowly. Each column's `_o` and `_i` versions
+(i = 1 - o) travel the same distance, so they are kept together as a pair,
+`_o` first. Smoothing widths are not grouped: 10 s and 20 s tracks fall
+wherever their travel puts them. The ranking is also written beside the
+.dawproject as `{prefix}_track_order.csv`.
+
 Usage:
     python write_dawproject.py json/N48_dawproject.json
 """
@@ -90,6 +100,55 @@ DEFAULT_TEMPO_BPM = 120.0
 # thousands. Refuse rather than emit something unopenable; the fix is to
 # narrow metrics_processing or raise dawproject.max_columns.
 DEFAULT_MAX_COLUMNS = 200
+
+
+# Every values-CSV column ends in one of these: process_metrics applies the
+# inversion step last, writing `<entry>_o` (original) and `<entry>_i` (1 - o).
+INVERSION_SUFFIXES = ("_o", "_i")
+
+
+def fader_travel_per_minute(times, series):
+    """
+    Mean absolute change between successive rows, scaled to one minute.
+
+    Total fader travel divided by the video's duration: the sum of the heights
+    of every up and down swing, per minute. Unaffected by a constant offset,
+    and identical for a series and its inversion 1 - series.
+    """
+    duration = float(times.iloc[-1] - times.iloc[0])
+    if duration <= 0:
+        raise ValueError("cannot rate fader travel over a zero-length video")
+    return float(series.diff().abs().sum()) / duration * 60.0
+
+
+def order_by_fader_travel(times, columns, values):
+    """
+    Return (ordered columns, ranking rows) with the most fader travel first.
+
+    Columns are grouped into `_o`/`_i` pairs by the name before the suffix;
+    a pair is ranked by the travel of its members (equal up to rounding, as
+    i = 1 - o) and emitted `_o` first. Ties keep the CSV's order.
+    """
+    pairs = {}
+    for column in columns:
+        if not column.endswith(INVERSION_SUFFIXES):
+            raise ValueError(
+                f"column {column!r} does not end in _o or _i; the fader-travel "
+                f"ordering pairs each column with its inversion")
+        base, suffix = column[:-2], column[-2:]
+        pairs.setdefault(base, {})[suffix] = column
+
+    ranked = []
+    for position, (base, members) in enumerate(pairs.items()):
+        ordered = [members[s] for s in INVERSION_SUFFIXES if s in members]
+        travel = max(fader_travel_per_minute(times, values[c]) for c in ordered)
+        ranked.append((travel, position, base, ordered))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+
+    ordered_columns = [c for _, _, _, ordered in ranked for c in ordered]
+    rows = [{"rank": rank, "column": base, "fader_travel_per_min": travel}
+            for rank, (travel, _, base, _) in enumerate(ranked, start=1)]
+    return ordered_columns, rows
 
 
 def build_project_xml(times, columns, values, tempo_bpm, time_signature,
@@ -250,6 +309,15 @@ def render_metrics_dawproject(values_csv, output_path, max_columns,
     # Automation times are wall-clock seconds derived from the video frame
     # numbers, which is what keeps the curves locked to the video.
     times = csv[FRAME_COLUMN] / frames_per_second
+
+    columns, ranking = order_by_fader_travel(times, columns, csv)
+    order_csv = output_path[:-len(".dawproject")] + "_track_order.csv"
+    pd.DataFrame(ranking).to_csv(order_csv, index=False)
+    print(f"Wrote {order_csv}")
+    print("  Track order by fader travel per minute (o/i pairs together):")
+    for row in ranking[:10]:
+        print(f"    {row['rank']:3d}. {row['fader_travel_per_min']:7.3f}  "
+              f"{row['column']}")
 
     project_xml = serialize(
         build_project_xml(times, columns, csv, tempo_bpm, time_signature,

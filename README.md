@@ -822,11 +822,30 @@ a ZIP holding `project.xml` and `metadata.xml`. No audio is embedded, so the
 file is small.
 
 Inside:
-- One **empty audio track per values-CSV column**, named after the column,
+- One **empty audio track per values-CSV column**, named after the column
+  and ordered by fader travel (see below),
   each routed to the master. The tracks carry automation only, with no clips.
 - A `Points` envelope per track with `timeUnit="seconds"`, targeting that
   track's `Volume` parameter, with one `RealPoint` per CSV row.
 - A `Transport` tempo, which is cosmetic — nothing positional depends on it.
+
+**Track order: most fader travel first.** Each track's score is its total
+fader travel per minute of video: the mean absolute change between successive
+rows, scaled to one minute, i.e. the sum of the heights of all its up and down
+swings divided by the duration. For a smooth series this is proportional to
+`std × √(1 − lag-1 autocorrelation)`, so tracks that swing widely *and* often
+come first and slow drifts sink. (Standard deviation alone would do the
+opposite here: with rank normalization every series starts with the same
+spread, and smoothing shrinks fast-moving series more than slow ones.)
+
+- A column's `_o` and `_i` versions travel the same distance (`i = 1 − o`), so
+  they stay together as a pair, `_o` first.
+- Smoothing widths are not grouped. Wider smoothing usually travels less, so
+  40 s tracks tend to sink to the bottom; one that ranks high is worth a listen.
+- The ranking is also written beside the `.dawproject` as
+  `{name_prefix}_track_order.csv` (rank, column, fader travel per minute).
+- Every column must end in `_o` or `_i`, which the pipeline's inversion step
+  guarantees; anything else is an error.
 
 The tracks use `Channel role="regular"`. The `mixerRole` enumeration is
 `regular | master | effect | submix | vca` — **there is no `group`**, and
