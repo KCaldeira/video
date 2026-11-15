@@ -2085,6 +2085,32 @@ slow). This script takes speed as `1/value` before deriving anything, so its tra
 correct. `speed_to_cc.py` does not invert, so its `Speed` and `Inverse Speed` tracks are the other
 way round. Any value `<= 0` in an inverse-speed file is an error.
 
+**Standard set for a new piece**: three continuous files at clip fractions 0.4, 0.1 and 0.025
+(evenly spaced by a factor of 4, from nearly on/off to smooth), plus binned files at
+`0.25 0.5 0.25` with 1-, 2-, 4- and 8-bar segments. Take the tempo and time signature from the
+piece's `json/<piece>_dawproject.json`. Set the first two lines, then run the loops from the repo
+root:
+
+```bash
+PIECE=N57; TEMPO=96; TS=4/4
+for NC in 40:0.4 10:0.1 025:0.025; do      # output suffix : clip fraction
+    python speed_to_dawproject.py data/input/${PIECE}_speed.py --tempo $TEMPO --time-signature $TS \
+        --clip-fraction ${NC#*:} -o data/output/${PIECE}_speed_${NC%%:*}.dawproject
+done
+for B in 1 2 4 8; do
+    python speed_to_dawproject.py data/input/${PIECE}_speed.py --tempo $TEMPO --time-signature $TS \
+        --segment-bars $B --bin-fractions 0.25 0.5 0.25
+done
+```
+
+This writes `<piece>_speed_40`, `_speed_10` and `_speed_025.dawproject` (the suffix is the clip
+fraction's digits after the decimal point) and
+`<piece>_speed_s{1,2,4,8}bar_b25-50-25_lead10ms.dawproject`, each binned file with a
+`_segments.csv`. Copy the `.dawproject` files into the piece's Cubase project folder (see
+`CLAUDE.md` for where that is on each machine); the CSVs are records only. 0.33 and 0.20 were
+tried on N56 and N57 and sounded nearly the same, which led to this set. The clip fraction must be
+below 0.5: at 0.5 both quantiles are the median, leaving nothing to scale.
+
 **Usage**:
 ```bash
 python speed_to_dawproject.py <input_file> [-o OUTPUT] [--fps 30] [--tempo 120]

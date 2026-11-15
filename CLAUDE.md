@@ -149,6 +149,22 @@ python run_video_processing.py config.json
 4. **MIDI** (write_midi.py) - Legacy CC output, off by default
 5. **DAWproject** (write_dawproject.py) - Volume automation; the default output
 
+### Speed Processing (each piece's `<piece>_speed.py`)
+Standard set for a new piece, with tempo and time signature from that piece's
+`json/<piece>_dawproject.json`:
+```bash
+# Continuous: clip fractions 0.4, 0.1 and 0.025 (evenly spaced by a factor of 4)
+python speed_to_dawproject.py data/input/N57_speed.py --tempo 96 --time-signature 4/4 \
+    --clip-fraction 0.4 -o data/output/N57_speed_40.dawproject      # also 0.1 -> _10, 0.025 -> _025
+# Binned: 0.25 0.5 0.25 at 1, 2, 4 and 8 bars (default output names)
+python speed_to_dawproject.py data/input/N57_speed.py --tempo 96 --time-signature 4/4 \
+    --segment-bars 4 --bin-fractions 0.25 0.5 0.25
+```
+The `_speed_NN` suffix is the clip fraction's digits after the decimal point.
+0.33 and 0.20 sounded nearly the same; the clip fraction must be below 0.5
+(set 2026-11-15, on N56/N57). Copy the `.dawproject` files, not the
+`_segments.csv` files, into the piece's Cubase project folder.
+
 ### Audio Leveling Workflow (separate from the video pipeline)
 ```bash
 python audio_level_curve.py INPUT_AUDIO [--target-lufs -28] [--mean-distance 15]
