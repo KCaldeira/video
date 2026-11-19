@@ -121,6 +121,24 @@ audio** so the volume is reduced 25% of the time. The two knobs worth reaching
 for are `--target-fraction` (how often the level comes down) and
 `--mean-distance` (how quickly the curve may move).
 
+### Example: level a Cubase mixdown and put the result in the project folder
+
+To level a mixdown so the volume comes down half the time (`--target-fraction
+0.5`) and get back a finished WAV, run step 1 alone and copy the preview render
+into the piece's Cubase project folder (here N56 on the desktop):
+
+```bash
+python audio_level_curve.py "/mnt/f/Cubase Projects/N56/Mixdown/N56_2026-11-14-10.wav" \
+    --target-fraction 0.5
+cp data/output/N56_2026-11-14-10_cf50_gau15_cg0.1_leveled.wav "/mnt/f/Cubase Projects/N56/"
+```
+
+The `_leveled.wav` already includes the makeup gain, so its peak sits at
+`--peak-dbfs` (-0.1 dBFS); the "APPLY ... CLIP GAIN" line applies only if you
+import the curve into Cubase instead. The analysis files (CSV, plot, config)
+stay in `data/output/`. To write everything straight into the project folder
+instead, use `--output-dir "/mnt/f/Cubase Projects/N56"` and skip the copy.
+
 Both stages document themselves:
 
 ```bash
