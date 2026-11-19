@@ -107,13 +107,13 @@ python audio_level_curve.py "data/input/my_song.wav"
 
 # 2. Package the curve and the audio into a DAWproject
 python curve_to_dawproject.py \
-    "data/output/my_song_cf25_gau15_gain_points.csv" \
+    "data/output/my_song_cf25_gau1_gain_points.csv" \
     "data/input/my_song.wav"
 
 # 3. In Cubase: File > Import > DAWproject
 ```
 
-Step 1 also writes `my_song_cf25_gau15_leveled.wav`, a preview render, so you
+Step 1 also writes `my_song_cf25_gau1_leveled.wav`, a preview render, so you
 can hear the result before opening Cubase.
 
 The defaults need no knowledge of the file: the target is **derived from the
@@ -130,7 +130,7 @@ into the piece's Cubase project folder (here N56 on the desktop):
 ```bash
 python audio_level_curve.py "/mnt/f/Cubase Projects/N56/Mixdown/N56_2026-11-14-10.wav" \
     --target-fraction 0.5
-cp data/output/N56_2026-11-14-10_cf50_gau15_cg0.1_leveled.wav "/mnt/f/Cubase Projects/N56/"
+cp data/output/N56_2026-11-14-10_cf50_gau1_cg0.1_leveled.wav "/mnt/f/Cubase Projects/N56/"
 ```
 
 The `_leveled.wav` already includes the makeup gain, so its peak sits at
@@ -1342,6 +1342,9 @@ Below roughly 3 s the tool stops behaving like volume automation and starts
 behaving like a compressor with a very slow attack. If you find yourself
 reaching for those values, a compressor is probably the better instrument.
 
+**The default is 1 s** (set 2026-11-18), at the fast end of this range. For
+fader-style riding of phrases or sections, pass `--mean-distance 8` to `15`.
+
 **Worked comparison.** One source (679.8 s, integrated -26.05 LUFS), one
 target (`--target-lufs -28`), four mean weighting distances. Everything except
 the smoothing is held constant:
@@ -1518,9 +1521,9 @@ Written to `data/output/`, named `{input_stem}_{tag}_*`:
 
 The tag encodes the settings that shape the curve, so different settings land
 in different files and a repeat of the same settings overwrites cleanly. For
-example `song_cf25_gau15_leveled.wav` is a cut-only ride reducing 25% of the
-time, with gaussian smoothing at a 15 s mean weighting distance;
-`song_c28_gau15_leveled.wav` is the same but anchored to an absolute -28 LUFS
+example `song_cf25_gau1_leveled.wav` is a cut-only ride reducing 25% of the
+time, with gaussian smoothing at a 1 s mean weighting distance (the default);
+`song_c28_gau1_leveled.wav` is the same but anchored to an absolute -28 LUFS
 ceiling. Use `--tag` to name
 a run yourself.
 
@@ -1549,11 +1552,12 @@ a run yourself.
 
 A full pass over a 679.8 s, 48 kHz, 24-bit stereo recording.
 
-**1. Run with the defaults.** The target is derived from the audio, so this
-works without knowing anything about the file:
+**1. Run with the default target.** The target is derived from the audio, so
+this works without knowing anything about the file (this run predates the 1 s
+smoothing default, so it gives the 15 s it used):
 
 ```bash
-python audio_level_curve.py "data/input/N47 2026-09-17-04.wav" --no-preview
+python audio_level_curve.py "data/input/N47 2026-09-17-04.wav" --mean-distance 15 --no-preview
 ```
 
 ```

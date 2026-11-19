@@ -69,9 +69,9 @@ outputs (written to data/output/, named {input}_{tag}_*):
   ..._config.json        every parameter used for this run
 
 The tag encodes the settings that shape the curve -- mode, target, kernel and
-mean distance -- so "song_cf25_gau15_leveled.wav" is a cut-only ride reducing
-the volume 25% of the time, gaussian smoothing with a 15 s mean weighting
-distance. An absolute target appears instead as "song_c28_gau15_*". Use --tag
+mean distance -- so "song_cf25_gau1_leveled.wav" is a cut-only ride reducing
+the volume 25% of the time, gaussian smoothing with a 1 s mean weighting
+distance. An absolute target appears instead as "song_c28_gau1_*". Use --tag
 to name a run yourself.
 
 The preview is rendered by interpolating the DECIMATED points exactly the way a
@@ -90,7 +90,7 @@ Every run also reports how much headroom is left before 0 dBFS, using an
 inter-sample (true) peak by default. That is a report only; nothing acts on it.
 
 examples:
-  # defaults: reduce the volume 25% of the time, 15 s mean weighting distance
+  # defaults: reduce the volume 25% of the time, 1 s mean weighting distance
   python audio_level_curve.py "data/input/N47 2026-09-17-04.wav"
 
   # ride harder, and let the curve move faster
@@ -459,7 +459,7 @@ def main():
     parser.add_argument(
         "--mean-distance",
         type=float,
-        default=15.0,
+        default=1.0,
         help="mean weighting distance of the smoothing kernel, in seconds; "
         "equals a quarter of a boxcar's full width (default: %(default)s)",
     )
@@ -552,7 +552,7 @@ def main():
         help="suffix distinguishing this run's output files; the default "
         "encodes the settings that change the curve, so different settings "
         "land in different files and a repeat of the same settings overwrites "
-        "cleanly (default: e.g. cf25_gau15)",
+        "cleanly (default: e.g. cf25_gau1)",
     )
 
     args = parser.parse_args()
