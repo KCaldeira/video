@@ -30,6 +30,15 @@ instead of "Speed", and the values are used as they are, not inverted:
 rotation is signed, so it has no meaningful reciprocal. The sign convention
 there is that positive is counter-clockwise.
 
+For a rotation file, --rotation abs, ccw or cw processes abs(rot),
+max(0, rot) (counter-clockwise only) or max(0, -rot) (clockwise only) instead
+of the signed values. Those are zero whenever the camera turns the other way,
+so the two Inverse tracks are left out (four tracks), and the variant is added
+to the default output name (N58_rot_ccw.dawproject). Binned track names use
+"RoA", "RoCC" and "RoCW". A rectified series that is zero in most frames can
+make the clip quantiles equal, and the script then stops rather than write a
+flat track.
+
 Automation times are wall-clock seconds, `frame_index / fps`, so the curves
 line up with the video and with the output of write_dawproject.py. Nothing
 positional depends on tempo.
@@ -128,8 +137,20 @@ BIN_OFF = 0.0
 # purposes.
 TICKS_PER_QUARTER = 480
 
+# --rotation choices: how a signed rotation series (positive counter-clockwise)
+# is turned into the series that is processed, and the quantity name that
+# labels the tracks. The rectified variants are zero whenever the camera turns
+# the other way, so 1/value is undefined there and they get no Inverse tracks.
+ROTATION_TRANSFORMS = {
+    "signed": (lambda r: r, "Rotation"),
+    "abs": (np.abs, "Abs Rotation"),
+    "ccw": (lambda r: np.maximum(0.0, r), "CCW Rotation"),
+    "cw": (lambda r: np.maximum(0.0, -r), "CW Rotation"),
+}
+
 # Short quantity names for the binned track names.
-QUANTITY_ABBREVIATION = {"Speed": "Sp", "Rotation": "Ro"}
+QUANTITY_ABBREVIATION = {"Speed": "Sp", "Rotation": "Ro", "Abs Rotation": "RoA",
+                         "CCW Rotation": "RoCC", "CW Rotation": "RoCW"}
 
 
 def scale_unit(values, clip_fraction=0.0):
@@ -138,25 +159,46 @@ def scale_unit(values, clip_fraction=0.0):
     The `clip_fraction` and `1 - clip_fraction` quantiles map to 0 and 1, and
     values beyond them are clipped to those bounds. 0 uses the true min and
     max, which matches scale_to_cc without the 0-100 step.
+
+    If the two quantiles are equal but some values lie above them (clockwise
+    rotation that is zero in most frames, clipped at 0.4), the result is the
+    limit of the scaling as the upper bound closes on the lower: 1 above the
+    bound, 0 elsewhere, an on/off gate. A wholly constant series is an error.
     """
     low = float(np.quantile(values, clip_fraction))
     high = float(np.quantile(values, 1.0 - clip_fraction))
     if high == low:
-        raise ValueError(
-            f"series is constant between the {clip_fraction} and "
-            f"{1.0 - clip_fraction} quantiles, so it cannot be scaled to 0-1")
+        above = values > low
+        if not np.any(above):
+            raise ValueError(
+                f"series has no values above its {clip_fraction} and "
+                f"{1.0 - clip_fraction} quantiles (both {low:g}), so it "
+                "cannot be scaled to 0-1")
+        print(f"  Warning: the {clip_fraction:g} and {1.0 - clip_fraction:g} "
+              f"quantiles are both {low:g}; writing an on/off gate "
+              f"(1 in the {np.mean(above):.1%} of frames above it)")
+        return above.astype(float)
     return (np.clip(values, low, high) - low) / (high - low)
 
 
-def build_series(speed, quantity, clip_fraction):
+def build_series(speed, quantity, clip_fraction, include_inverse=True):
     """The six derived series, in the same order speed_to_cc.py writes them.
 
     Clipping applies to all three base series, so on the percentile series
     percentile `clip_fraction` maps to 0 and `1 - clip_fraction` to 1.
+    With include_inverse False the two Inverse series are left out (four
+    series), for rectified rotation, which is zero much of the time.
     """
     value = scale_unit(speed, clip_fraction)
-    inverse = scale_unit(1.0 / (speed + 1e-10), clip_fraction)
     percentile = scale_unit(percentile_data(speed), clip_fraction)
+    if not include_inverse:
+        return {
+            f"{quantity}": value,
+            f"{quantity} Percentile": percentile,
+            f"{quantity} Inverted": 1.0 - value,
+            f"{quantity} Percentile Inverted": 1.0 - percentile,
+        }
+    inverse = scale_unit(1.0 / (speed + 1e-10), clip_fraction)
 
     return {
         f"{quantity}": value,
@@ -166,6 +208,12 @@ def build_series(speed, quantity, clip_fraction):
         f"Inverse {quantity} Inverted": 1.0 - inverse,
         f"{quantity} Percentile Inverted": 1.0 - percentile,
     }
+
+
+def output_stem(args):
+    """Input file stem, plus the --rotation variant unless it is signed."""
+    stem = os.path.splitext(os.path.basename(args.input_file))[0]
+    return stem if args.rotation == "signed" else f"{stem}_{args.rotation}"
 
 
 def segment_seconds(segment_bars, segment_beats, tempo, numerator, denominator):
@@ -471,7 +519,7 @@ def write_binned(args, speed, quantity, numerator, denominator):
     point_values = values.iloc[point_segment].reset_index(drop=True)
 
     tag = binned_tag(args.segment_bars, args.segment_beats, fractions, args.lead_ms)
-    stem = os.path.splitext(os.path.basename(args.input_file))[0]
+    stem = output_stem(args)
     output_path = args.output or os.path.join(
         "data", "output", f"{stem}_{tag}.dawproject")
     segments_csv = os.path.splitext(output_path)[0] + "_segments.csv"
@@ -521,8 +569,14 @@ def main():
         help="speed/rotation data file (.py, .csv, or .kfs), one value per frame")
     parser.add_argument(
         "-o", "--output",
-        help="output .dawproject path "
-             "(default: data/output/<input stem>.dawproject)")
+        help="output .dawproject path (default: data/output/<input stem>"
+             "[_<rotation>].dawproject)")
+    parser.add_argument(
+        "--rotation", choices=list(ROTATION_TRANSFORMS), default="signed",
+        help="rotation files only: process the signed values, abs(rot), "
+             "max(0, rot) (counter-clockwise) or max(0, -rot) (clockwise). "
+             "Anything but signed drops the Inverse tracks and adds "
+             "_<rotation> to the default output name (default: %(default)s)")
     parser.add_argument(
         "--fps", type=float, default=DEFAULT_FPS,
         help="frame rate the series was sampled at, used to turn frame "
@@ -592,7 +646,11 @@ def main():
     numerator, denominator = (int(x) for x in args.time_signature.split("/"))
 
     is_rotation = "rot" in os.path.basename(args.input_file).lower()
-    quantity = "Rotation" if is_rotation else "Speed"
+    if not is_rotation and args.rotation != "signed":
+        raise ValueError(f"--rotation {args.rotation} needs a rotation file "
+                         "(\"rot\" in its name)")
+    transform, quantity = (ROTATION_TRANSFORMS[args.rotation] if is_rotation
+                           else (None, "Speed"))
 
     data = read_speed_data(args.input_file)
     print(f"Loaded {len(data)} frames from {args.input_file}")
@@ -600,7 +658,11 @@ def main():
           f"mean={data.mean():.4f}")
     if is_rotation:
         print("Note: convention is that positive is counter-clockwise")
-        speed = data
+        speed = transform(data)
+        if args.rotation != "signed":
+            print(f"Processing {quantity.lower()} (--rotation {args.rotation}): "
+                  f"min={speed.min():.4f}, max={speed.max():.4f}, "
+                  f"zero in {np.mean(speed == 0):.1%} of frames")
     else:
         # The file holds inverse speed; a zero or negative value has no
         # meaningful reciprocal, so refuse rather than write infinities.
@@ -624,7 +686,8 @@ def main():
 
     # Derive from the full series, then thin, so that the percentile ranks and
     # the 0-1 scaling reflect every frame rather than only the kept ones.
-    series = build_series(speed, quantity, args.clip_fraction)
+    series = build_series(speed, quantity, args.clip_fraction,
+                          include_inverse=args.rotation == "signed")
     frames = np.arange(len(speed))[::args.every_nth_frame]
     values = pd.DataFrame({k: v[::args.every_nth_frame] for k, v in series.items()})
     times = frames / args.fps
@@ -634,8 +697,7 @@ def main():
         raise ValueError(f"{len(columns)} columns exceeds {DEFAULT_MAX_COLUMNS}")
 
     output_path = args.output or os.path.join(
-        "data", "output",
-        os.path.splitext(os.path.basename(args.input_file))[0] + ".dawproject")
+        "data", "output", output_stem(args) + ".dawproject")
 
     project_xml = serialize(build_project_xml(
         times, columns, values, args.tempo, [numerator, denominator],

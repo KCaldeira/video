@@ -2192,6 +2192,24 @@ If the filename contains `rot`, the tracks are labelled `Rotation` and the value
 are, not inverted: rotation is signed, so it has no meaningful reciprocal. Positive is
 counter-clockwise.
 
+For a rotation file, `--rotation abs|ccw|cw` processes `abs(rot)` (rotation speed either way),
+`max(0, rot)` (counter-clockwise only) or `max(0, -rot)` (clockwise only) instead of the signed
+values, with tracks labelled `Abs Rotation`, `CCW Rotation` or `CW Rotation` (`RoA`, `RoCC`,
+`RoCW` in binned names). These are zero whenever the camera turns the other way, so the two
+`Inverse` tracks are left out (four tracks), and `_abs`/`_ccw`/`_cw` is added to the default
+output name. A direction that is rare gives degenerate output, by design:
+
+- If the two clip quantiles are equal (N58 clockwise, zero in 81% of frames, at
+  `--clip-fraction 0.4`), each track becomes an on/off gate: 1 where the value is above the
+  quantile, 0 elsewhere.
+- In binned mode, segments with equal medians are split between bins in time order, so when most
+  segments have median 0, the lower bins differ only by when they occur.
+
+```bash
+python speed_to_dawproject.py "/mnt/f/Cubase Projects/N58/N58_rot.py" --rotation ccw \
+    --tempo 116 --time-signature 4/4 --clip-fraction 0.4 -o data/output/N58_rot_ccw_40.dawproject
+```
+
 As in `write_dawproject.py`, each track is an audio track carrying the automation, routed to the
 master (Cubase will not import automation onto a group). Import with `File > Import > DAWproject` from Cubase 15 (see `CLAUDE.md`).
 

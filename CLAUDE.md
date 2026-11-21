@@ -165,6 +165,17 @@ The `_speed_NN` suffix is the clip fraction's digits after the decimal point.
 (set 2026-11-15, on N56/N57). Copy the `.dawproject` files, not the
 `_segments.csv` files, into the piece's Cubase project folder.
 
+A `<piece>_rot.py` file gets the same standard set three times, with
+`--rotation abs`, `ccw` and `cw` (abs(rot), max(0,rot), max(0,-rot)), named
+`N58_rot_ccw_40.dawproject` etc. (first done on N58, 2026-11-21). Degenerate
+output for a rarely used direction is acceptable; see README.
+
+**Since N58/N59 (2026-11-21), inputs stay in the Cubase project folder**
+(`/mnt/f/Cubase Projects/<piece>/`): the video is symlinked into
+`data/input/`, the `*_speed.py`/`*_rot.py` files are read in place, and
+outputs are made in `data/output/`, then the `.dawproject` and `_plots.pdf`
+files are copied to that folder.
+
 ### Audio Leveling Workflow (separate from the video pipeline)
 ```bash
 python audio_level_curve.py INPUT_AUDIO [--target-lufs -28] [--mean-distance 15]
