@@ -1,5 +1,5 @@
 {
-  "description": "N59 visual metrics -> DAWproject volume automation. Same settings as N54: frame step 30 (1.0 s/row), edge and chromaticity metrics, rank normalisation. Transport 84 bpm 4/4.",
+  "description": "N59 visual metrics -> DAWproject volume automation. Same settings as N54: frame step 30 (1.0 s/row), edge and chromaticity metrics, rank normalisation. Transport 112 bpm 4/4.",
   "video": {
     "video_name": "N59_Buffalo4Af",
     "file_extensions": [
@@ -71,7 +71,7 @@
   "dawproject": {
     "_comment": "Every column of the values CSV becomes one track. There is no column list: narrow metrics_processing to get fewer.",
     "_comment_transport": "Cubase overwrites the target project's initial tempo marking and time signature with these on import, so set them to match that project. Both are always written: Cubase will not load a file with no Tempo, and with no TimeSignature it imposes 4/4 rather than leaving the signature untouched.",
-    "tempo": 84,
+    "tempo": 112,
     "time_signature": [
       4,
       4
