@@ -139,6 +139,35 @@ import the curve into Cubase instead. The analysis files (CSV, plot, config)
 stay in `data/output/`. To write everything straight into the project folder
 instead, use `--output-dir "/mnt/f/Cubase Projects/N56"` and skip the copy.
 
+### Leveling from Windows: drag a mixdown onto an icon
+
+`windows/Level audio.bat` runs the whole leveling workflow without a WSL
+terminal. Drag one or more audio files onto it in Explorer, or put a shortcut
+to it in the *Send to* menu (`Win+R`, `shell:sendto`) and right-click a file >
+*Send to* > *Level audio*. For each file it runs `level_dropped.sh` in WSL,
+which calls `audio_level_curve.py` and then `curve_to_dawproject.py`. The
+analysis files go to `data/output/` as usual, and three files are copied into
+**the folder the source came from**:
+
+- `<stem>_<tag>_leveled.wav`: the finished result, ride plus makeup gain.
+  In Cubase, use `File > Import > Audio File`.
+- `<stem>_<tag>.dawproject`: the source audio with the ride as editable
+  volume automation. This one still needs the reported clip gain.
+- `<stem>_<tag>_plot.png`: loudness before and after, and the gain curve.
+
+The tag encodes the settings, so the source file is never overwritten. The
+`.bat` uses `--target-fraction 0.5`. For other settings, copy it under another
+name and edit its `LEVEL_ARGS` line, which takes any `audio_level_curve.py`
+flags. The window stays open at the end so you can read the log and any error.
+The `.bat` hard-codes the WSL distro (`Ubuntu-22.04`) and the repo path
+(`/home/kcaldeira/video`), so on another machine check both.
+
+Typical round trip: in Cubase, `File > Export > Audio Mixdown` to the piece's
+`Mixdown` folder, drag the WAV onto *Level audio*, then import the
+`_leveled.wav`. From WSL the same thing is
+`./level_dropped.sh "F:\Cubase Projects\N59\Mixdown\mix.wav" --target-fraction 0.5`
+(Windows or WSL paths both work).
+
 Both stages document themselves:
 
 ```bash

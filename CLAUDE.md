@@ -183,6 +183,9 @@ python curve_to_dawproject.py POINTS_CSV AUDIO_FILE
 ```
 1. **audio_level_curve.py** - K-weighted (BS.1770) loudness -> smoothed -> gain curve
 2. **curve_to_dawproject.py** - gain curve + audio -> `.dawproject` for Cubase
+3. **`windows/Level audio.bat`** -> `level_dropped.sh` - drag-and-drop from Explorer:
+   runs 1 and 2 (at `--target-fraction 0.5`) and copies `_leveled.wav`, `.dawproject` and
+   `_plot.png` beside the source file. See README.
 
 Uses flag-based CLIs (the `speed_to_cc.py` style), not JSON configs. Key
 invariants for this workflow:
