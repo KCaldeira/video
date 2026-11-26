@@ -58,8 +58,9 @@ The processing uses separate dictionaries for each transformation stage:
 
 ## Environment
 
-- **DAW: Cubase 15.0.30** (Windows). Assume this version for any DAWproject or
-  MIDI question; do not ask which DAW or version.
+- **DAW: Cubase 16.0.5** (Windows; Ken's version since 2026-11-26, before that
+  15.0.30). Assume this version for any DAWproject or MIDI question; do not ask
+  which DAW or version.
 - **Two machines: a laptop and a desktop (a tower).** The user tries to keep
   them aligned, but installed software and drive layouts can differ. Check
   which one you are on (`hostname`) before assuming a path or an installed
@@ -87,7 +88,12 @@ it and read the `<Application version="...">` line.
 **The desktop** has `C:\Program Files\Steinberg\` folders for Cubase 10.5,
 11, 12, 14 and 15, but only Cubase 15 in the Start menu (checked
 2026-10-22); some of those folders may be leftovers. As on the laptop, start
-Cubase 15 from its shortcut and import from inside it.
+Cubase from its shortcut and import from inside it.
+
+**Cubase 16.0.5 since 2026-11-26.** The two paragraphs above predate it; where
+16 is installed on each machine, and whether 15 is still there, has not been
+checked. If both are present, make sure imports go into 16 (the same trap as
+14/15 above).
 
 ### Cubase MIDI conventions
 
@@ -101,6 +107,10 @@ Cubase 15 from its shortcut and import from inside it.
   appear in the file with no notes are genuinely empty tracks.
 
 ### Known Cubase DAWproject limitations
+
+These were established on Cubase 14.0.41 and 15.0.30. They have not yet been
+re-checked on 16.0.5; assume they still hold, but re-test before relying on a
+workaround or designing around one.
 
 - **Automation will not import onto a group (`role="submix"`) channel.**
   Confirmed on both Cubase 14.0.41 and 15.0.30 across twelve structural
