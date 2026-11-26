@@ -888,7 +888,8 @@ spread, and smoothing shrinks fast-moving series more than slow ones.)
 - A column's `_o` and `_i` versions travel the same distance (`i = 1 − o`), so
   they stay together as a pair, `_o` first.
 - Smoothing widths are not grouped. Wider smoothing usually travels less, so
-  40 s tracks tend to sink to the bottom; one that ranks high is worth a listen.
+  the widest-smoothed tracks tend to sink to the bottom; one that ranks high is
+  worth a listen.
 - The ranking is also written beside the `.dawproject` as
   `{name_prefix}_track_order.csv` (rank, column, fader travel per minute).
 - Every column must end in `_o` or `_i`, which the pipeline's inversion step

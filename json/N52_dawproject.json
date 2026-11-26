@@ -56,7 +56,7 @@
     ],
     "_comment_filter_seconds": "Triangular smoothing width in seconds, converted to the nearest odd number of analysis rows. Cheap to change: re-run with process_video and process_metrics false.",
     "filter_seconds": [
-      10,20,40
+      10,20
     ],
     "_comment_block_seconds": "Block-average widths in seconds, piecewise constant. Suffix _b016s etc.",
     "block_seconds": [],
