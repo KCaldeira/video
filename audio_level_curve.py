@@ -64,7 +64,8 @@ EPILOG = """\
 outputs (written to data/output/, named {input}_{tag}_*):
   ..._gain_curve.csv     full-resolution analysis, one row per block
   ..._gain_points.csv    decimated automation points -- input to stage 2
-  ..._leveled.wav        preview render, 32-bit float at the source rate
+  ..._leveled.wav        preview render, a WAV at the source rate in the
+                         source's sample format (see --output-format)
   ..._plot.png           loudness before, loudness after, and the gain curve
   ..._config.json        every parameter used for this run
 
@@ -79,8 +80,11 @@ DAW interpolates an automation envelope, so what you hear is what Cubase will
 do -- not a higher-resolution approximation of it.
 
 Nothing is resampled and no bit depth is reduced anywhere in this pipeline. The
-preview is always written as 32-bit float at the source sample rate, so
-applying gain neither requantizes the audio nor changes its rate.
+preview is written at the source sample rate and, by default, in the source's
+sample format: a 24-bit WAV in gives a 24-bit WAV out. A lossy source (MP3,
+Ogg) has no bit depth and gives 32-bit float. --output-format float keeps the
+gained audio unrequantized; integer output stops with an error rather than clip
+if any sample would reach full scale.
 
 This tool does not limit or normalize. If the ride leaves the result too hot or
 too quiet, that is a job for a separate limiting or normalizing step run
@@ -138,9 +142,21 @@ DEFAULT_MAX_CUT_DB = float("inf")
 # volume fader, so the run warns when the curve exceeds it.
 CUBASE_FADER_MAX_DB = 12.0
 
-# The preview is always written as 32-bit float at the source sample rate, so
-# applying gain never requantizes the audio or changes its rate.
-PREVIEW_SUBTYPE = "FLOAT"
+# --output-format choices and the libsndfile subtypes they write. "same" takes
+# the source's subtype (see resolve_output_subtype).
+OUTPUT_FORMATS = {
+    "pcm16": "PCM_16",
+    "pcm24": "PCM_24",
+    "pcm32": "PCM_32",
+    "float": "FLOAT",
+    "double": "DOUBLE",
+}
+
+# Lossy codecs have no bit depth: they decode to floating point, so "same"
+# writes those as 32-bit float.
+LOSSY_SUBTYPES = ("MPEG_LAYER_I", "MPEG_LAYER_II", "MPEG_LAYER_III", "VORBIS", "OPUS")
+
+FLOAT_SUBTYPES = ("FLOAT", "DOUBLE")
 
 # Oversampling factor for the true-peak report. ITU-R BS.1770-4 Annex 2 calls
 # for at least 4x at 48 kHz. Analysis only; never applied to written audio.
@@ -314,19 +330,42 @@ def measure_leveled_peak(path, point_times, point_gain_linear, mode="true"):
     return peak
 
 
-def render_preview(path, out_path, point_times, point_gain_linear):
+def resolve_output_subtype(output_format, source_subtype):
+    """
+    libsndfile subtype for the preview WAV. "same" keeps the source's sample
+    format; a lossy source has none and gets 32-bit float. Any other source
+    format a WAV cannot hold is an error, so nothing is chosen silently.
+    """
+    if output_format != "same":
+        return OUTPUT_FORMATS[output_format]
+    if source_subtype in LOSSY_SUBTYPES:
+        return "FLOAT"
+    if not sf.check_format("WAV", source_subtype):
+        raise ValueError(
+            f"the source format {source_subtype} cannot be written to a WAV; "
+            f"choose one with --output-format ({', '.join(OUTPUT_FORMATS)})"
+        )
+    return source_subtype
+
+
+def render_preview(path, out_path, point_times, point_gain_linear, subtype):
     """
     Apply the gain curve and write the result. The gain is interpolated
     linearly between the decimated points, matching how a DAW draws an
     automation envelope, so the preview reflects what the DAWproject will do.
+
+    An integer subtype cannot hold a sample at or beyond full scale, so if the
+    gained audio reaches it the partial file is deleted and the run stops,
+    rather than writing a clipped (or wrapped) file.
     """
     source = sf.SoundFile(path)
     target = sf.SoundFile(
         out_path,
         mode="w",
+        format="WAV",
         samplerate=source.samplerate,
         channels=source.channels,
-        subtype=PREVIEW_SUBTYPE,
+        subtype=subtype,
     )
 
     offset = 0
@@ -335,7 +374,17 @@ def render_preview(path, out_path, point_times, point_gain_linear):
         times = (np.arange(len(block)) + offset) / source.samplerate
         gain = np.interp(times, point_times, point_gain_linear)
         scaled = block * gain[:, None]
-        peak = max(peak, float(np.max(np.abs(scaled))))
+        block_peak = float(np.max(np.abs(scaled)))
+        if subtype not in FLOAT_SUBTYPES and block_peak >= 1.0:
+            target.close()
+            source.close()
+            os.remove(out_path)
+            raise ValueError(
+                f"the leveled audio reaches {20.0 * np.log10(block_peak):+.2f} dBFS "
+                f"at {offset / source.samplerate:.1f} s, which {subtype} cannot hold "
+                f"without clipping; lower --peak-dbfs or use --output-format float"
+            )
+        peak = max(peak, block_peak)
         target.write(scaled)
         offset += len(block)
 
@@ -537,6 +586,15 @@ def main():
         "at the highest sample and is faster (default: %(default)s)",
     )
     parser.add_argument(
+        "--output-format",
+        choices=("same",) + tuple(OUTPUT_FORMATS),
+        default="same",
+        help="sample format of the _leveled.wav preview; same matches the "
+        "input (24-bit in, 24-bit out; a lossy input such as MP3 gives float), "
+        "the others force 16-, 24- or 32-bit integer, 32-bit float or 64-bit "
+        "float (default: %(default)s)",
+    )
+    parser.add_argument(
         "--no-preview",
         action="store_true",
         help="skip the preview render (analysis and curves are still written)",
@@ -607,6 +665,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     probe = sf.info(args.input_file)
+    output_subtype = resolve_output_subtype(args.output_format, probe.subtype)
     hop_frames = int(round(args.block_hop * probe.samplerate))
     if hop_frames < 1:
         parser.error(f"--block-hop {args.block_hop} is shorter than one sample")
@@ -642,6 +701,8 @@ def main():
     print(f"  Peak:             {peak_label} ({args.peak_mode} peak)")
     print(f"  Smoothing:        {audio_smoothing.describe(args.smoothing_method, args.mean_distance, args.block_hop)}")
     print(f"  Output:           {output_dir}/{name_prefix}_*")
+    print(f"  Preview format:   {output_subtype}"
+          f"{' (same as input)' if args.output_format == 'same' else ''}")
     print()
 
     print("STEP 1: measuring K-weighted loudness")
@@ -778,7 +839,8 @@ def main():
     if not args.no_preview:
         preview_path = os.path.join(output_dir, f"{name_prefix}_leveled.wav")
         rendered_peak = render_preview(
-            args.input_file, preview_path, point_times, preview_gain_linear
+            args.input_file, preview_path, point_times, preview_gain_linear,
+            output_subtype,
         )
         print(f"  {preview_path}  (peak {20.0 * np.log10(max(rendered_peak, 1e-30)):+.2f} dBFS)")
 
@@ -820,7 +882,8 @@ def main():
                 "leveled_peak_dbfs": float(peak_dbfs),
                 "ride_db_min": float(ride_db.min()),
                 "ride_db_max": float(ride_db.max()),
-                "preview_subtype": PREVIEW_SUBTYPE,
+                "output_format": args.output_format,
+                "preview_subtype": output_subtype,
                 "n_blocks": int(len(lufs_raw)),
                 "n_points": int(len(point_times)),
                 "n_gated_blocks": gated,

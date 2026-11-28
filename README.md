@@ -1529,9 +1529,15 @@ the same curve.
 ### No Loss of Information
 
 - Nothing is resampled; the output sample rate always equals the input's.
-- The preview is always written as **32-bit float**, so applying gain to 24-bit
-  source audio does not requantize it. Where the gain is unity the preview is
-  bit-identical to the source.
+- The preview is written in the **source's sample format** by default
+  (`--output-format same`): a 24-bit WAV in gives a 24-bit WAV out, 16-bit
+  gives 16-bit, float gives float. A lossy source (MP3, Ogg) has no bit depth
+  and gives 32-bit float. `--output-format pcm16|pcm24|pcm32|float|double`
+  forces a format; `float` keeps the gained audio unrequantized.
+- Integer output is rounded once to the output bit depth, with no dither (at 24
+  bits the error is below -138 dBFS). If any gained sample would reach full
+  scale, the run deletes the partial file and stops rather than clip; lower
+  `--peak-dbfs` or use `--output-format float`.
 - `curve_to_dawproject.py` copies the source audio into the archive **byte for
   byte** — never decoded, re-encoded, resampled, or requantized. Cubase
   receives the original file plus a fader move.
@@ -1544,7 +1550,7 @@ Written to `data/output/`, named `{input_stem}_{tag}_*`:
 |---|---|
 | `..._gain_curve.csv` | full resolution: `time_s,lufs_raw,lufs_smooth,gain_db,gain_linear,valid` |
 | `..._gain_points.csv` | decimated automation points — **input to stage 2** |
-| `..._leveled.wav` | preview render, 32-bit float at the source rate |
+| `..._leveled.wav` | preview render, WAV at the source rate and (by default) the source's sample format |
 | `..._plot.png` | loudness before, gain curve, loudness after |
 | `..._config.json` | every parameter used for the run |
 | `....dawproject` | stage 2 output |

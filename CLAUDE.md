@@ -205,8 +205,9 @@ invariants for this workflow:
 - **Volume riding only.** Limiting, normalizing, and peak-setting are a
   separate concern and deliberately excluded; do not add them here.
 - **No loss of information.** Never resample, never reduce bit depth. The
-  preview render is always 32-bit float at the source rate; the DAWproject
-  embeds the source audio byte for byte.
+  preview render is at the source rate and, by default, the source's sample
+  format (`--output-format same`; lossy input gives float; integer output
+  refuses to clip); the DAWproject embeds the source audio byte for byte.
 - Outputs go directly in `data/output/` named `{input_stem}_{tag}_*`, where
   the tag encodes the curve-shaping settings (e.g. `c28_gau15`).
 
